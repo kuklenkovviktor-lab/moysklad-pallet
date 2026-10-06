@@ -468,9 +468,47 @@ def complete_receipt(receipt_id):
     r.raise_for_status()
     return r.json()
 
+def _barcode_values(value):
+    values = []
+    if value is None:
+        return values
+    if isinstance(value, str):
+        s = value.strip()
+        if s:
+            values.append(s)
+        return values
+    if isinstance(value, (int, float)):
+        values.append(str(value).strip())
+        return values
+    if isinstance(value, list):
+        for item in value:
+            values.extend(_barcode_values(item))
+        return values
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_l = str(key).lower()
+            if "barcode" in key_l or key_l in ("ean13", "ean8", "code128", "qr"):
+                values.extend(_barcode_values(item))
+            elif isinstance(item, (dict, list)):
+                values.extend(_barcode_values(item))
+        return values
+    return values
+
+def _pack_matches_barcode(pack, barcode):
+    target = str(barcode).strip()
+    candidates = []
+    candidates.extend(_barcode_values(pack.get("barcode")))
+    candidates.extend(_barcode_values(pack.get("barcodes")))
+    for value in candidates:
+        if str(value).strip() == target:
+            return True
+    return False
+
 def find_product_pack_by_barcode(barcode):
+    target = str(barcode).strip()
     limit = 1000
     offset = 0
+
     while True:
         r = requests.get(
             f"{API_BASE}/entity/product",
@@ -480,13 +518,34 @@ def find_product_pack_by_barcode(barcode):
         )
         r.raise_for_status()
         rows = r.json().get("rows", [])
+
         for product in rows:
-            for pack in product.get("packs", []) or []:
-                if str(pack.get("barcode", "")).strip() == barcode:
+            packs = product.get("packs", []) or []
+
+            # Сначала проверяем упаковки, если они уже пришли в списке товаров.
+            for pack in packs:
+                if _pack_matches_barcode(pack, target):
                     return product, pack
+
+            # В списочном ответе МойСклад некоторые поля могут быть неполными.
+            # Поэтому при необходимости читаем полную карточку товара.
+            product_id = product.get("id")
+            if product_id:
+                d = requests.get(
+                    f"{API_BASE}/entity/product/{product_id}",
+                    headers=headers(),
+                    timeout=30,
+                )
+                d.raise_for_status()
+                full_product = d.json()
+                for pack in full_product.get("packs", []) or []:
+                    if _pack_matches_barcode(pack, target):
+                        return full_product, pack
+
         if len(rows) < limit:
             break
         offset += limit
+
     return None, None
 
 def get_receipt(receipt_id):
