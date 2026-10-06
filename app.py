@@ -24,7 +24,7 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>Приёмка палет</title>
+<title>Оприходование палет</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}
@@ -57,36 +57,36 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <div class="wrap">
 
 <div class="card">
-  <h1>Приёмка палет</h1>
-  <div class="muted">Создай Приёмку, выбери поставщика и склад, затем сканируй палеты. После работы нажми «Завершить приёмку».</div>
+  <h1>Склад → Оприходование</h1>
+  <div class="muted">Создай Оприходование: выбери склад и поставщика через статус, затем сканируй палеты. После работы проведи документ.</div>
 </div>
 
 <div class="card" id="docCard">
-  <h2>Документ Приёмки</h2>
+  <h2>Документ Оприходования</h2>
 
   <div id="activeDoc" class="activeDoc hidden"></div>
 
-  <button id="newDocBtn" onclick="showNewDoc()">＋ Новая приёмка</button>
-  <button class="secondary" onclick="showExisting()">Открыть существующую</button>
+  <button id="newDocBtn" onclick="showNewDoc()">＋ Новое оприходование</button>
+  <button class="secondary" onclick="showExisting()">Открыть существующее</button>
 
   <div id="newDocForm" class="hidden">
-    <label>Поставщик / контрагент</label>
-    <select id="agentSelect"><option value="">Загрузка…</option></select>
+    <label>Склад</label>
+    <select id="storeSelect"><option value="">Загрузка…</option></select>
+
+    <label>Поставщик (статус Оприходования)</label>
+    <select id="stateSelect"><option value="">Загрузка…</option></select>
 
     <label>Организация</label>
     <select id="orgSelect"><option value="">Загрузка…</option></select>
 
-    <label>Склад</label>
-    <select id="storeSelect"><option value="">Загрузка…</option></select>
-
-    <button onclick="createReceipt()">Создать приёмку</button>
+    <button onclick="createReceipt()">Создать оприходование</button>
     <button class="secondary" onclick="hideDocForms()">Отмена</button>
   </div>
 
   <div id="existingForm" class="hidden">
-    <label>Последние приёмки</label>
+    <label>Последние оприходования</label>
     <select id="receiptSelect"><option value="">Загрузка…</option></select>
-    <button onclick="useSelectedReceipt()">Открыть выбранную</button>
+    <button onclick="useSelectedReceipt()">Открыть выбранное</button>
     <button class="secondary" onclick="loadReceipts()">↻ Обновить список</button>
     <button class="secondary" onclick="hideDocForms()">Отмена</button>
   </div>
@@ -94,7 +94,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 <div class="card" id="scanCard">
   <h2>Сканирование палет</h2>
-  <div class="muted">Один скан палетного ШК добавляет количество из упаковки товара в активную Приёмку.</div>
+  <div class="muted">Один скан палетного ШК добавляет количество из упаковки товара в активное Оприходование.</div>
 
   <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Сканировать полную палету</button>
   <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>📦 Неполная палета</button>
@@ -127,7 +127,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
   </div>
 
-  <button id="completeBtn" class="danger" onclick="completeReceipt()" disabled>✓ Завершить приёмку</button>
+  <button id="completeBtn" class="danger" onclick="completeReceipt()" disabled>✓ Провести оприходование</button>
 </div>
 
 </div>
@@ -185,7 +185,7 @@ function errorFeedback(){
   try{if(navigator.vibrate)navigator.vibrate([180,80,180]);}catch(e){}
 }
 
-const agentSelect=document.getElementById('agentSelect');
+const stateSelect=document.getElementById('stateSelect');
 const orgSelect=document.getElementById('orgSelect');
 const storeSelect=document.getElementById('storeSelect');
 const receiptSelect=document.getElementById('receiptSelect');
@@ -232,9 +232,9 @@ async function loadBootstrap(){
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'Не удалось загрузить справочники');
 
-    fillSelect(agentSelect,data.counterparties,'Выбери поставщика');
-    fillSelect(orgSelect,data.organizations,'Выбери организацию');
     fillSelect(storeSelect,data.stores,'Выбери склад');
+    fillSelect(stateSelect,data.states,'Выбери поставщика / статус');
+    fillSelect(orgSelect,data.organizations,'Выбери организацию');
 
     if(data.organizations.length===1)orgSelect.value=data.organizations[0].id;
     if(data.stores.length===1)storeSelect.value=data.stores[0].id;
@@ -254,12 +254,12 @@ function fillSelect(el,items,placeholder){
 }
 
 async function createReceipt(){
-  const agentId=agentSelect.value;
+  const stateId=stateSelect.value;
   const organizationId=orgSelect.value;
   const storeId=storeSelect.value;
 
-  if(!agentId||!organizationId||!storeId){
-    showError('Выбери поставщика, организацию и склад.');
+  if(!stateId||!organizationId||!storeId){
+    showError('Выбери склад, поставщика/статус и организацию.');
     return;
   }
 
@@ -268,21 +268,21 @@ async function createReceipt(){
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        agent_id:agentId,
+        state_id:stateId,
         organization_id:organizationId,
         store_id:storeId
       })
     });
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось создать Приёмку');
+    if(!r.ok)throw new Error(data.error||'Не удалось создать Оприходование');
 
     pallets=0; units=0;
     document.getElementById('pallets').textContent='0';
     document.getElementById('units').textContent='0';
 
-    setActiveReceipt(data.id,data.name,data.agent+' · '+data.store+' · черновик');
+    setActiveReceipt(data.id,data.name,data.state+' · '+data.store+' · черновик');
     hideDocForms();
-    document.getElementById('result').innerHTML='<div class="ok">Приёмка создана. Можно сканировать палеты.</div>';
+    document.getElementById('result').innerHTML='<div class="ok">Оприходование создано. Можно сканировать палеты.</div>';
   }catch(e){
     showError(e.message);
   }
@@ -322,7 +322,7 @@ function useSelectedReceipt(){
 
 async function completeReceipt(){
   if(!activeReceiptId)return;
-  if(!confirm('Завершить и провести эту Приёмку? После этого она будет проведена в МойСклад.'))return;
+  if(!confirm('Провести это Оприходование? После этого документ будет проведён в МойСклад.'))return;
 
   try{
     if(scanner){
@@ -334,9 +334,9 @@ async function completeReceipt(){
 
     const r=await fetch('/api/receipts/'+activeReceiptId+'/complete',{method:'POST'});
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось завершить Приёмку');
+    if(!r.ok)throw new Error(data.error||'Не удалось провести Оприходование');
 
-    document.getElementById('result').innerHTML='<div class="ok"><b>'+escapeHtml(data.name)+'</b><br>Приёмка проведена в МойСклад.</div>';
+    document.getElementById('result').innerHTML='<div class="ok"><b>'+escapeHtml(data.name)+'</b><br>Оприходование проведено в МойСклад.</div>';
     setActiveReceipt('','','');
   }catch(e){
     showError(e.message);
@@ -361,7 +361,7 @@ async function stopScanner(){
 
 async function toggleCamera(mode='full'){
   initAudio();
-  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
+  if(!activeReceiptId){showError('Сначала создай или открой Оприходование.');return;}
 
   if(scanner){
     await stopScanner();
@@ -552,48 +552,62 @@ def get_rows(entity, params=None):
     r.raise_for_status()
     return r.json().get("rows", [])
 
+def get_enter_states():
+    r = requests.get(
+        f"{API_BASE}/entity/enter/metadata",
+        headers=headers(),
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json().get("states", []) or []
+
 def bootstrap_data():
     organizations = get_rows("organization", {"limit": 1000, "order": "name"})
     stores = get_rows("store", {"limit": 1000, "order": "name"})
-    counterparties = get_rows("counterparty", {"limit": 1000, "order": "name"})
+    states = get_enter_states()
 
     return {
         "organizations": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in organizations if not x.get("archived")],
         "stores": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in stores if not x.get("archived")],
-        "counterparties": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in counterparties if not x.get("archived")],
+        "states": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in states],
     }
 
 def list_receipts():
-    rows = get_rows("supply", {
+    rows = get_rows("enter", {
         "limit": 30,
         "order": "moment,desc",
-        "expand": "agent,store",
+        "expand": "state,store",
     })
     result = []
     for row in rows:
         moment = (row.get("moment") or "")[:16].replace("T", " ")
         name = row.get("name") or "Без номера"
-        agent = (row.get("agent") or {}).get("name") or "без поставщика"
+        state = (row.get("state") or {}).get("name") or "без статуса"
         store = (row.get("store") or {}).get("name") or "без склада"
-        status = "проведена" if row.get("applicable") else "черновик"
+        status = "проведено" if row.get("applicable") else "черновик"
         result.append({
             "id": row.get("id"),
             "name": name,
-            "label": f"{name} · {moment} · {agent} · {status}",
-            "meta": f"{agent} · {store} · {status}",
+            "label": f"{name} · {moment} · {store} · {state} · {status}",
+            "meta": f"{store} · {state} · {status}",
         })
     return result
 
-def create_receipt(agent_id, organization_id, store_id):
+def create_receipt(state_id, organization_id, store_id):
+    states = get_enter_states()
+    state = next((x for x in states if x.get("id") == state_id), None)
+    if not state or not state.get("meta"):
+        raise ValueError("Выбранный статус Оприходования не найден.")
+
     payload = {
         "organization": meta("organization", organization_id),
-        "agent": meta("counterparty", agent_id),
         "store": meta("store", store_id),
+        "state": {"meta": state["meta"]},
         "applicable": False,
-        "description": "Приёмка создана мобильным сканером палет",
+        "description": "Оприходование создано мобильным сканером палет",
     }
     r = requests.post(
-        f"{API_BASE}/entity/supply",
+        f"{API_BASE}/entity/enter",
         headers=headers(),
         json=payload,
         timeout=30,
@@ -603,7 +617,7 @@ def create_receipt(agent_id, organization_id, store_id):
 
 def complete_receipt(receipt_id):
     r = requests.put(
-        f"{API_BASE}/entity/supply/{receipt_id}",
+        f"{API_BASE}/entity/enter/{receipt_id}",
         headers=headers(),
         json={"applicable": True},
         timeout=30,
@@ -776,7 +790,7 @@ def start_pack_warmup():
 
 def get_receipt(receipt_id):
     r = requests.get(
-        f"{API_BASE}/entity/supply/{receipt_id}",
+        f"{API_BASE}/entity/enter/{receipt_id}",
         headers=headers(),
         params={"expand": "positions"},
         timeout=30,
@@ -787,7 +801,7 @@ def get_receipt(receipt_id):
 def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
     receipt = get_receipt(receipt_id)
     if receipt.get("applicable"):
-        raise ValueError("Эта Приёмка уже проведена. Открой черновик или создай новую.")
+        raise ValueError("Это Оприходование уже проведено. Открой черновик или создай новое.")
 
     positions = receipt.get("positions", {}).get("rows", []) or []
     product_href = product["meta"]["href"]
@@ -803,7 +817,7 @@ def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
         if pos.get("assortment", {}).get("meta", {}).get("href") == product_href:
             new_qty = float(pos.get("quantity", 0) or 0) + add_qty
             r = requests.put(
-                f"{API_BASE}/entity/supply/{receipt_id}/positions/{pos['id']}",
+                f"{API_BASE}/entity/enter/{receipt_id}/positions/{pos['id']}",
                 headers=headers(),
                 json={"quantity": new_qty},
                 timeout=30,
@@ -827,7 +841,7 @@ def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
     }
 
     r = requests.post(
-        f"{API_BASE}/entity/supply/{receipt_id}/positions",
+        f"{API_BASE}/entity/enter/{receipt_id}/positions",
         headers=headers(),
         json=payload,
         timeout=30,
@@ -867,19 +881,19 @@ def receipts():
 def new_receipt():
     try:
         data = request.get_json(force=True)
-        agent_id = str(data.get("agent_id", "")).strip()
+        state_id = str(data.get("state_id", "")).strip()
         organization_id = str(data.get("organization_id", "")).strip()
         store_id = str(data.get("store_id", "")).strip()
 
-        if not agent_id or not organization_id or not store_id:
-            return jsonify(error="Нужно выбрать поставщика, организацию и склад"), 400
+        if not state_id or not organization_id or not store_id:
+            return jsonify(error="Нужно выбрать склад, поставщика/статус и организацию"), 400
 
-        doc = create_receipt(agent_id, organization_id, store_id)
+        doc = create_receipt(state_id, organization_id, store_id)
 
-        agent_name = ""
+        state_name = ""
         store_name = ""
         try:
-            agent_name = (doc.get("agent") or {}).get("name") or ""
+            state_name = (doc.get("state") or {}).get("name") or ""
             store_name = (doc.get("store") or {}).get("name") or ""
         except Exception:
             pass
@@ -887,8 +901,8 @@ def new_receipt():
         return jsonify(
             ok=True,
             id=doc.get("id"),
-            name=doc.get("name") or "Новая Приёмка",
-            agent=agent_name or "Поставщик выбран",
+            name=doc.get("name") or "Новое Оприходование",
+            state=state_name or "Статус выбран",
             store=store_name or "Склад выбран",
         )
     except requests.HTTPError as e:
@@ -901,7 +915,7 @@ def new_receipt():
 def finish_receipt(receipt_id):
     try:
         doc = complete_receipt(receipt_id)
-        return jsonify(ok=True, id=doc.get("id"), name=doc.get("name") or "Приёмка")
+        return jsonify(ok=True, id=doc.get("id"), name=doc.get("name") or "Оприходование")
     except requests.HTTPError as e:
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
@@ -966,7 +980,7 @@ def scan():
         if not barcode:
             return jsonify(error="Пустой штрихкод"), 400
         if not receipt_id:
-            return jsonify(error="Не выбрана Приёмка"), 400
+            return jsonify(error="Не выбрано Оприходование"), 400
 
         product, pack = find_product_pack_by_barcode(barcode)
         if not product:
