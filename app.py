@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 import requests
 from flask import Flask, request, jsonify
 
@@ -6,6 +8,15 @@ app = Flask(__name__)
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
+
+# Быстрый индекс палетных штрихкодов в памяти Render.
+# После первого прогрева скан не перебирает каталог МойСклад заново.
+PACK_CACHE = {}
+PRODUCT_LIST_CACHE = {"ts": 0.0, "rows": []}
+DETAILED_PRODUCT_IDS = set()
+CACHE_LOCK = threading.RLock()
+WARMUP_STATE = {"running": False, "ready": False, "indexed": 0, "error": ""}
+PRODUCT_LIST_TTL = 3600
 
 PAGE = """<!doctype html>
 <html lang="ru">
@@ -370,7 +381,7 @@ async function toggleCamera(mode='full'){
   try{
     await scanner.start(
       {facingMode:"environment"},
-      {fps:10,qrbox:{width:280,height:140},formatsToSupport:[
+      {fps:15,qrbox:{width:320,height:160},formatsToSupport:[
         Html5QrcodeSupportedFormats.EAN_13,
         Html5QrcodeSupportedFormats.CODE_128,
         Html5QrcodeSupportedFormats.QR_CODE
@@ -505,6 +516,7 @@ document.getElementById('barcode').addEventListener('keydown',e=>{
 });
 
 loadBootstrap();
+fetch('/api/warmup',{method:'POST'}).catch(()=>{});
 const savedId=localStorage.getItem('receipt_id')||'';
 const savedName=localStorage.getItem('receipt_name')||'';
 if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
@@ -625,21 +637,34 @@ def _barcode_values(value):
         return values
     return values
 
-def _pack_matches_barcode(pack, barcode):
-    target = str(barcode).strip()
-    candidates = []
-    candidates.extend(_barcode_values(pack.get("barcode")))
-    candidates.extend(_barcode_values(pack.get("barcodes")))
-    for value in candidates:
-        if str(value).strip() == target:
-            return True
-    return False
+def _pack_barcodes(pack):
+    values = []
+    values.extend(_barcode_values(pack.get("barcode")))
+    values.extend(_barcode_values(pack.get("barcodes")))
+    return {str(v).strip() for v in values if str(v).strip()}
 
-def find_product_pack_by_barcode(barcode):
-    target = str(barcode).strip()
+def _index_product(product):
+    added = 0
+    with CACHE_LOCK:
+        for pack in product.get("packs", []) or []:
+            for barcode in _pack_barcodes(pack):
+                PACK_CACHE[barcode] = {"product": product, "pack": pack}
+                added += 1
+    return added
+
+def _get_product_list(force=False):
+    now = time.time()
+    with CACHE_LOCK:
+        if (
+            not force
+            and PRODUCT_LIST_CACHE["rows"]
+            and now - PRODUCT_LIST_CACHE["ts"] < PRODUCT_LIST_TTL
+        ):
+            return PRODUCT_LIST_CACHE["rows"]
+
+    rows_all = []
     limit = 1000
     offset = 0
-
     while True:
         r = requests.get(
             f"{API_BASE}/entity/product",
@@ -649,35 +674,105 @@ def find_product_pack_by_barcode(barcode):
         )
         r.raise_for_status()
         rows = r.json().get("rows", [])
-
+        rows_all.extend(rows)
         for product in rows:
-            packs = product.get("packs", []) or []
-
-            # Сначала проверяем упаковки, если они уже пришли в списке товаров.
-            for pack in packs:
-                if _pack_matches_barcode(pack, target):
-                    return product, pack
-
-            # В списочном ответе МойСклад некоторые поля могут быть неполными.
-            # Поэтому при необходимости читаем полную карточку товара.
-            product_id = product.get("id")
-            if product_id:
-                d = requests.get(
-                    f"{API_BASE}/entity/product/{product_id}",
-                    headers=headers(),
-                    timeout=30,
-                )
-                d.raise_for_status()
-                full_product = d.json()
-                for pack in full_product.get("packs", []) or []:
-                    if _pack_matches_barcode(pack, target):
-                        return full_product, pack
-
+            _index_product(product)
         if len(rows) < limit:
             break
         offset += limit
 
+    with CACHE_LOCK:
+        PRODUCT_LIST_CACHE["rows"] = rows_all
+        PRODUCT_LIST_CACHE["ts"] = now
+    return rows_all
+
+def _load_full_product(product):
+    product_id = product.get("id")
+    if not product_id:
+        return product
+
+    with CACHE_LOCK:
+        if product_id in DETAILED_PRODUCT_IDS:
+            return product
+
+    r = requests.get(
+        f"{API_BASE}/entity/product/{product_id}",
+        headers=headers(),
+        timeout=30,
+    )
+    r.raise_for_status()
+    full_product = r.json()
+    _index_product(full_product)
+
+    with CACHE_LOCK:
+        DETAILED_PRODUCT_IDS.add(product_id)
+        WARMUP_STATE["indexed"] = len(PACK_CACHE)
+    return full_product
+
+def find_product_pack_by_barcode(barcode):
+    target = str(barcode).strip()
+
+    # Горячий путь: обычно один словарный lookup, без запроса к МойСклад.
+    with CACHE_LOCK:
+        found = PACK_CACHE.get(target)
+    if found:
+        return found["product"], found["pack"]
+
+    rows = _get_product_list()
+
+    # После загрузки списка код мог уже попасть в индекс.
+    with CACHE_LOCK:
+        found = PACK_CACHE.get(target)
+    if found:
+        return found["product"], found["pack"]
+
+    # Только для еще не просмотренных карточек идем за полными данными.
+    for product in rows:
+        product_id = product.get("id")
+        with CACHE_LOCK:
+            already_detailed = bool(product_id and product_id in DETAILED_PRODUCT_IDS)
+        if already_detailed:
+            continue
+
+        full_product = _load_full_product(product)
+        with CACHE_LOCK:
+            found = PACK_CACHE.get(target)
+        if found:
+            return found["product"], found["pack"]
+
     return None, None
+
+def _warm_pack_cache_worker():
+    try:
+        with CACHE_LOCK:
+            WARMUP_STATE.update({"running": True, "ready": False, "error": ""})
+
+        rows = _get_product_list()
+        for product in rows:
+            product_id = product.get("id")
+            with CACHE_LOCK:
+                if product_id and product_id in DETAILED_PRODUCT_IDS:
+                    continue
+            _load_full_product(product)
+            # Держимся ниже лимита API и не душим МойСклад фоновым прогревом.
+            time.sleep(0.07)
+
+        with CACHE_LOCK:
+            WARMUP_STATE["ready"] = True
+            WARMUP_STATE["indexed"] = len(PACK_CACHE)
+    except Exception as e:
+        with CACHE_LOCK:
+            WARMUP_STATE["error"] = str(e)
+    finally:
+        with CACHE_LOCK:
+            WARMUP_STATE["running"] = False
+
+def start_pack_warmup():
+    with CACHE_LOCK:
+        if WARMUP_STATE["running"] or WARMUP_STATE["ready"]:
+            return
+        WARMUP_STATE["running"] = True
+    threading.Thread(target=_warm_pack_cache_worker, daemon=True).start()
 
 def get_receipt(receipt_id):
     r = requests.get(
@@ -812,6 +907,27 @@ def finish_receipt(receipt_id):
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
         return jsonify(error=str(e)), 500
+
+@app.post("/api/warmup")
+def warmup():
+    try:
+        start_pack_warmup()
+        with CACHE_LOCK:
+            state = dict(WARMUP_STATE)
+            state["cached_barcodes"] = len(PACK_CACHE)
+        return jsonify(ok=True, **state)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+@app.get("/api/cache-status")
+def cache_status():
+    with CACHE_LOCK:
+        return jsonify(
+            ok=True,
+            cached_barcodes=len(PACK_CACHE),
+            detailed_products=len(DETAILED_PRODUCT_IDS),
+            **WARMUP_STATE,
+        )
 
 @app.post("/api/pack-info")
 def pack_info():
