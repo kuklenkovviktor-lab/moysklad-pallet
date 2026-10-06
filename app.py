@@ -85,15 +85,26 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <h2>Сканирование палет</h2>
   <div class="muted">Один скан палетного ШК добавляет количество из упаковки товара в активную Приёмку.</div>
 
-  <button id="cameraBtn" onclick="toggleCamera()" disabled>📷 Сканировать камерой</button>
-  <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>⌨️ Ввести код вручную / ТСД</button>
+  <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Сканировать полную палету</button>
+  <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>📦 Неполная палета</button>
+  <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>⌨️ Ручной ввод / ТСД</button>
 
   <div id="reader" class="hidden"></div>
 
   <div id="manual" class="hidden">
     <label>Штрихкод палеты</label>
     <input id="barcode" inputmode="numeric" autocomplete="off" placeholder="Например 2000000000404">
-    <button onclick="sendManual()">Добавить палету</button>
+    <button onclick="sendManualFull()">Добавить как полную палету</button>
+    <button class="secondary" onclick="sendManualPartial()">Неполная палета вручную</button>
+  </div>
+
+  <div id="partialForm" class="info hidden">
+    <b id="partialTitle">Неполная палета</b>
+    <div class="small" id="partialMeta"></div>
+    <label>Фактически приехало, шт.</label>
+    <input id="partialQty" inputmode="numeric" type="number" min="1" step="1" placeholder="Например 100">
+    <button onclick="confirmPartial()">Принять фактическое количество</button>
+    <button class="secondary" onclick="cancelPartial()">Отмена</button>
   </div>
 
   <div id="result"></div>
@@ -118,6 +129,11 @@ let busy=false;
 let activeReceiptId='';
 let activeReceiptName='';
 let audioCtx=null;
+let scanMode='full';
+let partialBarcode='';
+let partialStandardQty=0;
+let lastBarcode='';
+let lastScanAt=0;
 
 function initAudio(){
   try{
@@ -172,6 +188,7 @@ function setActiveReceipt(id,name,meta=''){
   const box=document.getElementById('activeDoc');
   const enabled=!!activeReceiptId;
   document.getElementById('cameraBtn').disabled=!enabled;
+  document.getElementById('partialBtn').disabled=!enabled;
   document.getElementById('manualBtn').disabled=!enabled;
   document.getElementById('completeBtn').disabled=!enabled;
 
@@ -321,17 +338,26 @@ function toggleManual(){
   setTimeout(()=>document.getElementById('barcode').focus(),100);
 }
 
-async function toggleCamera(){
+async function stopScanner(){
+  if(scanner){
+    try{await scanner.stop();}catch(e){}
+    scanner=null;
+  }
+  document.getElementById('reader').classList.add('hidden');
+  document.getElementById('cameraBtn').textContent='📷 Сканировать полную палету';
+  document.getElementById('partialBtn').textContent='📦 Неполная палета';
+}
+
+async function toggleCamera(mode='full'){
   initAudio();
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
 
   if(scanner){
-    try{await scanner.stop();}catch(e){}
-    scanner=null;
-    document.getElementById('reader').classList.add('hidden');
-    document.getElementById('cameraBtn').textContent='📷 Сканировать камерой';
+    await stopScanner();
     return;
   }
+
+  scanMode=mode;
 
   if(typeof Html5Qrcode==='undefined'){
     showError('Модуль сканирования не загрузился. Обнови страницу.');
@@ -349,19 +375,26 @@ async function toggleCamera(){
         Html5QrcodeSupportedFormats.CODE_128,
         Html5QrcodeSupportedFormats.QR_CODE
       ]},
-      async(decodedText)=>{if(!busy)await sendScan(decodedText);},
+      async(decodedText)=>{
+        if(busy)return;
+        const now=Date.now();
+        if(decodedText===lastBarcode && now-lastScanAt<3000)return;
+        lastBarcode=decodedText;
+        lastScanAt=now;
+        if(scanMode==='partial') await preparePartial(decodedText);
+        else await sendScan(decodedText);
+      },
       ()=>{}
     );
-    document.getElementById('cameraBtn').textContent='⏹ Остановить камеру';
+    if(scanMode==='partial') document.getElementById('partialBtn').textContent='⏹ Остановить камеру';
+    else document.getElementById('cameraBtn').textContent='⏹ Остановить камеру';
   }catch(e){
-    scanner=null;
-    document.getElementById('reader').classList.add('hidden');
-    document.getElementById('cameraBtn').textContent='📷 Сканировать камерой';
+    await stopScanner();
     showError('Не удалось открыть камеру: '+e);
   }
 }
 
-async function sendManual(){
+async function sendManualFull(){
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
@@ -370,7 +403,62 @@ async function sendManual(){
   input.focus();
 }
 
-async function sendScan(barcode){
+async function sendManualPartial(){
+  const input=document.getElementById('barcode');
+  const code=input.value.trim();
+  if(!code)return;
+  await preparePartial(code);
+  input.value='';
+}
+
+async function preparePartial(barcode){
+  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
+  busy=true;
+  try{
+    const r=await fetch('/api/pack-info',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({barcode:barcode})
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'Не удалось определить упаковку');
+
+    await stopScanner();
+
+    partialBarcode=barcode;
+    partialStandardQty=Number(data.standard_qty||0);
+    document.getElementById('partialTitle').textContent=(data.article||data.name||'Неполная палета');
+    document.getElementById('partialMeta').textContent='Стандартная палета: '+partialStandardQty+' шт. · '+barcode;
+    document.getElementById('partialQty').value='';
+    document.getElementById('partialQty').max=String(partialStandardQty);
+    document.getElementById('partialForm').classList.remove('hidden');
+    setTimeout(()=>document.getElementById('partialQty').focus(),100);
+    successFeedback();
+  }catch(e){
+    showError(e.message);
+  }finally{
+    busy=false;
+  }
+}
+
+function cancelPartial(){
+  partialBarcode='';
+  partialStandardQty=0;
+  document.getElementById('partialForm').classList.add('hidden');
+}
+
+async function confirmPartial(){
+  const qty=Number(document.getElementById('partialQty').value);
+  if(!partialBarcode){showError('Сначала отсканируй палету.');return;}
+  if(!Number.isFinite(qty)||qty<=0){showError('Укажи фактическое количество больше нуля.');return;}
+  if(qty>partialStandardQty){showError('Фактическое количество не может быть больше стандартной палеты '+partialStandardQty+' шт.');return;}
+
+  const barcode=partialBarcode;
+  cancelPartial();
+  await sendScan(barcode,qty);
+}
+
+async function sendScan(barcode,quantity=null){
   if(busy)return;
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
   busy=true;
@@ -379,7 +467,7 @@ async function sendScan(barcode){
     const r=await fetch('/api/scan',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({barcode:barcode,receipt_id:activeReceiptId})
+      body:JSON.stringify({barcode:barcode,receipt_id:activeReceiptId,quantity:quantity})
     });
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'Ошибка');
@@ -413,7 +501,7 @@ function escapeHtml(s){
 }
 
 document.getElementById('barcode').addEventListener('keydown',e=>{
-  if(e.key==='Enter')sendManual();
+  if(e.key==='Enter')sendManualFull();
 });
 
 loadBootstrap();
@@ -601,14 +689,20 @@ def get_receipt(receipt_id):
     r.raise_for_status()
     return r.json()
 
-def add_or_increment_position(receipt_id, product, pack):
+def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
     receipt = get_receipt(receipt_id)
     if receipt.get("applicable"):
         raise ValueError("Эта Приёмка уже проведена. Открой черновик или создай новую.")
 
     positions = receipt.get("positions", {}).get("rows", []) or []
     product_href = product["meta"]["href"]
-    add_qty = float(pack["quantity"])
+    standard_qty = float(pack["quantity"])
+    add_qty = standard_qty if requested_qty is None else float(requested_qty)
+
+    if add_qty <= 0:
+        raise ValueError("Количество должно быть больше нуля.")
+    if add_qty > standard_qty:
+        raise ValueError(f"Количество {add_qty:g} больше стандартной палеты {standard_qty:g}.")
 
     for pos in positions:
         if pos.get("assortment", {}).get("meta", {}).get("href") == product_href:
@@ -719,12 +813,39 @@ def finish_receipt(receipt_id):
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+@app.post("/api/pack-info")
+def pack_info():
+    try:
+        data = request.get_json(force=True)
+        barcode = str(data.get("barcode", "")).strip()
+        if not barcode:
+            return jsonify(error="Пустой штрихкод"), 400
+
+        product, pack = find_product_pack_by_barcode(barcode)
+        if not product:
+            return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
+
+        return jsonify(
+            ok=True,
+            barcode=barcode,
+            name=product.get("name"),
+            article=product.get("article"),
+            pack_name=pack.get("name"),
+            standard_qty=float(pack.get("quantity") or 0),
+        )
+    except requests.HTTPError as e:
+        body = e.response.text[:1200] if e.response is not None else ""
+        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
 @app.post("/api/scan")
 def scan():
     try:
         data = request.get_json(force=True)
         barcode = str(data.get("barcode", "")).strip()
         receipt_id = str(data.get("receipt_id", "")).strip()
+        requested_qty = data.get("quantity", None)
 
         if not barcode:
             return jsonify(error="Пустой штрихкод"), 400
@@ -735,7 +856,7 @@ def scan():
         if not product:
             return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
 
-        result = add_or_increment_position(receipt_id, product, pack)
+        result = add_or_increment_position(receipt_id, product, pack, requested_qty)
         return jsonify(
             ok=True,
             barcode=barcode,
