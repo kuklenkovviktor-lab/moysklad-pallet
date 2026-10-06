@@ -6,7 +6,6 @@ app = Flask(__name__)
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
-DEFAULT_RECEIPT_ID = os.getenv("MOYSKLAD_RECEIPT_ID", "").strip()
 
 PAGE = """<!doctype html>
 <html lang="ru">
@@ -24,14 +23,15 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
 h1{font-size:26px;margin:0 0 8px}
 .muted{color:#666;font-size:14px;line-height:1.35}
 label{display:block;margin:14px 0 6px;font-size:13px;color:#666}
-input{width:100%;padding:15px;font-size:18px;border:2px solid #d0d4d9;border-radius:12px}
+input,select{width:100%;padding:15px;font-size:17px;border:2px solid #d0d4d9;border-radius:12px;background:#fff}
 button{width:100%;padding:16px;font-size:18px;font-weight:700;border:0;border-radius:12px;cursor:pointer;background:#111;color:#fff;margin-top:10px}
 button.secondary{background:#e9ebee;color:#111}
 #reader{width:100%;margin-top:14px;overflow:hidden;border-radius:14px}
 .hidden{display:none}
-.ok,.err{margin-top:14px;padding:14px;border-radius:12px}
+.ok,.err,.info{margin-top:14px;padding:14px;border-radius:12px}
 .ok{background:#eaf8ee}
 .err{background:#fdecec}
+.info{background:#eef3ff}
 .stats{margin-top:14px;padding:14px;background:#f0f2f5;border-radius:12px}
 .big{font-size:28px;font-weight:800}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -42,10 +42,13 @@ button.secondary{background:#e9ebee;color:#111}
 <div class="wrap">
 <div class="card">
 <h1>Приёмка палет</h1>
-<div class="muted">1 скан палетного ШК = количество из упаковки МойСклад</div>
+<div class="muted">Выбери Приёмку один раз → сканируй палеты. Никаких UUID руками.</div>
 
-<label>ID Приёмки МойСклад</label>
-<input id="receiptId" value="__DEFAULT_RECEIPT__" placeholder="UUID документа Приёмки">
+<label>Приёмка МойСклад</label>
+<select id="receiptSelect">
+  <option value="">Загружаю последние Приёмки…</option>
+</select>
+<button class="secondary" onclick="loadReceipts()">↻ Обновить список Приёмок</button>
 
 <button id="cameraBtn" onclick="toggleCamera()">📷 Сканировать камерой</button>
 <button class="secondary" onclick="toggleManual()">⌨️ Ввести код вручную / ТСД</button>
@@ -75,9 +78,39 @@ let pallets=0;
 let units=0;
 let busy=false;
 
-const receiptInput=document.getElementById('receiptId');
-receiptInput.value=localStorage.getItem('receipt_id') || receiptInput.value || '';
-receiptInput.addEventListener('change',()=>localStorage.setItem('receipt_id',receiptInput.value.trim()));
+const receiptSelect=document.getElementById('receiptSelect');
+
+async function loadReceipts(){
+  receiptSelect.innerHTML='<option value="">Загружаю…</option>';
+  try{
+    const r=await fetch('/api/receipts');
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'Не удалось загрузить Приёмки');
+
+    const saved=localStorage.getItem('receipt_id')||'';
+    receiptSelect.innerHTML='<option value="">Выбери Приёмку</option>';
+
+    data.receipts.forEach(x=>{
+      const o=document.createElement('option');
+      o.value=x.id;
+      o.textContent=x.label;
+      if(x.id===saved)o.selected=true;
+      receiptSelect.appendChild(o);
+    });
+
+    if(!receiptSelect.value && data.receipts.length){
+      receiptSelect.value=data.receipts[0].id;
+      localStorage.setItem('receipt_id',receiptSelect.value);
+    }
+  }catch(e){
+    receiptSelect.innerHTML='<option value="">Ошибка загрузки</option>';
+    showError(e.message);
+  }
+}
+
+receiptSelect.addEventListener('change',()=>{
+  localStorage.setItem('receipt_id',receiptSelect.value);
+});
 
 function toggleManual(){
   document.getElementById('manual').classList.toggle('hidden');
@@ -93,8 +126,13 @@ async function toggleCamera(){
     return;
   }
 
-  if(typeof Html5Qrcode === 'undefined'){
-    showError('Модуль сканирования не загрузился. Обнови страницу и попробуй ещё раз.');
+  if(!receiptSelect.value){
+    showError('Сначала выбери Приёмку.');
+    return;
+  }
+
+  if(typeof Html5Qrcode==='undefined'){
+    showError('Модуль сканирования не загрузился. Обнови страницу.');
     return;
   }
 
@@ -114,7 +152,7 @@ async function toggleCamera(){
         ]
       },
       async(decodedText)=>{
-        if(!busy) await sendScan(decodedText);
+        if(!busy)await sendScan(decodedText);
       },
       ()=>{}
     );
@@ -140,11 +178,9 @@ async function sendScan(barcode){
   if(busy)return;
   busy=true;
 
-  const receiptId=receiptInput.value.trim();
-  localStorage.setItem('receipt_id',receiptId);
-
+  const receiptId=receiptSelect.value;
   if(!receiptId){
-    showError('Сначала укажи ID Приёмки.');
+    showError('Сначала выбери Приёмку.');
     busy=false;
     return;
   }
@@ -161,7 +197,6 @@ async function sendScan(barcode){
 
     pallets+=1;
     units+=Number(data.added||0);
-
     document.getElementById('pallets').textContent=pallets;
     document.getElementById('units').textContent=units;
 
@@ -186,6 +221,8 @@ function showError(message){
 document.getElementById('barcode').addEventListener('keydown',e=>{
   if(e.key==='Enter')sendManual();
 });
+
+loadReceipts();
 </script>
 </body>
 </html>"""
@@ -199,11 +236,36 @@ def headers():
         "Content-Type": "application/json",
     }
 
+def list_receipts():
+    r = requests.get(
+        f"{API_BASE}/entity/supply",
+        headers=headers(),
+        params={
+            "limit": 30,
+            "order": "moment,desc",
+            "expand": "agent,store",
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    rows = r.json().get("rows", [])
+    result = []
+    for row in rows:
+        moment = (row.get("moment") or "")[:16].replace("T", " ")
+        name = row.get("name") or "Без номера"
+        agent = (row.get("agent") or {}).get("name") or "без поставщика"
+        store = (row.get("store") or {}).get("name") or "без склада"
+        applicable = "✓" if row.get("applicable") else "черновик"
+        result.append({
+            "id": row.get("id"),
+            "label": f"{name} · {moment} · {agent} · {store} · {applicable}",
+        })
+    return result
+
 def find_product_pack_by_barcode(barcode):
     url = f"{API_BASE}/entity/product"
     limit = 1000
     offset = 0
-
     while True:
         r = requests.get(
             url,
@@ -213,16 +275,13 @@ def find_product_pack_by_barcode(barcode):
         )
         r.raise_for_status()
         rows = r.json().get("rows", [])
-
         for product in rows:
             for pack in product.get("packs", []) or []:
                 if str(pack.get("barcode", "")).strip() == barcode:
                     return product, pack
-
         if len(rows) < limit:
             break
         offset += limit
-
     return None, None
 
 def get_receipt(receipt_id):
@@ -253,8 +312,7 @@ def add_or_increment_position(receipt_id, product, pack):
             r.raise_for_status()
             return {"mode": "incremented", "added": add_qty, "total": new_qty}
 
-    buy_price = product.get("buyPrice", {}) or {}
-    price = int(buy_price.get("value", 0) or 0)
+    price = int(((product.get("buyPrice") or {}).get("value")) or 0)
 
     payload = {
         "quantity": add_qty,
@@ -281,23 +339,37 @@ def add_or_increment_position(receipt_id, product, pack):
 
 @app.get("/")
 def index():
-    return PAGE.replace("__DEFAULT_RECEIPT__", DEFAULT_RECEIPT_ID)
+    return PAGE
 
 @app.get("/api/health")
 def health():
     return jsonify(ok=True, token_configured=bool(TOKEN))
+
+@app.get("/api/receipts")
+def receipts():
+    try:
+        return jsonify(receipts=list_receipts())
+    except requests.HTTPError as e:
+        body = ""
+        try:
+            body = e.response.text[:1200]
+        except Exception:
+            pass
+        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
 
 @app.post("/api/scan")
 def scan():
     try:
         data = request.get_json(force=True)
         barcode = str(data.get("barcode", "")).strip()
-        receipt_id = str(data.get("receipt_id", "") or DEFAULT_RECEIPT_ID).strip()
+        receipt_id = str(data.get("receipt_id", "")).strip()
 
         if not barcode:
             return jsonify(error="Пустой штрихкод"), 400
         if not receipt_id:
-            return jsonify(error="Не указан ID Приёмки"), 400
+            return jsonify(error="Не выбрана Приёмка"), 400
 
         product, pack = find_product_pack_by_barcode(barcode)
         if not product:
