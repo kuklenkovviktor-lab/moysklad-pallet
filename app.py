@@ -117,6 +117,46 @@ let units=0;
 let busy=false;
 let activeReceiptId='';
 let activeReceiptName='';
+let audioCtx=null;
+
+function initAudio(){
+  try{
+    if(!audioCtx){
+      const Ctx=window.AudioContext||window.webkitAudioContext;
+      if(Ctx)audioCtx=new Ctx();
+    }
+    if(audioCtx && audioCtx.state==='suspended')audioCtx.resume();
+  }catch(e){}
+}
+
+function playTone(freq=880,duration=0.12,type='sine'){
+  try{
+    initAudio();
+    if(!audioCtx)return;
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type=type;
+    osc.frequency.value=freq;
+    gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18,audioCtx.currentTime+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime+duration+0.02);
+  }catch(e){}
+}
+
+function successFeedback(){
+  playTone(980,0.10,'sine');
+  setTimeout(()=>playTone(1320,0.12,'sine'),110);
+  try{if(navigator.vibrate)navigator.vibrate([80,40,80]);}catch(e){}
+}
+
+function errorFeedback(){
+  playTone(220,0.22,'square');
+  try{if(navigator.vibrate)navigator.vibrate([180,80,180]);}catch(e){}
+}
 
 const agentSelect=document.getElementById('agentSelect');
 const orgSelect=document.getElementById('orgSelect');
@@ -276,11 +316,13 @@ async function completeReceipt(){
 }
 
 function toggleManual(){
+  initAudio();
   document.getElementById('manual').classList.toggle('hidden');
   setTimeout(()=>document.getElementById('barcode').focus(),100);
 }
 
 async function toggleCamera(){
+  initAudio();
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
 
   if(scanner){
@@ -347,7 +389,7 @@ async function sendScan(barcode){
     document.getElementById('pallets').textContent=pallets;
     document.getElementById('units').textContent=units;
 
-    if(navigator.vibrate)navigator.vibrate(100);
+    successFeedback();
 
     document.getElementById('result').innerHTML=
       '<div class="ok"><b>'+escapeHtml(data.article||data.name||'')+'</b><br>'+
@@ -362,6 +404,7 @@ async function sendScan(barcode){
 }
 
 function showError(message){
+  errorFeedback();
   document.getElementById('result').innerHTML='<div class="err">'+escapeHtml(String(message))+'</div>';
 }
 
