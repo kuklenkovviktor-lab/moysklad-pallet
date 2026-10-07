@@ -207,56 +207,40 @@ FBS_PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#111111">
+<meta name="theme-color" content="#e9eef3">
 <title>FBS · Выработка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-*{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f5f6f8;color:#111}
-.wrap{max-width:620px;margin:0 auto;padding:16px}
-.card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 2px 12px rgba(0,0,0,.08);margin-bottom:14px}
-h1{font-size:26px;margin:0 0 8px} h2{font-size:19px;margin:0 0 10px}
-.muted,.small{color:#666}.small{font-size:12px}
-select,input{width:100%;padding:14px;font-size:17px;border:2px solid #d0d4d9;border-radius:12px;background:#fff}
-button{width:100%;padding:15px;font-size:17px;font-weight:700;border:0;border-radius:12px;cursor:pointer;background:#111;color:#fff;margin-top:10px}
-button.secondary{background:#e9ebee;color:#111} button.active{outline:3px solid #111}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.stat{background:#f0f2f5;border-radius:14px;padding:14px}.big{font-size:30px;font-weight:850}
-.ok,.err{padding:13px;border-radius:12px;margin-top:12px}.ok{background:#eaf8ee}.err{background:#fdecec}
-#reader{margin-top:12px;overflow:hidden;border-radius:14px}.hidden{display:none!important}
-.progress{height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin:10px 0}
-.progress>div{height:100%;background:#111;width:0%}
-.activities{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.activities button{margin-top:0;padding:12px;font-size:14px}
-a{color:#111}
-#rotateHint{display:none}
-@media (max-width:900px) and (orientation:portrait){
-  #rotateHint{display:flex;position:fixed;inset:0;z-index:9999;background:#111;color:#fff;align-items:center;justify-content:center;text-align:center;padding:32px;font-size:24px;font-weight:800}
-  #rotateHint span{display:block;font-size:54px;margin-bottom:12px}
+:root{--bg:#e9eef3;--panel:#f7f9fb;--panel2:#eef3f6;--text:#25313d;--muted:#6b7785;--line:#d7e0e7;--accent:#48647a;--accent2:#dde8ef}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%}
+.wrap{width:100%;max-width:980px;margin:auto;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:clamp(11px,2vw,17px);box-shadow:0 2px 10px rgba(52,72,91,.07);margin-bottom:9px}
+h1{font-size:clamp(20px,3vw,25px);margin:0 0 5px}h2{font-size:clamp(15px,2.2vw,18px);margin:0 0 7px}
+.muted,.small{color:var(--muted)}.muted{font-size:clamp(12px,1.8vw,14px)}.small{font-size:clamp(10px,1.5vw,12px)}
+select,input{width:100%;padding:clamp(9px,1.6vw,13px);font-size:clamp(14px,2vw,16px);color:var(--text);border:1px solid var(--line);border-radius:10px;background:#fbfcfd;outline:none}
+button{width:100%;padding:clamp(9px,1.6vw,13px);font-size:clamp(13px,2vw,15px);font-weight:750;border:1px solid transparent;border-radius:10px;cursor:pointer;background:var(--accent);color:#f7fafc;margin-top:7px}
+button.secondary{background:var(--accent2);color:var(--text);border-color:#cbd9e2}button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:inset 0 0 0 1px #8ca7b9}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.stat{background:var(--panel2);border:1px solid #dde5eb;border-radius:11px;padding:9px}.big{font-size:clamp(22px,4vw,30px);font-weight:820;line-height:1.05}
+.ok,.err{padding:9px;border-radius:9px;margin-top:7px;font-size:12px}.ok{background:#e1f1e6;color:#2f6b45}.err{background:#f6e4e4;color:#8a4343}
+#reader{margin-top:7px;overflow:hidden;border-radius:11px;max-height:42dvh}.hidden{display:none!important}
+.progress{height:9px;background:#dbe3e9;border-radius:999px;overflow:hidden;margin:6px 0}.progress>div{height:100%;background:#6f8ca1;width:0%}
+.activities{display:grid;grid-template-columns:1fr 1fr;gap:5px}.activities button{margin:0;padding:9px;font-size:12px}
+a{color:#536f83;text-decoration:none;font-weight:650}
+@media (orientation:landscape) and (max-height:560px){
+body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(5px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+.wrap>.card:first-child{height:42px;display:flex;align-items:center;gap:8px;padding:5px 9px;margin-bottom:5px;border-radius:10px}.wrap>.card:first-child h1{font-size:16px;margin:0;white-space:nowrap}.wrap>.card:first-child .muted{display:none}.wrap>.card:first-child div:last-child{margin:0!important;margin-left:auto!important;font-size:11px;white-space:nowrap}
+#startCard{max-width:540px;margin:5px auto;padding:11px}
+#work{display:grid!important;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(0,.95fr);gap:5px;height:calc(100dvh - 52px - env(safe-area-inset-top) - env(safe-area-inset-bottom));align-items:stretch}
+#work>.card{min-width:0;height:100%;margin:0;padding:8px;border-radius:10px;overflow:auto;box-shadow:none}
+#work h2{font-size:13px;margin-bottom:4px}#work .big{font-size:clamp(19px,3vw,25px)}#work .small{font-size:9px}#work .stat{padding:6px}
+#work button{padding:6px 5px;font-size:11px;margin-top:4px;border-radius:8px}#work input{padding:7px;font-size:12px;border-radius:8px}
+#reader{margin-top:4px;max-height:135px}.activities{grid-template-columns:1fr 1fr;gap:3px}.activities button{padding:5px 3px;font-size:10px;min-height:28px}.progress{margin:4px 0;height:7px}.ok,.err{padding:6px;margin-top:4px;font-size:10px}
 }
-@media (max-width:1100px) and (orientation:landscape){
-  body{overflow-x:hidden}
-  .wrap{max-width:none;width:100%;padding:8px 10px}
-  .wrap>.card:first-child{padding:10px 14px;margin-bottom:8px}
-  .wrap>.card:first-child h1{font-size:19px;margin-bottom:2px}
-  .wrap>.card:first-child .muted{display:none}
-  #startCard{max-width:560px;margin:8px auto;padding:14px}
-  #work{display:grid!important;grid-template-columns:1.05fr 1fr .95fr;gap:8px;align-items:start}
-  #work>.card{margin:0;padding:12px;border-radius:14px;min-height:calc(100vh - 88px)}
-  #work h2{font-size:16px;margin-bottom:6px}
-  #work .big{font-size:26px}
-  #work .stat{padding:10px}
-  #work button{padding:11px;font-size:14px;margin-top:7px}
-  #work input{padding:10px;font-size:15px}
-  #reader{margin-top:8px;max-height:52vh}
-  .activities{grid-template-columns:1fr 1fr;gap:6px}
-  .activities button{padding:9px;font-size:13px}
-  .progress{margin:7px 0;height:11px}
-}
+@media (orientation:landscape) and (max-width:760px){body{overflow:auto}.wrap{height:auto;overflow:visible}#work{grid-template-columns:1fr 1fr;height:auto}#work>.card{height:auto;overflow:visible}#work>.card:last-child{grid-column:1/-1}.activities{grid-template-columns:repeat(4,1fr)}}
 </style>
 </head>
 <body>
-<div id="rotateHint"><div><span>↻</span>Поверни телефон боком</div></div>
 <div class="wrap">
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
