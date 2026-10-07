@@ -548,6 +548,7 @@ async function loadWmsIdentity(){
     const d=await r.json();
     document.getElementById('navIdentity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
     if(d.employee.role==='manager')document.getElementById('statsLink').classList.remove('hidden');
+    await fetch('/api/operation/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation:'receiving'})});
   }catch(e){}
 }
 async function logoutWms(){
