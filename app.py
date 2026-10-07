@@ -2,11 +2,26 @@ import os
 import time
 import threading
 import requests
-from flask import Flask, request, jsonify
-from wms import wms_bp, init_wms_db
+from flask import Flask, request, jsonify, session, redirect
+from wms import wms_bp, init_wms_db, get_session_employee, log_event
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "mini-wms-warehouse-2026")
 app.register_blueprint(wms_bp)
+
+@app.before_request
+def require_employee_login():
+    path = request.path
+    public_paths = {"/login", "/api/auth/login", "/api/health"}
+    if path in public_paths or path.startswith("/static/"):
+        return None
+    employee = get_session_employee()
+    if employee:
+        return None
+    if path.startswith("/api/"):
+        return jsonify(error="Требуется вход по бейджу"), 401
+    return redirect("/login")
+
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
@@ -60,6 +75,12 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </head>
 <body>
 <div class="wrap">
+<div class="nav">
+  <a class="active" href="/">📦 Приёмка</a>
+  <a href="/fbs">🚀 FBS</a>
+  <a id="statsLink" class="hidden" href="/stats">📊 Статистика</a>
+</div>
+<div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="#" onclick="logoutWms();return false">Сменить сотрудника</a></div>
 
 <div class="card">
   <h1>Склад → Оприходование</h1>
@@ -520,6 +541,21 @@ document.getElementById('barcode').addEventListener('keydown',e=>{
   if(e.key==='Enter')sendManualFull();
 });
 
+async function loadWmsIdentity(){
+  try{
+    const r=await fetch('/api/auth/me');
+    if(!r.ok){location.href='/login';return;}
+    const d=await r.json();
+    document.getElementById('navIdentity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
+    if(d.employee.role==='manager')document.getElementById('statsLink').classList.remove('hidden');
+  }catch(e){}
+}
+async function logoutWms(){
+  try{await fetch('/api/auth/logout',{method:'POST'})}catch(e){}
+  localStorage.removeItem('fbs_shift_id');
+  location.href='/login';
+}
+loadWmsIdentity();
 loadBootstrap();
 fetch('/api/warmup',{method:'POST'}).catch(()=>{});
 const savedId=localStorage.getItem('receipt_id')||'';
@@ -992,6 +1028,16 @@ def scan():
             return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
 
         result = add_or_increment_position(receipt_id, product, pack, requested_qty)
+        employee = get_session_employee()
+        if employee:
+            log_event(
+                employee["id"],
+                "receiving",
+                "scan",
+                object_code=barcode,
+                quantity=result["added"],
+                result=receipt_id,
+            )
         return jsonify(
             ok=True,
             barcode=barcode,
