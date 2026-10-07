@@ -169,6 +169,10 @@ def init_wms_db():
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_badge_code ON employees(badge_code)")
     except Exception:
         pass
+    try:
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_barcode_unique ON scans(barcode)")
+    except Exception:
+        pass
 
 
 def ensure_db():
@@ -227,6 +231,42 @@ def log_event(employee_id, operation_type, event_type, shift_id=None, object_cod
     except Exception:
         pass
 
+
+
+def ensure_active_shift(employee_id, initial_activity="other"):
+    existing = query_one(
+        "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+        (employee_id,),
+    )
+    if existing:
+        return existing[0], False
+
+    shift_id = str(uuid.uuid4())
+    ts = now_iso()
+    execute(
+        "INSERT INTO shifts (id, employee_id, started_at, ended_at) VALUES (?, ?, ?, NULL)",
+        (shift_id, employee_id, ts),
+    )
+    execute(
+        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
+        (str(uuid.uuid4()), shift_id, employee_id, initial_activity, ts),
+    )
+    log_event(employee_id, "shift", "start", shift_id=shift_id, result=initial_activity)
+    return shift_id, True
+
+
+def switch_activity(shift_id, employee_id, activity_type):
+    current = current_activity(shift_id)
+    if current and current["type"] == activity_type:
+        return False
+    ts = now_iso()
+    execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
+    execute(
+        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
+        (str(uuid.uuid4()), shift_id, employee_id, activity_type, ts),
+    )
+    log_event(employee_id, activity_type, "switch", shift_id=shift_id, result="active")
+    return True
 
 
 def current_activity(shift_id):
@@ -608,8 +648,9 @@ def auth_login():
         return jsonify(error="Бейдж не найден"), 404
     session.clear()
     session["employee_id"] = row[0]
-    log_event(row[0], "auth", "login", object_code=badge_code, result="ok")
-    return jsonify(ok=True, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
+    shift_id, _ = ensure_active_shift(row[0], "other")
+    log_event(row[0], "auth", "login", shift_id=shift_id, object_code=badge_code, result="ok")
+    return jsonify(ok=True, shift_id=shift_id, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
 
 
 @wms_bp.post("/api/auth/logout")
@@ -628,6 +669,37 @@ def auth_me():
     if not emp:
         return jsonify(error="Требуется вход"), 401
     return jsonify(employee=emp)
+
+
+@wms_bp.post("/api/operation/enter")
+def operation_enter():
+    ensure_db()
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    data = request.get_json(silent=True) or {}
+    operation = str(data.get("operation", "")).strip()
+    allowed = {"picking", "replenishment", "receiving", "shipping", "pallets", "kgt", "downtime", "other"}
+    if operation not in allowed:
+        return jsonify(error="Неизвестная операция"), 400
+    shift_id, _ = ensure_active_shift(employee["id"], operation)
+    switch_activity(shift_id, employee["id"], operation)
+    return jsonify(ok=True, shift_id=shift_id, operation=operation)
+
+
+@wms_bp.get("/api/shift/current")
+def current_shift_api():
+    ensure_db()
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    row = query_one(
+        "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+        (employee["id"],),
+    )
+    if not row:
+        return jsonify(active=False)
+    return jsonify(active=True, stats=shift_stats(row[0]))
 
 
 @wms_bp.get("/stats")
@@ -726,19 +798,10 @@ def start_shift():
         (employee_id,),
     )
     if existing:
+        switch_activity(existing[0], employee_id, "picking")
         return jsonify(ok=True, shift_id=existing[0], resumed=True)
 
-    shift_id = str(uuid.uuid4())
-    ts = now_iso()
-    execute(
-        "INSERT INTO shifts (id, employee_id, started_at, ended_at) VALUES (?, ?, ?, NULL)",
-        (shift_id, employee_id, ts),
-    )
-    execute(
-        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, 'picking', ?, NULL)",
-        (str(uuid.uuid4()), shift_id, employee_id, ts),
-    )
-    log_event(employee_id, "shift", "start", shift_id=shift_id, result="picking")
+    shift_id, _ = ensure_active_shift(employee_id, "picking")
     return jsonify(ok=True, shift_id=shift_id, resumed=False)
 
 
@@ -770,8 +833,12 @@ def fbs_scan():
     if not active or active["type"] != "picking":
         return jsonify(error="Сейчас включена не сборка. Переключи операцию на «Сборка»."), 409
 
-    if query_one("SELECT id FROM scans WHERE shift_id = ? AND barcode = ?", (shift_id, barcode)):
-        return jsonify(error="Этот заказ уже отсканирован в текущей смене"), 409
+    duplicate = query_one(
+        "SELECT s.id, e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
+        (barcode,),
+    )
+    if duplicate:
+        return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[1])), 409
 
     try:
         execute(
@@ -779,8 +846,12 @@ def fbs_scan():
             (str(uuid.uuid4()), shift_id, shift[0], barcode, now_iso()),
         )
     except Exception:
-        if query_one("SELECT id FROM scans WHERE shift_id = ? AND barcode = ?", (shift_id, barcode)):
-            return jsonify(error="Этот заказ уже отсканирован в текущей смене"), 409
+        duplicate = query_one(
+            "SELECT e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
+            (barcode,),
+        )
+        if duplicate:
+            return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[0])), 409
         raise
 
     log_event(shift[0], "fbs", "scan", shift_id=shift_id, object_code=barcode, quantity=1, result="ok")
@@ -798,22 +869,17 @@ def change_activity():
     if activity_type not in allowed:
         return jsonify(error="Неизвестная операция"), 400
 
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
     shift = query_one("SELECT employee_id, ended_at FROM shifts WHERE id = ?", (shift_id,))
     if not shift or shift[1]:
         return jsonify(error="Активная смена не найдена"), 404
+    if shift[0] != employee["id"]:
+        return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
 
-    current = current_activity(shift_id)
-    if current and current["type"] == activity_type:
-        return jsonify(ok=True, unchanged=True)
-
-    ts = now_iso()
-    execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
-    execute(
-        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        (str(uuid.uuid4()), shift_id, shift[0], activity_type, ts),
-    )
-    log_event(shift[0], activity_type, "switch", shift_id=shift_id, result="active")
-    return jsonify(ok=True)
+    changed = switch_activity(shift_id, shift[0], activity_type)
+    return jsonify(ok=True, unchanged=not changed)
 
 
 @wms_bp.post("/api/fbs/end")
@@ -821,10 +887,15 @@ def end_shift():
     ensure_db()
     data = request.get_json(force=True)
     shift_id = str(data.get("shift_id", "")).strip()
-    shift = query_one("SELECT id, ended_at FROM shifts WHERE id = ?", (shift_id,))
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    shift = query_one("SELECT id, employee_id, ended_at FROM shifts WHERE id = ?", (shift_id,))
     if not shift:
         return jsonify(error="Смена не найдена"), 404
-    if shift[1]:
+    if shift[1] != employee["id"] and not is_manager():
+        return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
+    if shift[2]:
         return jsonify(ok=True, already_ended=True)
 
     ts = now_iso()
@@ -843,6 +914,11 @@ def stats():
     result = shift_stats(shift_id)
     if not result:
         return jsonify(error="Смена не найдена"), 404
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    if result["employee_id"] != employee["id"] and not is_manager():
+        return jsonify(error="Нет доступа к этой смене"), 403
     return jsonify(**result)
 
 
