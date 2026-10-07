@@ -3,7 +3,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session, redirect
 
 wms_bp = Blueprint("wms", __name__)
 
@@ -68,7 +68,10 @@ def init_wms_db():
             name TEXT NOT NULL,
             rate REAL NOT NULL DEFAULT 2.25,
             target INTEGER NOT NULL DEFAULT 1600,
-            active INTEGER NOT NULL DEFAULT 1
+            active INTEGER NOT NULL DEFAULT 1,
+            role TEXT NOT NULL DEFAULT 'staff',
+            badge_number INTEGER,
+            badge_code TEXT
         )
         """,
         """
@@ -105,24 +108,125 @@ def init_wms_db():
             FOREIGN KEY(employee_id) REFERENCES employees(id)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS operation_events (
+            id TEXT PRIMARY KEY,
+            employee_id TEXT NOT NULL,
+            shift_id TEXT,
+            operation_type TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            object_code TEXT,
+            quantity REAL,
+            result TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(employee_id) REFERENCES employees(id)
+        )
+        """,
     ]
     with db_connect() as conn:
         cur = conn.cursor()
         for stmt in statements:
             cur.execute(stmt)
+
+        # Миграция старой таблицы employees без потери данных.
+        if DATABASE_URL:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'employees'")
+            cols = {r[0] for r in cur.fetchall()}
+        else:
+            cur.execute("PRAGMA table_info(employees)")
+            cols = {r[1] for r in cur.fetchall()}
+
+        additions = [
+            ("role", "TEXT NOT NULL DEFAULT 'staff'"),
+            ("badge_number", "INTEGER"),
+            ("badge_code", "TEXT"),
+        ]
+        for name, ddl in additions:
+            if name not in cols:
+                cur.execute(f"ALTER TABLE employees ADD COLUMN {name} {ddl}")
+
         conn.commit()
         cur.close()
 
-    for emp_id, name in [("ilya", "Илья"), ("anton", "Антон")]:
-        if not query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
+    seeds = [
+        ("viktor", "Виктор", "manager", 1, "WMS-EMP-001"),
+        ("anton", "Антон", "staff", 2, "WMS-EMP-002"),
+        ("ilya", "Илья", "staff", 3, "WMS-EMP-003"),
+    ]
+    for emp_id, name, role, badge_number, badge_code in seeds:
+        if query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
             execute(
-                "INSERT INTO employees (id, name, rate, target, active) VALUES (?, ?, ?, ?, 1)",
-                (emp_id, name, RATE, TARGET),
+                "UPDATE employees SET name = ?, role = ?, badge_number = ?, badge_code = ?, rate = ?, target = ?, active = 1 WHERE id = ?",
+                (name, role, badge_number, badge_code, RATE, TARGET, emp_id),
             )
+        else:
+            execute(
+                "INSERT INTO employees (id, name, rate, target, active, role, badge_number, badge_code) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+                (emp_id, name, RATE, TARGET, role, badge_number, badge_code),
+            )
+
+    try:
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_badge_code ON employees(badge_code)")
+    except Exception:
+        pass
 
 
 def ensure_db():
     init_wms_db()
+
+
+def get_session_employee():
+    employee_id = str(session.get("employee_id", "")).strip()
+    if not employee_id:
+        return None
+    row = query_one(
+        "SELECT id, name, role, badge_number, badge_code, rate, target FROM employees WHERE id = ? AND active = 1",
+        (employee_id,),
+    )
+    if not row:
+        session.clear()
+        return None
+    return {
+        "id": row[0],
+        "name": row[1],
+        "role": row[2] or "staff",
+        "badge_number": row[3],
+        "badge_code": row[4],
+        "rate": float(row[5]),
+        "target": int(row[6]),
+    }
+
+
+def is_manager():
+    emp = get_session_employee()
+    return bool(emp and emp["role"] == "manager")
+
+
+def log_event(employee_id, operation_type, event_type, shift_id=None, object_code=None, quantity=None, result=None):
+    if not employee_id:
+        return
+    try:
+        execute(
+            """
+            INSERT INTO operation_events
+            (id, employee_id, shift_id, operation_type, event_type, object_code, quantity, result, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                employee_id,
+                shift_id,
+                operation_type,
+                event_type,
+                object_code,
+                quantity,
+                result,
+                now_iso(),
+            ),
+        )
+    except Exception:
+        pass
+
 
 
 def current_activity(shift_id):
@@ -202,6 +306,52 @@ def shift_stats(shift_id):
     }
 
 
+LOGIN_PAGE = """<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Вход</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
+.wrap{max-width:520px;margin:auto;padding:max(16px,env(safe-area-inset-top)) 16px 20px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+h1{margin:0 0 7px;font-size:25px}.muted{color:#6b7785;font-size:14px}.code{margin-top:14px;width:100%;padding:13px;border:1px solid #d7e0e7;border-radius:11px;font-size:17px;background:#fbfcfd}
+button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:11px;background:#48647a;color:white;font-size:16px;font-weight:750}
+button.secondary{background:#dde8ef;color:#25313d}.err{margin-top:10px;padding:10px;background:#f6e4e4;color:#8a4343;border-radius:10px}
+#reader{margin-top:12px;overflow:hidden;border-radius:12px}
+</style></head>
+<body><div class="wrap"><div class="card">
+<h1>Mini WMS · Вход</h1>
+<div class="muted">Отсканируй личный бейдж. Система сама определит сотрудника и его права.</div>
+<button onclick="toggleCamera()">📷 Сканировать бейдж</button>
+<div id="reader"></div>
+<input id="code" class="code" autocomplete="off" placeholder="Код бейджа">
+<button class="secondary" onclick="manualLogin()">Войти по коду</button>
+<div id="result"></div>
+</div></div>
+<script>
+let scanner=null,busy=false;
+async function login(code){
+ code=(code||'').trim(); if(!code||busy)return; busy=true;
+ try{
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code})});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Ошибка входа')+'</div>';return}
+  localStorage.removeItem('fbs_shift_id');
+  location.href='/fbs';
+ }finally{busy=false}
+}
+function manualLogin(){const e=document.getElementById('code');login(e.value)}
+document.getElementById('code').addEventListener('keydown',e=>{if(e.key==='Enter')manualLogin()});
+async function toggleCamera(){
+ if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').innerHTML='';return}
+ if(typeof Html5Qrcode==='undefined')return;
+ scanner=new Html5Qrcode('reader');
+ try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:280,height:180}},txt=>login(txt),()=>{})}
+ catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>'}
+}
+</script></body></html>"""
+
+
 FBS_PAGE = """<!doctype html>
 <html lang="ru">
 <head>
@@ -248,17 +398,18 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 <div class="nav">
 <a href="/">📦 Приёмка</a>
 <a class="active" href="/fbs">🚀 FBS</a>
-<a href="/fbs-manager">📊 Руководитель</a>
+<a class="manager-only hidden" href="/stats">📊 Статистика</a>
 </div>
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
 <div class="muted">Скан заказа фиксирует сотрудника, время, выработку и оплату. Дубли не засчитываются.</div>
+<div class="small" style="margin-top:6px"><span id="identity"></span> · <a href="#" onclick="logout();return false">Сменить сотрудника</a></div>
 </div>
 
 <div class="card" id="startCard">
-<h2>Сотрудник</h2>
-<select id="employee"><option>Загрузка…</option></select>
-<button onclick="startShift()">Начать смену</button>
+<h2 id="startName">Сотрудник</h2>
+<div class="muted">Бейдж уже определил сотрудника. Начни или продолжи его смену.</div>
+<button onclick="startShift()">Начать / продолжить смену</button>
 </div>
 
 <div id="work" class="hidden">
@@ -316,17 +467,22 @@ function beep(ok=true){
 }
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 
-async function loadEmployees(){
- const r=await fetch('/api/fbs/employees'),d=await r.json();
- const el=document.getElementById('employee');el.innerHTML='';
- d.employees.forEach(x=>{const o=document.createElement('option');o.value=x.id;o.textContent=x.name;el.appendChild(o)});
+async function loadIdentity(){
+ const r=await fetch('/api/auth/me'),d=await r.json();
+ if(!r.ok){location.href='/login';return}
+ document.getElementById('identity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
+ document.getElementById('startName').textContent=d.employee.name;
+ if(d.employee.role==='manager')document.querySelectorAll('.manager-only').forEach(x=>x.classList.remove('hidden'));
  if(shiftId)await refresh();
 }
 async function startShift(){
- const employee_id=document.getElementById('employee').value;
- const r=await fetch('/api/fbs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({employee_id})});
+ const r=await fetch('/api/fbs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
  const d=await r.json();if(!r.ok){showErr(d.error);return}
  shiftId=d.shift_id;localStorage.setItem('fbs_shift_id',shiftId);await refresh();
+}
+async function logout(){
+ try{await fetch('/api/auth/logout',{method:'POST'})}catch(e){}
+ localStorage.removeItem('fbs_shift_id');location.href='/login';
 }
 async function refresh(){
  if(!shiftId)return;
@@ -372,55 +528,183 @@ async function toggleCamera(){
  }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
 }
 function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
-loadEmployees();setInterval(()=>{if(shiftId)refresh()},15000);
+loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
 </script></body></html>"""
 
 
-MANAGER_PAGE = """<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FBS · Руководитель</title>
+STATS_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Статистика</title>
 <style>
-*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6f8;margin:0;color:#111}
-.wrap{max-width:900px;margin:auto;padding:16px}.card{background:#fff;border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-h1{margin:0 0 8px}.worker{display:grid;grid-template-columns:1.3fr repeat(4,1fr);gap:8px;padding:12px 0;border-bottom:1px solid #eee}.worker:last-child{border:0}
-.big{font-size:28px;font-weight:850}.small{font-size:12px;color:#666}
-.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
-.nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:42px;padding:8px;border-radius:11px;text-decoration:none;font-weight:700;font-size:13px;background:#e7edf2;color:#314657;border:1px solid #d2dde5}
-.nav a.active{background:#48647a;color:#fff;border-color:#48647a}
-@media(max-width:650px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
+.wrap{max-width:980px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}.nav a{display:flex;align-items:center;justify-content:center;min-height:40px;border-radius:10px;text-decoration:none;font-weight:750;background:#dde8ef;color:#314657}.nav a.active{background:#48647a;color:#fff}
+h1{margin:0 0 6px}.big{font-size:28px;font-weight:850}.small{font-size:12px;color:#6b7785}.worker{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.actions a{padding:9px 12px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:700}
+@media(max-width:700px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
-<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/fbs-manager">📊 Руководитель</a></div>
-<div class="card"><h1>📊 FBS · Руководитель</h1></div>
+<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">📊 Статистика</a></div>
+<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="#" onclick="logout();return false">Сменить сотрудника</a></div></div>
 <div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
-<div class="card" id="workers">Загрузка…</div>
+<div class="card"><b>Сейчас работают</b><div id="workers" style="margin-top:8px">Загрузка…</div></div>
+<div class="card"><b>Сотрудники</b><div id="employees" style="margin-top:8px">Загрузка…</div></div>
 </div>
 <script>
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 async function load(){
- const r=await fetch('/api/fbs/dashboard'),d=await r.json();document.getElementById('active').textContent=d.workers.length;
+ const r=await fetch('/api/fbs/dashboard'); if(r.status===403){location.href='/fbs';return} const d=await r.json();
+ document.getElementById('active').textContent=d.workers.length;
  const box=document.getElementById('workers');
- if(!d.workers.length){box.innerHTML='Нет активных смен';return}
- box.innerHTML=d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+x.earned.toLocaleString('ru-RU')+' ₽</b><div class="small">заработано</div></div><div><b>'+x.percent+'%</b><div class="small">от 1600</div></div></div>').join('');
+ box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+x.earned.toLocaleString('ru-RU')+' ₽</b><div class="small">заработано</div></div><div><b>'+x.percent+'%</b><div class="small">от '+x.target+'</div></div></div>').join(''):'Нет активных смен';
+ const er=await fetch('/api/stats/employees'),ed=await er.json();
+ document.getElementById('employees').innerHTML=ed.employees.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.name)+'</b><div class="small">бейдж №'+(x.badge_number||'—')+' · '+esc(x.role)+'</div></div><div><b>'+x.shifts+'</b><div class="small">смен</div></div><div><b>'+x.orders+'</b><div class="small">FBS заказов</div></div><div><b>'+x.picking_hours+'</b><div class="small">ч чистой сборки</div></div><div><b>'+x.avg_speed+'</b><div class="small">ср. заказ/ч</div></div></div>').join('');
 }
+async function logout(){await fetch('/api/auth/logout',{method:'POST'});localStorage.removeItem('fbs_shift_id');location.href='/login'}
 load();setInterval(load,10000);
 </script></body></html>"""
+
+
+BADGES_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Бейджи</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:900px;margin:auto;padding:16px}
+.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.top a,.top button{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.badge{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:16px;text-align:center}.qr{display:flex;justify-content:center;margin:12px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}
+@media print{body{background:#fff}.top{display:none}.badge{break-inside:avoid;box-shadow:none}}
+</style></head><body><div class="wrap"><div class="top"><a href="/stats">← Статистика</a><button onclick="print()">Печать бейджей</button></div><div id="grid" class="grid"></div></div>
+<script>
+async function load(){
+ const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
+ const g=document.getElementById('grid');
+ g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">MINI WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">'+x.badge_code+'</div></div>').join('');
+ d.employees.forEach(x=>new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150}));
+}
+load();
+</script></body></html>"""
+
+
+@wms_bp.get("/login")
+def login_page():
+    ensure_db()
+    if get_session_employee():
+        return redirect("/fbs")
+    return LOGIN_PAGE
+
+
+@wms_bp.post("/api/auth/login")
+def auth_login():
+    ensure_db()
+    data = request.get_json(force=True)
+    badge_code = str(data.get("badge_code", "")).strip()
+    if not badge_code:
+        return jsonify(error="Пустой код бейджа"), 400
+    row = query_one(
+        "SELECT id, name, role, badge_number FROM employees WHERE badge_code = ? AND active = 1",
+        (badge_code,),
+    )
+    if not row:
+        return jsonify(error="Бейдж не найден"), 404
+    session.clear()
+    session["employee_id"] = row[0]
+    log_event(row[0], "auth", "login", object_code=badge_code, result="ok")
+    return jsonify(ok=True, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
+
+
+@wms_bp.post("/api/auth/logout")
+def auth_logout():
+    emp = get_session_employee()
+    if emp:
+        log_event(emp["id"], "auth", "logout", result="ok")
+    session.clear()
+    return jsonify(ok=True)
+
+
+@wms_bp.get("/api/auth/me")
+def auth_me():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Требуется вход"), 401
+    return jsonify(employee=emp)
+
+
+@wms_bp.get("/stats")
+def stats_page():
+    ensure_db()
+    if not is_manager():
+        return redirect("/fbs")
+    return STATS_PAGE
+
+
+@wms_bp.get("/fbs-manager")
+def old_manager_page():
+    return redirect("/stats")
+
+
+@wms_bp.get("/badges")
+def badges_page():
+    ensure_db()
+    if not is_manager():
+        return redirect("/fbs")
+    return BADGES_PAGE
+
+
+@wms_bp.get("/api/admin/badges")
+def admin_badges():
+    ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
+    rows = query_all("SELECT id, name, role, badge_number, badge_code FROM employees WHERE active = 1 ORDER BY badge_number, name")
+    return jsonify(employees=[
+        {"id": r[0], "name": r[1], "role": r[2], "badge_number": r[3], "badge_code": r[4]}
+        for r in rows
+    ])
+
+
+@wms_bp.get("/api/stats/employees")
+def stats_employees():
+    ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
+    rows = query_all("SELECT id, name, role, badge_number FROM employees WHERE active = 1 ORDER BY badge_number, name")
+    out = []
+    for emp_id, name, role, badge_number in rows:
+        shifts_row = query_one("SELECT COUNT(*) FROM shifts WHERE employee_id = ?", (emp_id,))
+        orders_row = query_one("SELECT COUNT(*) FROM scans WHERE employee_id = ?", (emp_id,))
+        secs = 0.0
+        shift_ids = query_all("SELECT id FROM shifts WHERE employee_id = ?", (emp_id,))
+        for sr in shift_ids:
+            secs += picking_seconds(sr[0])
+        orders = int(orders_row[0] if orders_row else 0)
+        hours = secs / 3600.0
+        out.append({
+            "id": emp_id,
+            "name": name,
+            "role": role,
+            "badge_number": badge_number,
+            "shifts": int(shifts_row[0] if shifts_row else 0),
+            "orders": orders,
+            "picking_hours": round(hours, 1),
+            "avg_speed": round(orders / hours, 1) if hours > 0 else 0.0,
+        })
+    return jsonify(employees=out)
 
 
 @wms_bp.get("/fbs")
 def fbs_page():
     ensure_db()
+    if not get_session_employee():
+        return redirect("/login")
     return FBS_PAGE
-
-
-@wms_bp.get("/fbs-manager")
-def manager_page():
-    ensure_db()
-    return MANAGER_PAGE
 
 
 @wms_bp.get("/api/fbs/employees")
 def employees():
     ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
     rows = query_all("SELECT id, name, rate, target FROM employees WHERE active = 1 ORDER BY name")
     return jsonify(employees=[
         {"id": r[0], "name": r[1], "rate": float(r[2]), "target": int(r[3])}
@@ -431,11 +715,11 @@ def employees():
 @wms_bp.post("/api/fbs/start")
 def start_shift():
     ensure_db()
-    data = request.get_json(force=True)
-    employee_id = str(data.get("employee_id", "")).strip()
-    emp = query_one("SELECT id, name FROM employees WHERE id = ? AND active = 1", (employee_id,))
-    if not emp:
-        return jsonify(error="Сотрудник не найден"), 404
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    employee_id = employee["id"]
+    emp = (employee_id, employee["name"])
 
     existing = query_one(
         "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
@@ -454,6 +738,7 @@ def start_shift():
         "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, 'picking', ?, NULL)",
         (str(uuid.uuid4()), shift_id, employee_id, ts),
     )
+    log_event(employee_id, "shift", "start", shift_id=shift_id, result="picking")
     return jsonify(ok=True, shift_id=shift_id, resumed=False)
 
 
@@ -466,6 +751,10 @@ def fbs_scan():
     if not barcode:
         return jsonify(error="Пустой штрихкод"), 400
 
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+
     shift = query_one(
         "SELECT employee_id, ended_at FROM shifts WHERE id = ?",
         (shift_id,),
@@ -474,6 +763,8 @@ def fbs_scan():
         return jsonify(error="Смена не найдена"), 404
     if shift[1]:
         return jsonify(error="Смена уже завершена"), 409
+    if shift[0] != employee["id"]:
+        return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
 
     active = current_activity(shift_id)
     if not active or active["type"] != "picking":
@@ -492,6 +783,7 @@ def fbs_scan():
             return jsonify(error="Этот заказ уже отсканирован в текущей смене"), 409
         raise
 
+    log_event(shift[0], "fbs", "scan", shift_id=shift_id, object_code=barcode, quantity=1, result="ok")
     stats = shift_stats(shift_id)
     return jsonify(ok=True, **stats)
 
@@ -520,6 +812,7 @@ def change_activity():
         "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
         (str(uuid.uuid4()), shift_id, shift[0], activity_type, ts),
     )
+    log_event(shift[0], activity_type, "switch", shift_id=shift_id, result="active")
     return jsonify(ok=True)
 
 
@@ -537,6 +830,9 @@ def end_shift():
     ts = now_iso()
     execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
     execute("UPDATE shifts SET ended_at = ? WHERE id = ?", (ts, shift_id))
+    emp_row = query_one("SELECT employee_id FROM shifts WHERE id = ?", (shift_id,))
+    if emp_row:
+        log_event(emp_row[0], "shift", "end", shift_id=shift_id, result="ok")
     return jsonify(ok=True, stats=shift_stats(shift_id))
 
 
@@ -553,6 +849,8 @@ def stats():
 @wms_bp.get("/api/fbs/dashboard")
 def dashboard():
     ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
     rows = query_all(
         """
         SELECT s.id
