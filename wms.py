@@ -227,9 +227,12 @@ button.secondary{background:var(--accent2);color:var(--text);border-color:#cbd9e
 .progress{height:9px;background:#dbe3e9;border-radius:999px;overflow:hidden;margin:6px 0}.progress>div{height:100%;background:#6f8ca1;width:0%}
 .activities{display:grid;grid-template-columns:1fr 1fr;gap:5px}.activities button{margin:0;padding:9px;font-size:12px}
 a{color:#536f83;text-decoration:none;font-weight:650}
+.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:38px;padding:7px 6px;border-radius:9px;background:#dde8ef;color:#314657;border:1px solid #cbd9e2;font-size:12px;font-weight:750}
+.nav a.active{background:#48647a;color:#fff;border-color:#48647a}
 @media (orientation:landscape) and (max-height:560px){
 body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(5px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
-.wrap>.card:first-child{height:42px;display:flex;align-items:center;gap:8px;padding:5px 9px;margin-bottom:5px;border-radius:10px}.wrap>.card:first-child h1{font-size:16px;margin:0;white-space:nowrap}.wrap>.card:first-child .muted{display:none}.wrap>.card:first-child div:last-child{margin:0!important;margin-left:auto!important;font-size:11px;white-space:nowrap}
+.wrap>.nav + .card{height:42px;display:flex;align-items:center;gap:8px;padding:5px 9px;margin-bottom:5px;border-radius:10px}.wrap>.nav + .card h1{font-size:16px;margin:0;white-space:nowrap}.wrap>.nav + .card .muted{display:none}.wrap>.nav + .card div:last-child{margin:0!important;margin-left:auto!important;font-size:11px;white-space:nowrap}
 #startCard{max-width:540px;margin:5px auto;padding:11px}
 #work{display:grid!important;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(0,.95fr);gap:5px;height:calc(100dvh - 52px - env(safe-area-inset-top) - env(safe-area-inset-bottom));align-items:stretch}
 #work>.card{min-width:0;height:100%;margin:0;padding:8px;border-radius:10px;overflow:auto;box-shadow:none}
@@ -242,10 +245,14 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 </head>
 <body>
 <div class="wrap">
+<div class="nav">
+<a href="/">📦 Приёмка</a>
+<a class="active" href="/fbs">🚀 FBS</a>
+<a href="/fbs-manager">📊 Руководитель</a>
+</div>
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
 <div class="muted">Скан заказа фиксирует сотрудника, время, выработку и оплату. Дубли не засчитываются.</div>
-<div style="margin-top:8px"><a href="/">← Оприходование</a> · <a href="/fbs-manager">Руководитель</a></div>
 </div>
 
 <div class="card" id="startCard">
@@ -376,9 +383,14 @@ MANAGER_PAGE = """<!doctype html>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6f8;margin:0;color:#111}
 .wrap{max-width:900px;margin:auto;padding:16px}.card{background:#fff;border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
 h1{margin:0 0 8px}.worker{display:grid;grid-template-columns:1.3fr repeat(4,1fr);gap:8px;padding:12px 0;border-bottom:1px solid #eee}.worker:last-child{border:0}
-.big{font-size:28px;font-weight:850}.small{font-size:12px;color:#666}a{color:#111}@media(max-width:650px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
+.big{font-size:28px;font-weight:850}.small{font-size:12px;color:#666}
+.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:42px;padding:8px;border-radius:11px;text-decoration:none;font-weight:700;font-size:13px;background:#e7edf2;color:#314657;border:1px solid #d2dde5}
+.nav a.active{background:#48647a;color:#fff;border-color:#48647a}
+@media(max-width:650px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
-<div class="card"><h1>📊 FBS · Руководитель</h1><a href="/fbs">← Сотрудник</a></div>
+<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/fbs-manager">📊 Руководитель</a></div>
+<div class="card"><h1>📊 FBS · Руководитель</h1></div>
 <div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
 <div class="card" id="workers">Загрузка…</div>
 </div>
