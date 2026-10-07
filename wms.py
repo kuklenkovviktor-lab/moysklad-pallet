@@ -229,9 +229,35 @@ button.secondary{background:#e9ebee;color:#111} button.active{outline:3px solid 
 .activities{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .activities button{margin-top:0;padding:12px;font-size:14px}
 a{color:#111}
+#rotateHint{display:none}
+@media (max-width:900px) and (orientation:portrait){
+  #rotateHint{display:flex;position:fixed;inset:0;z-index:9999;background:#111;color:#fff;align-items:center;justify-content:center;text-align:center;padding:32px;font-size:24px;font-weight:800}
+  #rotateHint span{display:block;font-size:54px;margin-bottom:12px}
+}
+@media (max-width:1100px) and (orientation:landscape){
+  body{overflow-x:hidden}
+  .wrap{max-width:none;width:100%;padding:8px 10px}
+  .wrap>.card:first-child{padding:10px 14px;margin-bottom:8px}
+  .wrap>.card:first-child h1{font-size:19px;margin-bottom:2px}
+  .wrap>.card:first-child .muted{display:none}
+  #startCard{max-width:560px;margin:8px auto;padding:14px}
+  #work{display:grid!important;grid-template-columns:1.05fr 1fr .95fr;gap:8px;align-items:start}
+  #work>.card{margin:0;padding:12px;border-radius:14px;min-height:calc(100vh - 88px)}
+  #work h2{font-size:16px;margin-bottom:6px}
+  #work .big{font-size:26px}
+  #work .stat{padding:10px}
+  #work button{padding:11px;font-size:14px;margin-top:7px}
+  #work input{padding:10px;font-size:15px}
+  #reader{margin-top:8px;max-height:52vh}
+  .activities{grid-template-columns:1fr 1fr;gap:6px}
+  .activities button{padding:9px;font-size:13px}
+  .progress{margin:7px 0;height:11px}
+}
 </style>
 </head>
-<body><div class="wrap">
+<body>
+<div id="rotateHint"><div><span>↻</span>Поверни телефон боком</div></div>
+<div class="wrap">
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
 <div class="muted">Скан заказа фиксирует сотрудника, время, выработку и оплату. Дубли не засчитываются.</div>
