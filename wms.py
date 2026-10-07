@@ -1,6 +1,8 @@
 import os
 import sqlite3
 import uuid
+import hashlib
+import hmac
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, session, redirect
@@ -11,6 +13,19 @@ RATE = float(os.getenv("FBS_RATE", "2.25"))
 TARGET = int(os.getenv("FBS_TARGET", "1600"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("WMS_DB_PATH", "/tmp/wms.db")
+WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").encode("utf-8")
+
+
+def make_token(purpose):
+    digest = hmac.new(WMS_BADGE_SECRET, purpose.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:32]
+
+
+def make_badge_code(employee_id):
+    return "WMS-BADGE-" + make_token("employee:" + employee_id)
+
+
+SUPERVISOR_EXIT_CODE = "WMS-EXIT-" + make_token("supervisor-exit")
 
 
 def now_iso():
@@ -149,11 +164,12 @@ def init_wms_db():
         cur.close()
 
     seeds = [
-        ("viktor", "Виктор", "manager", 1, "WMS-EMP-001"),
-        ("anton", "Антон", "staff", 2, "WMS-EMP-002"),
-        ("ilya", "Илья", "staff", 3, "WMS-EMP-003"),
+        ("viktor", "Виктор", "manager", 1),
+        ("anton", "Антон", "staff", 2),
+        ("ilya", "Илья", "staff", 3),
     ]
-    for emp_id, name, role, badge_number, badge_code in seeds:
+    for emp_id, name, role, badge_number in seeds:
+        badge_code = make_badge_code(emp_id)
         if query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
             execute(
                 "UPDATE employees SET name = ?, role = ?, badge_number = ?, badge_code = ?, rate = ?, target = ?, active = 1 WHERE id = ?",
@@ -354,34 +370,43 @@ LOGIN_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
 .wrap{max-width:520px;margin:auto;padding:max(16px,env(safe-area-inset-top)) 16px 20px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
-h1{margin:0 0 7px;font-size:25px}.muted{color:#6b7785;font-size:14px}.code{margin-top:14px;width:100%;padding:13px;border:1px solid #d7e0e7;border-radius:11px;font-size:17px;background:#fbfcfd}
-button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:11px;background:#48647a;color:white;font-size:16px;font-weight:750}
-button.secondary{background:#dde8ef;color:#25313d}.err{margin-top:10px;padding:10px;background:#f6e4e4;color:#8a4343;border-radius:10px}
-#reader{margin-top:12px;overflow:hidden;border-radius:12px}
+h1{margin:0 0 7px;font-size:25px}.muted{color:#6b7785;font-size:14px;line-height:1.4}
+button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;background:#48647a;color:white;font-size:16px;font-weight:750}
+.err,.ok{margin-top:10px;padding:10px;border-radius:10px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
+#reader{margin-top:12px;overflow:hidden;border-radius:12px}.scanbox{margin-top:14px;padding:14px;border:1px dashed #9fb0bd;border-radius:12px;background:#eef3f6;text-align:center;font-weight:700}
 </style></head>
 <body><div class="wrap"><div class="card">
 <h1>Mini WMS · Вход</h1>
-<div class="muted">Отсканируй личный бейдж. Система сама определит сотрудника и его права.</div>
-<button onclick="toggleCamera()">📷 Сканировать бейдж</button>
+<div class="muted">Вход только по личному QR-бейджу сотрудника. Выбор имени и ручной вход отключены.</div>
+<div class="scanbox">Поднеси бейдж к сканеру<br><span class="muted">или используй камеру TSD</span></div>
+<button onclick="toggleCamera()">📷 Камера TSD</button>
 <div id="reader"></div>
-<input id="code" class="code" autocomplete="off" placeholder="Код бейджа">
-<button class="secondary" onclick="manualLogin()">Войти по коду</button>
 <div id="result"></div>
 </div></div>
 <script>
-let scanner=null,busy=false;
+let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 async function login(code){
  code=(code||'').trim(); if(!code||busy)return; busy=true;
  try{
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code})});
   const d=await r.json();
-  if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Ошибка входа')+'</div>';return}
-  localStorage.removeItem('fbs_shift_id');
-  location.href='/fbs';
+  if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Бейдж не принят')+'</div>';return}
+  localStorage.setItem('fbs_shift_id',d.shift_id||'');
+  document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
+  setTimeout(()=>location.href='/fbs',250);
  }finally{busy=false}
 }
-function manualLogin(){const e=document.getElementById('code');login(e.value)}
-document.getElementById('code').addEventListener('keydown',e=>{if(e.key==='Enter')manualLogin()});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Enter'){
+  const code=hidBuffer.trim(); hidBuffer=''; clearTimeout(hidTimer);
+  if(code)login(code); return;
+ }
+ if(e.key.length===1){
+  hidBuffer+=e.key;
+  clearTimeout(hidTimer);
+  hidTimer=setTimeout(()=>{hidBuffer=''},1200);
+ }
+});
 async function toggleCamera(){
  if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').innerHTML='';return}
  if(typeof Html5Qrcode==='undefined')return;
@@ -443,7 +468,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
 <div class="muted">Скан заказа фиксирует сотрудника, время, выработку и оплату. Дубли не засчитываются.</div>
-<div class="small" style="margin-top:6px"><span id="identity"></span> · <a href="#" onclick="logout();return false">Сменить сотрудника</a></div>
+<div class="small" style="margin-top:6px"><span id="identity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 </div>
 
 <div class="card" id="startCard">
@@ -485,7 +510,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 <button data-a="downtime" onclick="activity('downtime')">Простой</button>
 <button data-a="other" onclick="activity('other')">Другое</button>
 </div>
-<button class="secondary" onclick="endShift()">Завершить смену</button>
+<button class="secondary" onclick="location.href='/exit'">🚪 Завершить смену</button>
 </div>
 </div>
 </div>
@@ -520,10 +545,6 @@ async function startShift(){
  const d=await r.json();if(!r.ok){showErr(d.error);return}
  shiftId=d.shift_id;localStorage.setItem('fbs_shift_id',shiftId);await refresh();
 }
-async function logout(){
- try{await fetch('/api/auth/logout',{method:'POST'})}catch(e){}
- localStorage.removeItem('fbs_shift_id');location.href='/login';
-}
 async function refresh(){
  if(!shiftId)return;
  const r=await fetch('/api/fbs/stats?shift_id='+encodeURIComponent(shiftId)),d=await r.json();
@@ -553,12 +574,6 @@ async function activity(type){
  const r=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:type})});
  const d=await r.json();if(!r.ok){showErr(d.error);return}await refresh();
 }
-async function endShift(){
- if(!confirm('Завершить смену?'))return;
- const r=await fetch('/api/fbs/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId})});
- const d=await r.json();if(!r.ok){showErr(d.error);return}
- localStorage.removeItem('fbs_shift_id');shiftId='';location.reload();
-}
 async function toggleCamera(){
  if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').classList.add('hidden');return}
  if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
@@ -569,6 +584,69 @@ async function toggleCamera(){
 }
 function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
 loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
+</script></body></html>"""
+
+
+EXIT_PAGE = """<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Завершение смены</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
+.wrap{max-width:540px;margin:auto;padding:max(16px,env(safe-area-inset-top)) 16px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+h1{margin:0 0 8px;font-size:24px}.muted{color:#6b7785;font-size:14px;line-height:1.4}.warning{margin-top:12px;padding:12px;background:#fff4dd;border-radius:11px;color:#70531f}
+button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750}.secondary{display:block;margin-top:10px;text-align:center;color:#536f83;text-decoration:none}
+.err,.ok{margin-top:10px;padding:10px;border-radius:10px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
+#reader{margin-top:12px;overflow:hidden;border-radius:12px}.scanbox{margin-top:14px;padding:14px;border:1px dashed #9fb0bd;border-radius:12px;background:#eef3f6;text-align:center;font-weight:700}
+</style></head><body><div class="wrap"><div class="card">
+<h1>🚪 Завершение смены</h1>
+<div class="muted">Самостоятельный выход заблокирован. Для завершения смены отсканируй QR старшего в точке сдачи TSD/сканера.</div>
+<div class="warning">После подтверждения текущая операция остановится, смена закроется, а TSD выйдет из учётной записи.</div>
+<div class="scanbox">Сканируй QR старшего</div>
+<button onclick="toggleCamera()">📷 Камера TSD</button>
+<div id="reader"></div><div id="result"></div>
+<a class="secondary" href="/fbs">← Вернуться без выхода</a>
+</div></div>
+<script>
+let scanner=null,busy=false,hidBuffer='',hidTimer=null;
+async function finish(code){
+ code=(code||'').trim(); if(!code||busy)return; busy=true;
+ try{
+  const r=await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supervisor_code:code})});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'QR старшего не принят')+'</div>';return}
+  localStorage.removeItem('fbs_shift_id');
+  document.getElementById('result').innerHTML='<div class="ok">Смена завершена. TSD свободен.</div>';
+  setTimeout(()=>location.href='/login',500);
+ }finally{busy=false}
+}
+document.addEventListener('keydown',e=>{
+ if(e.key==='Enter'){const code=hidBuffer.trim();hidBuffer='';clearTimeout(hidTimer);if(code)finish(code);return}
+ if(e.key.length===1){hidBuffer+=e.key;clearTimeout(hidTimer);hidTimer=setTimeout(()=>{hidBuffer=''},1200)}
+});
+async function toggleCamera(){
+ if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').innerHTML='';return}
+ if(typeof Html5Qrcode==='undefined')return;
+ scanner=new Html5Qrcode('reader');
+ try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:280,height:180}},txt=>finish(txt),()=>{})}
+ catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>'}
+}
+</script></body></html>"""
+
+
+SUPERVISOR_QR_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · QR старшего</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
+@media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
+</style></head><body><div class="wrap">
+<div class="top"><a href="/stats">← Статистика</a><button onclick="print()">Печать</button></div>
+<div class="card"><h1>QR завершения смены</h1><div class="muted">Размести этот QR в точке сдачи TSD. Только его скан завершает смену сотрудника.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b></div>
+</div><script>
+fetch('/api/admin/supervisor-exit-code').then(r=>r.json()).then(d=>new QRCode(document.getElementById('qr'),{text:d.code,width:260,height:260}));
 </script></body></html>"""
 
 
@@ -584,7 +662,7 @@ h1{margin:0 0 6px}.big{font-size:28px;font-weight:850}.small{font-size:12px;colo
 @media(max-width:700px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
 <div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">📊 Статистика</a></div>
-<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="#" onclick="logout();return false">Сменить сотрудника</a></div></div>
+<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
 <div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
 <div class="card"><b>Сейчас работают</b><div id="workers" style="margin-top:8px">Загрузка…</div></div>
 <div class="card"><b>Сотрудники</b><div id="employees" style="margin-top:8px">Загрузка…</div></div>
@@ -599,7 +677,6 @@ async function load(){
  const er=await fetch('/api/stats/employees'),ed=await er.json();
  document.getElementById('employees').innerHTML=ed.employees.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.name)+'</b><div class="small">бейдж №'+(x.badge_number||'—')+' · '+esc(x.role)+'</div></div><div><b>'+x.shifts+'</b><div class="small">смен</div></div><div><b>'+x.orders+'</b><div class="small">FBS заказов</div></div><div><b>'+x.picking_hours+'</b><div class="small">ч чистой сборки</div></div><div><b>'+x.avg_speed+'</b><div class="small">ср. заказ/ч</div></div></div>').join('');
 }
-async function logout(){await fetch('/api/auth/logout',{method:'POST'});localStorage.removeItem('fbs_shift_id');location.href='/login'}
 load();setInterval(load,10000);
 </script></body></html>"""
 
@@ -618,7 +695,7 @@ BADGES_PAGE = """<!doctype html>
 async function load(){
  const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
  const g=document.getElementById('grid');
- g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">MINI WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">'+x.badge_code+'</div></div>').join('');
+ g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">MINI WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">Личный ID · не передавать другому сотруднику</div></div>').join('');
  d.employees.forEach(x=>new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150}));
 }
 load();
@@ -653,11 +730,55 @@ def auth_login():
     return jsonify(ok=True, shift_id=shift_id, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
 
 
+@wms_bp.get("/exit")
+def exit_page():
+    ensure_db()
+    if not get_session_employee():
+        return redirect("/login")
+    return EXIT_PAGE
+
+
+@wms_bp.get("/supervisor-qr")
+def supervisor_qr_page():
+    ensure_db()
+    if not is_manager():
+        return redirect("/fbs")
+    return SUPERVISOR_QR_PAGE
+
+
+@wms_bp.get("/api/admin/supervisor-exit-code")
+def supervisor_exit_code_api():
+    ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
+    return jsonify(code=SUPERVISOR_EXIT_CODE)
+
+
 @wms_bp.post("/api/auth/logout")
 def auth_logout():
+    ensure_db()
     emp = get_session_employee()
-    if emp:
-        log_event(emp["id"], "auth", "logout", result="ok")
+    if not emp:
+        return jsonify(error="Активная учётная запись не найдена"), 401
+
+    data = request.get_json(silent=True) or {}
+    supervisor_code = str(data.get("supervisor_code", "")).strip()
+    if not hmac.compare_digest(supervisor_code, SUPERVISOR_EXIT_CODE):
+        log_event(emp["id"], "auth", "logout_denied", object_code="invalid-supervisor-qr", result="denied")
+        return jsonify(error="Нужен QR старшего. Смена не завершена."), 403
+
+    row = query_one(
+        "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+        (emp["id"],),
+    )
+    if row:
+        shift_id = row[0]
+        ts = now_iso()
+        execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
+        execute("UPDATE shifts SET ended_at = ? WHERE id = ?", (ts, shift_id))
+        log_event(emp["id"], "shift", "end", shift_id=shift_id, object_code="supervisor-qr", result="ok")
+
+    log_event(emp["id"], "auth", "logout", object_code="supervisor-qr", result="ok")
     session.clear()
     return jsonify(ok=True)
 
@@ -885,11 +1006,14 @@ def change_activity():
 @wms_bp.post("/api/fbs/end")
 def end_shift():
     ensure_db()
-    data = request.get_json(force=True)
-    shift_id = str(data.get("shift_id", "")).strip()
     employee = get_session_employee()
     if not employee:
         return jsonify(error="Требуется вход по бейджу"), 401
+    data = request.get_json(silent=True) or {}
+    supervisor_code = str(data.get("supervisor_code", "")).strip()
+    if not hmac.compare_digest(supervisor_code, SUPERVISOR_EXIT_CODE):
+        return jsonify(error="Завершение смены возможно только по QR старшего"), 403
+    shift_id = str(data.get("shift_id", "")).strip()
     shift = query_one("SELECT id, employee_id, ended_at FROM shifts WHERE id = ?", (shift_id,))
     if not shift:
         return jsonify(error="Смена не найдена"), 404
@@ -897,13 +1021,10 @@ def end_shift():
         return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
     if shift[2]:
         return jsonify(ok=True, already_ended=True)
-
     ts = now_iso()
     execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
     execute("UPDATE shifts SET ended_at = ? WHERE id = ?", (ts, shift_id))
-    emp_row = query_one("SELECT employee_id FROM shifts WHERE id = ?", (shift_id,))
-    if emp_row:
-        log_event(emp_row[0], "shift", "end", shift_id=shift_id, result="ok")
+    log_event(shift[1], "shift", "end", shift_id=shift_id, object_code="supervisor-qr", result="ok")
     return jsonify(ok=True, stats=shift_stats(shift_id))
 
 
