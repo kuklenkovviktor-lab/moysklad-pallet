@@ -53,6 +53,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .small{font-size:12px;color:#777}
 .activeDoc{padding:13px;background:#f0f2f5;border-radius:12px;margin-top:10px}
+.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:44px;padding:9px 8px;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px;background:#e7edf2;color:#314657;border:1px solid #d2dde5}
+.nav a.active{background:#48647a;color:#fff;border-color:#48647a}
 </style>
 </head>
 <body>
