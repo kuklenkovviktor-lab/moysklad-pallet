@@ -3,8 +3,10 @@ import time
 import threading
 import requests
 from flask import Flask, request, jsonify
+from wms import wms_bp, init_wms_db
 
 app = Flask(__name__)
+app.register_blueprint(wms_bp)
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
@@ -1004,6 +1006,11 @@ def scan():
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
         return jsonify(error=str(e)), 500
+
+try:
+    init_wms_db()
+except Exception as e:
+    print(f"WMS DB init warning: {e}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
