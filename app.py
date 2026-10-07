@@ -80,7 +80,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <a href="/fbs">🚀 FBS</a>
   <a id="statsLink" class="hidden" href="/stats">📊 Статистика</a>
 </div>
-<div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="#" onclick="logoutWms();return false">Сменить сотрудника</a></div>
+<div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 
 <div class="card">
   <h1>Склад → Оприходование</h1>
@@ -550,11 +550,6 @@ async function loadWmsIdentity(){
     if(d.employee.role==='manager')document.getElementById('statsLink').classList.remove('hidden');
     await fetch('/api/operation/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation:'receiving'})});
   }catch(e){}
-}
-async function logoutWms(){
-  try{await fetch('/api/auth/logout',{method:'POST'})}catch(e){}
-  localStorage.removeItem('fbs_shift_id');
-  location.href='/login';
 }
 loadWmsIdentity();
 loadBootstrap();
