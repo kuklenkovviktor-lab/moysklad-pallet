@@ -12,7 +12,7 @@ app.register_blueprint(wms_bp)
 @app.before_request
 def require_employee_login():
     path = request.path
-    public_paths = {"/login", "/api/auth/login", "/api/health"}
+    public_paths = {"/login", "/api/auth/login", "/api/health", "/supervisor-terminal", "/api/supervisor-terminal/qr"}
     if path in public_paths or path.startswith("/static/"):
         return None
     employee = get_session_employee()
