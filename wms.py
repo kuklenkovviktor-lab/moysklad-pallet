@@ -216,6 +216,7 @@ def init_wms_db():
         ("viktor", "Виктор", "manager", 1),
         ("anton", "Антон", "staff", 2),
         ("ilya", "Илья", "staff", 3),
+        ("loader", "Грузчик", "staff", 4),
     ]
     for emp_id, name, role, badge_number in seeds:
         badge_code = make_badge_code(emp_id)
