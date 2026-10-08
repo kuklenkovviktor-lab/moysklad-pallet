@@ -706,7 +706,7 @@ load();
 def bootstrap_viktor_badge():
     ensure_db()
     code = make_badge_code("viktor")
-    page = """<!doctype html>
+    page = f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Mini WMS · Бейдж Виктора</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -716,7 +716,7 @@ def bootstrap_viktor_badge():
 <div class="small">MINI WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
 <a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в Mini WMS.</div>
-</div></div><script>new QRCode(document.getElementById('qr'),{text:"${code}",width:260,height:260});</script></body></html>"""
+</div></div><script>new QRCode(document.getElementById('qr'),{text:"{code}",width:260,height:260});</script></body></html>"""
     return page
 
 
