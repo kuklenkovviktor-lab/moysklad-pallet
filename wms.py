@@ -702,6 +702,24 @@ load();
 </script></body></html>"""
 
 
+@wms_bp.get("/setup/viktor-8f4c2e91a7b6")
+def bootstrap_viktor_badge():
+    ensure_db()
+    code = make_badge_code("viktor")
+    page = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mini WMS · Бейдж Виктора</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:22px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}.btn{display:block;margin-top:14px;padding:12px;border-radius:11px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}@media print{body{background:#fff}.wrap{padding:0}.btn,.hint{display:none}.card{border:0}}
+</style></head><body><div class="wrap"><div class="card">
+<div class="small">MINI WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
+<div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
+<a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в Mini WMS.</div>
+</div></div><script>new QRCode(document.getElementById('qr'),{text:"${code}",width:260,height:260});</script></body></html>"""
+    return page
+
+
 @wms_bp.get("/login")
 def login_page():
     ensure_db()
