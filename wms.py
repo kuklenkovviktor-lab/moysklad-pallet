@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 import hashlib
 import hmac
+import time
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, session, redirect
@@ -14,6 +15,7 @@ TARGET = int(os.getenv("FBS_TARGET", "1600"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("WMS_DB_PATH", "/tmp/wms.db")
 WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").encode("utf-8")
+SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
 
 
 def make_token(purpose):
@@ -25,7 +27,28 @@ def make_badge_code(employee_id):
     return "WMS-BADGE-" + make_token("employee:" + employee_id)
 
 
-SUPERVISOR_EXIT_CODE = "WMS-EXIT-" + make_token("supervisor-exit")
+def supervisor_exit_code_for_step(step):
+    return "WMS-EXIT-" + make_token("supervisor-exit:" + str(step))
+
+
+def current_supervisor_exit_code(now=None):
+    ts = float(now if now is not None else time.time())
+    step = int(ts // SUPERVISOR_QR_PERIOD)
+    remaining = SUPERVISOR_QR_PERIOD - int(ts % SUPERVISOR_QR_PERIOD)
+    return supervisor_exit_code_for_step(step), step, remaining
+
+
+def valid_supervisor_exit_code(code, now=None):
+    candidate = str(code or "").strip()
+    if not candidate:
+        return False
+    ts = float(now if now is not None else time.time())
+    step = int(ts // SUPERVISOR_QR_PERIOD)
+    # Текущий и предыдущий интервал: скан на границе обновления не должен отваливаться.
+    for allowed_step in (step, step - 1):
+        if hmac.compare_digest(candidate, supervisor_exit_code_for_step(allowed_step)):
+            return True
+    return False
 
 
 def now_iso():
@@ -644,9 +667,24 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
 </style></head><body><div class="wrap">
 <div class="top"><a href="/stats">← Статистика</a><button onclick="print()">Печать</button></div>
-<div class="card"><h1>QR завершения смены</h1><div class="muted">Размести этот QR в точке сдачи TSD. Только его скан завершает смену сотрудника.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b></div>
+<div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
 </div><script>
-fetch('/api/admin/supervisor-exit-code').then(r=>r.json()).then(d=>new QRCode(document.getElementById('qr'),{text:d.code,width:260,height:260}));
+let lastCode='';
+async function refreshQr(){
+ try{
+  const r=await fetch('/api/admin/supervisor-exit-code',{cache:'no-store'});
+  if(!r.ok)return;
+  const d=await r.json();
+  document.getElementById('ttl').textContent=d.expires_in;
+  if(d.code!==lastCode){
+   lastCode=d.code;
+   const box=document.getElementById('qr');
+   box.innerHTML='';
+   new QRCode(box,{text:d.code,width:260,height:260});
+  }
+ }catch(e){}
+}
+refreshQr();setInterval(refreshQr,1000);
 </script></body></html>"""
 
 
@@ -769,7 +807,8 @@ def supervisor_exit_code_api():
     ensure_db()
     if not is_manager():
         return jsonify(error="Доступ только руководителю"), 403
-    return jsonify(code=SUPERVISOR_EXIT_CODE)
+    code, step, remaining = current_supervisor_exit_code()
+    return jsonify(code=code, expires_in=remaining, period=SUPERVISOR_QR_PERIOD, step=step)
 
 
 @wms_bp.post("/api/auth/logout")
@@ -781,7 +820,7 @@ def auth_logout():
 
     data = request.get_json(silent=True) or {}
     supervisor_code = str(data.get("supervisor_code", "")).strip()
-    if not hmac.compare_digest(supervisor_code, SUPERVISOR_EXIT_CODE):
+    if not valid_supervisor_exit_code(supervisor_code):
         log_event(emp["id"], "auth", "logout_denied", object_code="invalid-supervisor-qr", result="denied")
         return jsonify(error="Нужен QR старшего. Смена не завершена."), 403
 
@@ -1029,7 +1068,7 @@ def end_shift():
         return jsonify(error="Требуется вход по бейджу"), 401
     data = request.get_json(silent=True) or {}
     supervisor_code = str(data.get("supervisor_code", "")).strip()
-    if not hmac.compare_digest(supervisor_code, SUPERVISOR_EXIT_CODE):
+    if not valid_supervisor_exit_code(supervisor_code):
         return jsonify(error="Завершение смены возможно только по QR старшего"), 403
     shift_id = str(data.get("shift_id", "")).strip()
     shift = query_one("SELECT id, employee_id, ended_at FROM shifts WHERE id = ?", (shift_id,))
