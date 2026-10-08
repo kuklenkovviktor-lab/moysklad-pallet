@@ -16,6 +16,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("WMS_DB_PATH", "/tmp/wms.db")
 WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").encode("utf-8")
 SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
+WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "mini-wms-terminal-secret-v1").encode("utf-8")
+SUPERVISOR_TERMINAL_VERSION = os.getenv("SUPERVISOR_TERMINAL_VERSION", "1").strip() or "1"
 
 
 def make_token(purpose):
@@ -49,6 +51,30 @@ def valid_supervisor_exit_code(code, now=None):
         if hmac.compare_digest(candidate, supervisor_exit_code_for_step(allowed_step)):
             return True
     return False
+
+
+def issue_supervisor_terminal_token():
+    nonce = uuid.uuid4().hex
+    body = SUPERVISOR_TERMINAL_VERSION + "." + nonce
+    digest = hmac.new(WMS_TERMINAL_SECRET, ("supervisor-terminal:" + body).encode("utf-8"), hashlib.sha256).hexdigest()
+    return "WMS-TERMINAL-" + body + "." + digest[:40]
+
+
+def valid_supervisor_terminal_token(token):
+    candidate = str(token or "").strip()
+    prefix = "WMS-TERMINAL-"
+    if not candidate.startswith(prefix):
+        return False
+    raw = candidate[len(prefix):]
+    parts = raw.split(".")
+    if len(parts) != 3:
+        return False
+    version, nonce, supplied = parts
+    if version != SUPERVISOR_TERMINAL_VERSION or not nonce:
+        return False
+    body = version + "." + nonce
+    expected = hmac.new(WMS_TERMINAL_SECRET, ("supervisor-terminal:" + body).encode("utf-8"), hashlib.sha256).hexdigest()[:40]
+    return hmac.compare_digest(supplied, expected)
 
 
 def now_iso():
@@ -688,6 +714,73 @@ refreshQr();setInterval(refreshQr,1000);
 </script></body></html>"""
 
 
+SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Терминал выхода</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+</style></head><body><div class="wrap"><div class="card">
+<h1>📟 Терминал выхода</h1>
+<div class="muted">Авторизуй это устройство один раз. После этого твоя учётка Виктора будет удалена из этой браузерной сессии, а устройство сможет показывать только динамический QR выхода.</div>
+<div class="note"><b>Важно:</b> это не завершает твою рабочую смену в WMS. Оно только убирает твою авторизацию с этого конкретного устройства.</div>
+<button class="btn" onclick="activate()">Авторизовать это устройство</button>
+<div id="result"></div>
+<a class="back" href="/stats">← Назад в статистику</a>
+</div></div>
+<script>
+async function activate(){
+ const r=await fetch('/api/supervisor-terminal/activate',{method:'POST'});
+ const d=await r.json();
+ if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Ошибка')+'</div>';return}
+ localStorage.setItem('supervisor_terminal_token',d.terminal_token);
+ localStorage.removeItem('fbs_shift_id');
+ location.href='/supervisor-terminal';
+}
+</script></body></html>"""
+
+
+SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · QR выхода</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
+</style></head><body><div class="wrap"><div class="card">
+<h1>🔐 QR старшего</h1>
+<div class="muted">Терминал авторизован отдельно от учётки руководителя. QR меняется каждые 30 секунд.</div>
+<div id="qr" class="qr"></div>
+<div class="ttl"><span id="ttl">—</span> сек.</div>
+<div class="muted">до обновления QR</div>
+<div id="result"></div>
+</div></div>
+<script>
+let lastCode='';
+async function refreshQr(){
+ const token=localStorage.getItem('supervisor_terminal_token')||'';
+ if(!token){document.getElementById('result').innerHTML='<div class="err">Это устройство не авторизовано как терминал старшего.</div>';return}
+ try{
+  const r=await fetch('/api/supervisor-terminal/qr',{cache:'no-store',headers:{'X-Supervisor-Terminal':token}});
+  const d=await r.json();
+  if(!r.ok){
+   localStorage.removeItem('supervisor_terminal_token');
+   document.getElementById('qr').innerHTML='';
+   document.getElementById('ttl').textContent='—';
+   document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Авторизация терминала недействительна')+'</div>';
+   return;
+  }
+  document.getElementById('result').innerHTML='';
+  document.getElementById('ttl').textContent=d.expires_in;
+  if(d.code!==lastCode){
+   lastCode=d.code;
+   const box=document.getElementById('qr');box.innerHTML='';
+   new QRCode(box,{text:d.code,width:280,height:280});
+  }
+ }catch(e){}
+}
+refreshQr();setInterval(refreshQr,1000);
+</script></body></html>"""
+
+
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>Mini WMS · Статистика</title>
@@ -700,7 +793,7 @@ h1{margin:0 0 6px}.big{font-size:28px;font-weight:850}.small{font-size:12px;colo
 @media(max-width:700px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
 <div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">📊 Статистика</a></div>
-<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
+<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/supervisor-terminal/setup">📟 Настроить терминал выхода</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
 <div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
 <div class="card"><b>Сейчас работают</b><div id="workers" style="margin-top:8px">Загрузка…</div></div>
 <div class="card"><b>Сотрудники</b><div id="employees" style="margin-top:8px">Загрузка…</div></div>
@@ -792,6 +885,40 @@ def exit_page():
     if not get_session_employee():
         return redirect("/login")
     return EXIT_PAGE
+
+
+@wms_bp.get("/supervisor-terminal/setup")
+def supervisor_terminal_setup_page():
+    ensure_db()
+    if not is_manager():
+        return redirect("/fbs")
+    return SUPERVISOR_TERMINAL_SETUP_PAGE
+
+
+@wms_bp.post("/api/supervisor-terminal/activate")
+def supervisor_terminal_activate():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp or emp["role"] != "manager":
+        return jsonify(error="Доступ только руководителю"), 403
+    token = issue_supervisor_terminal_token()
+    log_event(emp["id"], "supervisor_terminal", "activate", result="ok")
+    session.clear()
+    return jsonify(ok=True, terminal_token=token)
+
+
+@wms_bp.get("/supervisor-terminal")
+def supervisor_terminal_page():
+    return SUPERVISOR_TERMINAL_PAGE
+
+
+@wms_bp.get("/api/supervisor-terminal/qr")
+def supervisor_terminal_qr():
+    token = request.headers.get("X-Supervisor-Terminal", "")
+    if not valid_supervisor_terminal_token(token):
+        return jsonify(error="Терминал не авторизован"), 401
+    code, step, remaining = current_supervisor_exit_code()
+    return jsonify(code=code, expires_in=remaining, period=SUPERVISOR_QR_PERIOD, step=step)
 
 
 @wms_bp.get("/supervisor-qr")
