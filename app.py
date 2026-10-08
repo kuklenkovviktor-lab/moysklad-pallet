@@ -516,6 +516,12 @@ async function sendScan(barcode,quantity=null){
 
     successFeedback();
 
+    // После успешного сканирования камерой сразу закрываем её.
+    // Это исключает случайный повторный захват той же палеты.
+    if(scanner){
+      await stopScanner();
+    }
+
     document.getElementById('result').innerHTML=
       '<div class="ok"><b>'+escapeHtml(data.article||data.name||'')+'</b><br>'+
       'Добавлено: <b>'+data.added+' шт.</b><br>'+
