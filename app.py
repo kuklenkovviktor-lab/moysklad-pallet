@@ -190,7 +190,10 @@ let scanMode='full';
 let partialBarcode='';
 let partialStandardQty=0;
 let lastBarcode='';
-let lastScanAt=0;\nlet oszSscc='';\nlet oszProductBarcode='';\nlet oszProductMeta=null;
+let lastScanAt=0;
+let oszSscc='';
+let oszProductBarcode='';
+let oszProductMeta=null;
 
 function initAudio(){
   try{
