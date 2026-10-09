@@ -1196,7 +1196,22 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True, token_configured=bool(TOKEN))
+    db_backend = "postgres" if os.getenv("DATABASE_URL", "").strip() else "sqlite"
+    db_ok = False
+    db_error = ""
+    try:
+        row = query_one("SELECT 1")
+        db_ok = bool(row and row[0] == 1)
+    except Exception as e:
+        db_error = str(e)
+
+    return jsonify(
+        ok=bool(db_ok and TOKEN),
+        token_configured=bool(TOKEN),
+        database_backend=db_backend,
+        database_ok=db_ok,
+        database_error=db_error,
+    )
 
 @app.get("/api/bootstrap")
 def bootstrap():
@@ -1537,6 +1552,8 @@ try:
     init_wms_db()
 except Exception as e:
     print(f"WMS DB init warning: {e}")
+    if os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on"):
+        raise
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
