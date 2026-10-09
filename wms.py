@@ -492,9 +492,10 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
 <h1>Mini WMS · Вход</h1>
 <div class="muted">Вход только по личному QR-бейджу сотрудника. Выбор имени и ручной вход отключены.</div>
 <div class="scanbox">Поднеси бейдж к сканеру<br><span class="muted">или используй камеру TSD</span></div>
-<input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none"
+<input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
        placeholder="Поле внешнего сканера"
        style="width:100%;margin-top:12px;padding:13px;border:2px solid #9fb0bd;border-radius:11px;background:#fff;font-size:16px;text-align:center;color:#48647a;font-weight:700">
+<button onclick="submitHidValue()">Войти по считанному коду</button>
 <button onclick="toggleCamera()">📷 Камера TSD</button>
 <div id="reader"></div>
 <div id="result"></div>
@@ -535,23 +536,39 @@ async function login(code){
  }
 }
 
-// Основной канал для Bluetooth/HID-сканеров на iPhone/Safari.
-// Safari надёжнее отдаёт ввод внешней клавиатуры в сфокусированное поле,
-// чем в глобальный keydown документа.
-hidBadge.addEventListener('input',()=>{
- const code=normalizeHidCode(hidBadge.value);
- clearTimeout(hidTimer);
+// HID на iPhone/Safari бывает странным: некоторые сканеры печатают в input,
+// но не дают надёжный Enter/input-финиш. Поэтому отправляем код, когда значение
+// перестало меняться примерно на 220 мс. Это не зависит от суффикса сканера.
+let hidLastValue='',hidStableSince=0,hidPoll=null;
 
- // Наш бейдж имеет фиксированный формат, поэтому Enter от сканера не обязателен.
- if(/^WMS-BADGE-[0-9a-fA-F]{32}$/.test(code) || /^91\d{18}$/.test(code)){
-  submitHidValue();
+function armHidSubmit(){
+ const code=normalizeHidCode(hidBadge.value);
+ const now=Date.now();
+
+ if(!code){
+  hidLastValue='';
+  hidStableSince=now;
   return;
  }
 
- hidTimer=setTimeout(()=>{
-  if(normalizeHidCode(hidBadge.value))submitHidValue();
- },180);
-});
+ if(code!==hidLastValue){
+  hidLastValue=code;
+  hidStableSince=now;
+  document.getElementById('result').innerHTML='<div class="ok">Код получен. Жду завершения скана…</div>';
+  return;
+ }
+
+ if(!busy && now-hidStableSince>=220){
+  submitHidValue();
+  hidLastValue='';
+  hidStableSince=now;
+ }
+}
+
+hidBadge.addEventListener('input',armHidSubmit);
+hidBadge.addEventListener('change',armHidSubmit);
+hidBadge.addEventListener('keyup',armHidSubmit);
+hidBadge.addEventListener('paste',()=>setTimeout(armHidSubmit,0));
 
 hidBadge.addEventListener('keydown',e=>{
  if(e.key==='Enter'||e.key==='Tab'){
@@ -559,6 +576,10 @@ hidBadge.addEventListener('keydown',e=>{
   submitHidValue();
  }
 });
+
+// Последний резерв: просто опрашиваем поле. Если Safari показал текст,
+// система гарантированно увидит его и отправит на вход.
+hidPoll=setInterval(armHidSubmit,80);
 
 // Резерв для HID-сканеров/браузеров, которые всё же шлют события на document.
 document.addEventListener('keydown',e=>{
