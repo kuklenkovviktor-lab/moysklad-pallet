@@ -475,14 +475,35 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
 <h1>Mini WMS · Вход</h1>
 <div class="muted">Вход только по личному QR-бейджу сотрудника. Выбор имени и ручной вход отключены.</div>
 <div class="scanbox">Поднеси бейдж к сканеру<br><span class="muted">или используй камеру TSD</span></div>
+<input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none"
+       style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" aria-hidden="true">
 <button onclick="toggleCamera()">📷 Камера TSD</button>
 <div id="reader"></div>
 <div id="result"></div>
 </div></div>
 <script>
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
+const hidBadge=document.getElementById('hidBadge');
+
+function focusHid(){
+ try{hidBadge.focus({preventScroll:true})}catch(e){try{hidBadge.focus()}catch(_){}}
+}
+
+function normalizeHidCode(value){
+ return String(value||'').replace(/[\r\n\t]/g,'').trim();
+}
+
+function submitHidValue(){
+ const code=normalizeHidCode(hidBadge.value||hidBuffer);
+ hidBadge.value='';
+ hidBuffer='';
+ clearTimeout(hidTimer);
+ if(code)login(code);
+ setTimeout(focusHid,80);
+}
+
 async function login(code){
- code=(code||'').trim(); if(!code||busy)return; busy=true;
+ code=normalizeHidCode(code); if(!code||busy)return; busy=true;
  try{
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code})});
   const d=await r.json();
@@ -490,11 +511,42 @@ async function login(code){
   localStorage.setItem('fbs_shift_id',d.shift_id||'');
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
   setTimeout(()=>location.href='/fbs',250);
- }finally{busy=false}
+ }finally{
+  busy=false;
+  if(!scanner)setTimeout(focusHid,80);
+ }
 }
+
+// Основной канал для Bluetooth/HID-сканеров на iPhone/Safari.
+// Safari надёжнее отдаёт ввод внешней клавиатуры в сфокусированное поле,
+// чем в глобальный keydown документа.
+hidBadge.addEventListener('input',()=>{
+ const code=normalizeHidCode(hidBadge.value);
+ clearTimeout(hidTimer);
+
+ // Наш бейдж имеет фиксированный формат, поэтому Enter от сканера не обязателен.
+ if(/^WMS-BADGE-[0-9a-fA-F]{32}$/.test(code)){
+  submitHidValue();
+  return;
+ }
+
+ hidTimer=setTimeout(()=>{
+  if(normalizeHidCode(hidBadge.value))submitHidValue();
+ },180);
+});
+
+hidBadge.addEventListener('keydown',e=>{
+ if(e.key==='Enter'||e.key==='Tab'){
+  e.preventDefault();
+  submitHidValue();
+ }
+});
+
+// Резерв для HID-сканеров/браузеров, которые всё же шлют события на document.
 document.addEventListener('keydown',e=>{
- if(e.key==='Enter'){
-  const code=hidBuffer.trim(); hidBuffer=''; clearTimeout(hidTimer);
+ if(document.activeElement===hidBadge)return;
+ if(e.key==='Enter'||e.key==='Tab'){
+  const code=normalizeHidCode(hidBuffer); hidBuffer=''; clearTimeout(hidTimer);
   if(code)login(code); return;
  }
  if(e.key.length===1){
@@ -503,12 +555,22 @@ document.addEventListener('keydown',e=>{
   hidTimer=setTimeout(()=>{hidBuffer=''},1200);
  }
 });
+
+window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
+setTimeout(focusHid,120);
 async function toggleCamera(){
- if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').innerHTML='';return}
+ if(scanner){
+  try{await scanner.stop()}catch(e){}
+  scanner=null;
+  document.getElementById('reader').innerHTML='';
+  setTimeout(focusHid,100);
+  return
+ }
  if(typeof Html5Qrcode==='undefined')return;
  scanner=new Html5Qrcode('reader');
  try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:280,height:180}},txt=>login(txt),()=>{})}
- catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>'}
+ catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>';setTimeout(focusHid,100)}
 }
 </script></body></html>"""
 
