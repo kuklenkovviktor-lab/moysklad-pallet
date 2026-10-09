@@ -506,12 +506,44 @@ async function toggleCamera(mode='full'){
   }
 }
 
+function looksLikeSscc(code){
+  const raw=String(code||'').trim().replace(/\s+/g,'');
+  if(raw.startsWith(']C1'))return true;
+  if(/^\(00\)\d{18}$/.test(raw))return true;
+  if(/^00\d{18}$/.test(raw))return true;
+  if(/^\d{18}$/.test(raw))return true;
+  return false;
+}
+
 async function sendManualFull(){
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
-  await sendScan(code);
+
+  // Очищаем поле сразу, потому что HID-сканер уже передал весь код.
+  // Дальше результат операции показывается отдельным статусом.
   input.value='';
+
+  // Если уже считан SSCC ОСЗ, следующий HID-скан считаем ШК товара.
+  if(oszSscc && !oszProductBarcode){
+    document.getElementById('result').innerHTML='<div class="info"><b>ШК товара считан.</b> Ищу товар…</div>';
+    await prepareOszProduct(code);
+    return;
+  }
+
+  // HID-сканер может отдавать GS1 SSCC как (00)+18 цифр, 00+18 цифр
+  // или только 18 цифр. Валидность окончательно проверяет сервер.
+  if(looksLikeSscc(code)){
+    document.getElementById('oszForm').classList.remove('hidden');
+    document.getElementById('result').innerHTML='<div class="info"><b>SSCC считан.</b> Проверяю палету…</div>';
+    await handleOszSscc(code,false);
+    if(oszSscc){
+      setTimeout(()=>input.focus(),80);
+    }
+    return;
+  }
+
+  await sendScan(code);
   input.focus();
 }
 
@@ -591,7 +623,7 @@ async function startOszFlow(){
   await toggleCamera('osz_sscc');
 }
 
-async function handleOszSscc(raw){
+async function handleOszSscc(raw,autoCamera=true){
   busy=true;
   try{
     const r=await fetch('/api/osz/check',{
@@ -604,16 +636,20 @@ async function handleOszSscc(raw){
 
     await stopScanner();
     oszSscc=data.sscc;
-    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>SSCC принят. Готовлю сканирование ШК товара…';
+    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>'+
+      (autoCamera?'SSCC принят. Готовлю сканирование ШК товара…':'SSCC принят. Теперь отсканируйте ШК товара этим же сканером.');
     document.getElementById('oszProductBtn').classList.remove('hidden');
     successFeedback();
 
-    // Второй этап открываем автоматически: грузчику не нужен лишний тап.
-    setTimeout(()=>{
-      if(oszSscc && !scanner && !oszProductBarcode){
-        toggleCamera('osz_product');
-      }
-    },250);
+    // Для камеры следующий этап открываем автоматически.
+    // Для Bluetooth/HID оставляем фокус в поле ТСД: следующий пик будет ШК товара.
+    if(autoCamera){
+      setTimeout(()=>{
+        if(oszSscc && !scanner && !oszProductBarcode){
+          toggleCamera('osz_product');
+        }
+      },250);
+    }
   }catch(e){
     await stopScanner();
     showError(e.message);
@@ -695,6 +731,12 @@ async function acceptOszPallet(){
 
     resetOszForm();
     document.getElementById('oszForm').classList.add('hidden');
+
+    // При работе Bluetooth/HID сканером сразу готовы к следующей палете.
+    const manual=document.getElementById('manual');
+    if(manual && !manual.classList.contains('hidden')){
+      setTimeout(()=>document.getElementById('barcode').focus(),80);
+    }
   }catch(e){
     showError(e.message);
   }finally{
