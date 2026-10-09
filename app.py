@@ -1069,9 +1069,9 @@ def finish_receipt(receipt_id):
             """
             SELECT COUNT(*)
             FROM operation_events
-            WHERE operation_type = ? AND event_type = ? AND result = ?
+            WHERE operation_type = ? AND event_type IN (?, ?) AND result = ?
             """,
-            ("receiving", "scan", receipt_id),
+            ("receiving", "scan", "external_pallet", receipt_id),
         )
         pallets_count = int(scan_row[0]) if scan_row and scan_row[0] is not None else 0
 
@@ -1103,6 +1103,145 @@ def finish_receipt(receipt_id):
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
         return jsonify(error=str(e)), 500
+
+@app.post("/api/osz/check")
+def osz_check():
+    try:
+        data = request.get_json(force=True)
+        sscc = normalize_sscc(data.get("sscc", ""))
+        existing = query_one(
+            "SELECT receipt_id, article, quantity, accepted_at FROM external_pallets WHERE sscc = ?",
+            (sscc,),
+        )
+        if existing:
+            return jsonify(
+                error=f"Палета ОСЗ SSCC {sscc} уже была принята ранее.",
+                receipt_id=existing[0],
+                article=existing[1],
+                quantity=existing[2],
+                accepted_at=existing[3],
+            ), 409
+        return jsonify(ok=True, sscc=sscc)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+@app.post("/api/osz/product-info")
+def osz_product_info():
+    try:
+        data = request.get_json(force=True)
+        barcode = str(data.get("barcode", "")).strip()
+        if not barcode:
+            return jsonify(error="Пустой ШК товара"), 400
+
+        product, pack = find_product_by_any_barcode(barcode)
+        if not product:
+            return jsonify(error=f"Товар со штрихкодом {barcode} не найден"), 404
+
+        standard_qty = float(pack.get("quantity") or 0)
+        standard_qty_out = int(standard_qty) if standard_qty.is_integer() else standard_qty
+        return jsonify(
+            ok=True,
+            barcode=barcode,
+            name=product.get("name"),
+            article=product.get("article"),
+            pack_name=pack.get("name"),
+            standard_qty=standard_qty_out,
+        )
+    except requests.HTTPError as e:
+        body = e.response.text[:1200] if e.response is not None else ""
+        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+@app.post("/api/osz/accept")
+def osz_accept():
+    try:
+        data = request.get_json(force=True)
+        receipt_id = str(data.get("receipt_id", "")).strip()
+        sscc = normalize_sscc(data.get("sscc", ""))
+        product_barcode = str(data.get("product_barcode", "")).strip()
+        quantity = float(data.get("quantity", 0) or 0)
+
+        if not receipt_id:
+            return jsonify(error="Не выбрано Оприходование"), 400
+        if not product_barcode:
+            return jsonify(error="Не отсканирован товар"), 400
+        if quantity <= 0:
+            return jsonify(error="Количество должно быть больше нуля"), 400
+
+        existing = query_one("SELECT receipt_id FROM external_pallets WHERE sscc = ?", (sscc,))
+        if existing:
+            return jsonify(error=f"Палета ОСЗ SSCC {sscc} уже принята."), 409
+
+        product, pack = find_product_by_any_barcode(product_barcode)
+        if not product:
+            return jsonify(error=f"Товар со штрихкодом {product_barcode} не найден"), 404
+
+        result = add_or_increment_position(
+            receipt_id,
+            product,
+            pack,
+            requested_qty=quantity,
+            enforce_pack_limit=False,
+        )
+
+        employee = get_session_employee()
+        execute(
+            """
+            INSERT INTO external_pallets
+            (sscc, partner, receipt_id, employee_id, product_barcode, article, quantity, accepted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sscc,
+                "OSZ",
+                receipt_id,
+                (employee or {}).get("id"),
+                product_barcode,
+                product.get("article"),
+                result["added"],
+                now_iso(),
+            ),
+        )
+
+        if employee:
+            log_event(
+                employee["id"],
+                "receiving",
+                "external_pallet",
+                object_code=sscc,
+                quantity=result["added"],
+                result=receipt_id,
+            )
+
+        added = result["added"]
+        total = result["total"]
+        if float(added).is_integer():
+            added = int(added)
+        if float(total).is_integer():
+            total = int(total)
+
+        return jsonify(
+            ok=True,
+            sscc=sscc,
+            barcode=product_barcode,
+            name=product.get("name"),
+            article=product.get("article"),
+            added=added,
+            total=total,
+        )
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    except requests.HTTPError as e:
+        body = e.response.text[:1200] if e.response is not None else ""
+        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
 
 @app.post("/api/warmup")
 def warmup():
