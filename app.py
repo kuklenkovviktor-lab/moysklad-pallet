@@ -67,6 +67,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .stats{margin-top:14px;padding:14px;background:#f0f2f5;border-radius:12px}
 .big{font-size:28px;font-weight:800}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.qtypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.qtypad button{margin-top:0;padding:13px;font-size:20px;background:#e9ebee;color:#111}
+.qtypad button.action{font-size:16px}
 .small{font-size:12px;color:#777}
 .activeDoc{padding:13px;background:#f0f2f5;border-radius:12px;margin-top:10px}
 .nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
@@ -136,6 +139,20 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div id="oszProductInfo" class="hidden"></div>
     <label id="oszQtyLabel" class="hidden">Количество по этикетке ОСЗ, шт.</label>
     <input id="oszQty" class="hidden" inputmode="numeric" type="number" min="1" step="1" placeholder="Например 440">
+    <div id="oszQtyPad" class="qtypad hidden">
+      <button type="button" onclick="oszQtyDigit('1')">1</button>
+      <button type="button" onclick="oszQtyDigit('2')">2</button>
+      <button type="button" onclick="oszQtyDigit('3')">3</button>
+      <button type="button" onclick="oszQtyDigit('4')">4</button>
+      <button type="button" onclick="oszQtyDigit('5')">5</button>
+      <button type="button" onclick="oszQtyDigit('6')">6</button>
+      <button type="button" onclick="oszQtyDigit('7')">7</button>
+      <button type="button" onclick="oszQtyDigit('8')">8</button>
+      <button type="button" onclick="oszQtyDigit('9')">9</button>
+      <button type="button" class="action" onclick="oszQtyClear()">Очистить</button>
+      <button type="button" onclick="oszQtyDigit('0')">0</button>
+      <button type="button" class="action" onclick="oszQtyBackspace()">⌫</button>
+    </div>
     <button id="oszProductBtn" class="secondary hidden" onclick="scanOszProduct()">Сканировать ШК товара</button>
     <button id="oszAcceptBtn" class="hidden" onclick="acceptOszPallet()">Принять палету ОСЗ</button>
     <button class="secondary" onclick="cancelOszFlow()">Отмена</button>
@@ -611,6 +628,7 @@ function resetOszForm(){
   document.getElementById('oszProductInfo').innerHTML='';
   document.getElementById('oszQtyLabel').classList.add('hidden');
   document.getElementById('oszQty').classList.add('hidden');
+  document.getElementById('oszQtyPad').classList.add('hidden');
   document.getElementById('oszQty').value='';
   document.getElementById('oszProductBtn').classList.add('hidden');
   document.getElementById('oszAcceptBtn').classList.add('hidden');
@@ -685,11 +703,11 @@ async function prepareOszProduct(barcode){
     document.getElementById('oszProductInfo').classList.remove('hidden');
     document.getElementById('oszQtyLabel').classList.remove('hidden');
     document.getElementById('oszQty').classList.remove('hidden');
+    document.getElementById('oszQtyPad').classList.remove('hidden');
     document.getElementById('oszQty').value='';
     document.getElementById('oszAcceptBtn').classList.remove('hidden');
     document.getElementById('oszProductBtn').classList.add('hidden');
     document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>Проверьте количество по этикетке ОСЗ.';
-    setTimeout(()=>document.getElementById('oszQty').focus(),100);
     successFeedback();
   }catch(e){
     await stopScanner();
@@ -697,6 +715,22 @@ async function prepareOszProduct(barcode){
   }finally{
     busy=false;
   }
+}
+
+function oszQtyDigit(digit){
+  const input=document.getElementById('oszQty');
+  const current=String(input.value||'');
+  if(current.length>=7)return;
+  input.value=(current==='0'?'':current)+digit;
+}
+
+function oszQtyBackspace(){
+  const input=document.getElementById('oszQty');
+  input.value=String(input.value||'').slice(0,-1);
+}
+
+function oszQtyClear(){
+  document.getElementById('oszQty').value='';
 }
 
 async function acceptOszPallet(){
