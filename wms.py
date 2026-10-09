@@ -14,6 +14,7 @@ RATE = float(os.getenv("FBS_RATE", "2.25"))
 TARGET = int(os.getenv("FBS_TARGET", "1600"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("WMS_DB_PATH", "/tmp/wms.db")
+REQUIRE_POSTGRES = os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on")
 WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").encode("utf-8")
 SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
 WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "mini-wms-terminal-secret-v1").encode("utf-8")
@@ -93,7 +94,11 @@ def db_connect():
         url = DATABASE_URL
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://"):]
-        return psycopg.connect(url)
+        return psycopg.connect(url, connect_timeout=5)
+
+    if REQUIRE_POSTGRES:
+        raise RuntimeError("WMS_REQUIRE_POSTGRES включён, но DATABASE_URL не задан.")
+
     conn = sqlite3.connect(DB_PATH, timeout=15)
     return conn
 
