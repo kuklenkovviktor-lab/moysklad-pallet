@@ -31,6 +31,16 @@ def make_badge_code(employee_id):
     return "WMS-BADGE-" + make_token("employee:" + employee_id)
 
 
+def make_badge_scanner_code(employee_id):
+    # Только цифры: HID-сканер не зависит от RU/EN раскладки клавиатуры.
+    digest = hmac.new(
+        WMS_BADGE_SECRET,
+        ("employee-scanner:" + employee_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return "91" + f"{int(digest, 16) % (10 ** 18):018d}"
+
+
 def supervisor_exit_code_for_step(step):
     return "WMS-EXIT-" + make_token("supervisor-exit:" + str(step))
 
@@ -169,7 +179,8 @@ def init_wms_db():
             active INTEGER NOT NULL DEFAULT 1,
             role TEXT NOT NULL DEFAULT 'staff',
             badge_number INTEGER,
-            badge_code TEXT
+            badge_code TEXT,
+            scanner_code TEXT
         )
         """,
         """
@@ -250,6 +261,7 @@ def init_wms_db():
             ("role", "TEXT NOT NULL DEFAULT 'staff'"),
             ("badge_number", "INTEGER"),
             ("badge_code", "TEXT"),
+            ("scanner_code", "TEXT"),
         ]
         for name, ddl in additions:
             if name not in cols:
@@ -266,15 +278,16 @@ def init_wms_db():
     ]
     for emp_id, name, role, badge_number in seeds:
         badge_code = make_badge_code(emp_id)
+        scanner_code = make_badge_scanner_code(emp_id)
         if query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
             execute(
-                "UPDATE employees SET name = ?, role = ?, badge_number = ?, badge_code = ?, rate = ?, target = ?, active = 1 WHERE id = ?",
-                (name, role, badge_number, badge_code, RATE, TARGET, emp_id),
+                "UPDATE employees SET name = ?, role = ?, badge_number = ?, badge_code = ?, scanner_code = ?, rate = ?, target = ?, active = 1 WHERE id = ?",
+                (name, role, badge_number, badge_code, scanner_code, RATE, TARGET, emp_id),
             )
         else:
             execute(
-                "INSERT INTO employees (id, name, rate, target, active, role, badge_number, badge_code) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
-                (emp_id, name, RATE, TARGET, role, badge_number, badge_code),
+                "INSERT INTO employees (id, name, rate, target, active, role, badge_number, badge_code, scanner_code) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                (emp_id, name, RATE, TARGET, role, badge_number, badge_code, scanner_code),
             )
 
     try:
@@ -283,6 +296,10 @@ def init_wms_db():
         pass
     try:
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_barcode_unique ON scans(barcode)")
+    except Exception:
+        pass
+    try:
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_scanner_code ON employees(scanner_code)")
     except Exception:
         pass
 
@@ -476,7 +493,8 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
 <div class="muted">Вход только по личному QR-бейджу сотрудника. Выбор имени и ручной вход отключены.</div>
 <div class="scanbox">Поднеси бейдж к сканеру<br><span class="muted">или используй камеру TSD</span></div>
 <input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none"
-       style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" aria-hidden="true">
+       placeholder="Поле внешнего сканера"
+       style="width:100%;margin-top:12px;padding:13px;border:2px solid #9fb0bd;border-radius:11px;background:#fff;font-size:16px;text-align:center;color:#48647a;font-weight:700">
 <button onclick="toggleCamera()">📷 Камера TSD</button>
 <div id="reader"></div>
 <div id="result"></div>
@@ -525,7 +543,7 @@ hidBadge.addEventListener('input',()=>{
  clearTimeout(hidTimer);
 
  // Наш бейдж имеет фиксированный формат, поэтому Enter от сканера не обязателен.
- if(/^WMS-BADGE-[0-9a-fA-F]{32}$/.test(code)){
+ if(/^WMS-BADGE-[0-9a-fA-F]{32}$/.test(code) || /^91\d{18}$/.test(code)){
   submitHidValue();
   return;
  }
@@ -939,7 +957,7 @@ async function load(){
  g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">MINI WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div></div>').join('');
  d.employees.forEach(x=>{
   new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150});
-  JsBarcode('#b_'+x.id,x.badge_code,{format:'CODE128',displayValue:false,height:58,margin:2,width:1});
+  JsBarcode('#b_'+x.id,x.scanner_code,{format:'CODE128',displayValue:true,fontSize:11,height:58,margin:2,width:1});
  });
 }
 load();
@@ -980,8 +998,8 @@ def auth_login():
     if not badge_code:
         return jsonify(error="Пустой код бейджа"), 400
     row = query_one(
-        "SELECT id, name, role, badge_number FROM employees WHERE badge_code = ? AND active = 1",
-        (badge_code,),
+        "SELECT id, name, role, badge_number FROM employees WHERE (badge_code = ? OR scanner_code = ?) AND active = 1",
+        (badge_code, badge_code),
     )
     if not row:
         return jsonify(error="Бейдж не найден"), 404
@@ -1146,9 +1164,9 @@ def admin_badges():
     ensure_db()
     if not is_manager():
         return jsonify(error="Доступ только руководителю"), 403
-    rows = query_all("SELECT id, name, role, badge_number, badge_code FROM employees WHERE active = 1 ORDER BY badge_number, name")
+    rows = query_all("SELECT id, name, role, badge_number, badge_code, scanner_code FROM employees WHERE active = 1 ORDER BY badge_number, name")
     return jsonify(employees=[
-        {"id": r[0], "name": r[1], "role": r[2], "badge_number": r[3], "badge_code": r[4]}
+        {"id": r[0], "name": r[1], "role": r[2], "badge_number": r[3], "badge_code": r[4], "scanner_code": r[5]}
         for r in rows
     ])
 
