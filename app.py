@@ -2,7 +2,6 @@ import os
 import time
 import threading
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, request, jsonify, session, redirect
 from wms import wms_bp, init_wms_db, get_session_employee, log_event, query_one, execute, now_iso
 
@@ -1082,30 +1081,40 @@ def _warm_pack_cache_worker():
             WARMUP_STATE.update({"running": True, "ready": False, "error": ""})
 
         rows = _get_product_list()
-        pending = []
+
+        # Прогреваем кеш спокойно, по одному товару.
+        # Параллельный прогрев создавал всплеск запросов и мог выбить
+        # лимит МойСклад, из-за чего обычные операции получали HTTP 429.
         for product in rows:
             product_id = product.get("id")
             with CACHE_LOCK:
                 already_detailed = bool(product_id and product_id in DETAILED_PRODUCT_IDS)
-            if not already_detailed:
-                pending.append(product)
+            if already_detailed:
+                continue
 
-        # Несколько параллельных запросов заметно сокращают первый прогрев,
-        # но не создают агрессивную нагрузку на API МойСклад.
-        errors = []
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = [pool.submit(_load_full_product, product) for product in pending]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as exc:
-                    errors.append(str(exc))
+            try:
+                _load_full_product(product)
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 429:
+                    time.sleep(1.5)
+                    try:
+                        _load_full_product(product)
+                    except Exception as retry_exc:
+                        with CACHE_LOCK:
+                            WARMUP_STATE["error"] = str(retry_exc)
+                else:
+                    with CACHE_LOCK:
+                        WARMUP_STATE["error"] = str(exc)
+            except Exception as exc:
+                with CACHE_LOCK:
+                    WARMUP_STATE["error"] = str(exc)
+
+            # Не забиваем общий лимит API: приёмка важнее фонового прогрева.
+            time.sleep(0.25)
 
         with CACHE_LOCK:
             WARMUP_STATE["ready"] = True
             WARMUP_STATE["indexed"] = len(PACK_CACHE)
-            if errors:
-                WARMUP_STATE["error"] = errors[-1]
     except Exception as e:
         with CACHE_LOCK:
             WARMUP_STATE["error"] = str(e)
