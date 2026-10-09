@@ -467,11 +467,9 @@ async function toggleCamera(mode='full'){
     await scanner.start(
       {facingMode:"environment"},
       {
-        fps:25,
+        fps:20,
         qrbox:{width:scanWidth,height:110},
-        aspectRatio:1.7777778,
         disableFlip:true,
-        experimentalFeatures:{useBarCodeDetectorIfSupported:true},
         formatsToSupport:formats
       },
       async(decodedText)=>{
@@ -499,7 +497,12 @@ async function toggleCamera(mode='full'){
     else document.getElementById('cameraBtn').textContent='⏹ Остановить камеру';
   }catch(e){
     await stopScanner();
-    showError('Не удалось открыть камеру: '+e);
+    const message=String((e&&e.message)||e||'');
+    if(message.includes('expected pattern')){
+      showError('Safari не принял ускоренный режим камеры. Переключил на совместимый режим, попробуйте скан ещё раз.');
+    }else{
+      showError('Не удалось открыть камеру: '+message);
+    }
   }
 }
 
