@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import time
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 from flask import Blueprint, jsonify, request, session, redirect
 
@@ -88,19 +89,47 @@ def parse_iso(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
+_PG_POOL = None
+
+
+def _postgres_url():
+    url = DATABASE_URL
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    return url
+
+
+def _get_pg_pool():
+    global _PG_POOL
+    if _PG_POOL is None:
+        from psycopg_pool import ConnectionPool
+        _PG_POOL = ConnectionPool(
+            conninfo=_postgres_url(),
+            min_size=1,
+            max_size=5,
+            timeout=10,
+            kwargs={"connect_timeout": 5},
+            open=True,
+        )
+    return _PG_POOL
+
+
+@contextmanager
 def db_connect():
     if DATABASE_URL:
-        import psycopg
-        url = DATABASE_URL
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
-        return psycopg.connect(url, connect_timeout=5)
+        pool = _get_pg_pool()
+        with pool.connection() as conn:
+            yield conn
+        return
 
     if REQUIRE_POSTGRES:
         raise RuntimeError("WMS_REQUIRE_POSTGRES включён, но DATABASE_URL не задан.")
 
     conn = sqlite3.connect(DB_PATH, timeout=15)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def sql(query):
