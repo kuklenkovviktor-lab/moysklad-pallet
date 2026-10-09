@@ -544,6 +544,137 @@ async function confirmPartial(){
   await sendScan(barcode,qty);
 }
 
+function resetOszForm(){
+  oszSscc='';
+  oszProductBarcode='';
+  oszProductMeta=null;
+  document.getElementById('oszStatus').textContent='Сначала отсканируйте SSCC палеты.';
+  document.getElementById('oszProductInfo').classList.add('hidden');
+  document.getElementById('oszProductInfo').innerHTML='';
+  document.getElementById('oszQtyLabel').classList.add('hidden');
+  document.getElementById('oszQty').classList.add('hidden');
+  document.getElementById('oszQty').value='';
+  document.getElementById('oszProductBtn').classList.add('hidden');
+  document.getElementById('oszAcceptBtn').classList.add('hidden');
+}
+
+async function startOszFlow(){
+  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
+  resetOszForm();
+  document.getElementById('oszForm').classList.remove('hidden');
+  await toggleCamera('osz_sscc');
+}
+
+async function handleOszSscc(raw){
+  busy=true;
+  try{
+    const r=await fetch('/api/osz/check',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sscc:raw})
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'Не удалось проверить SSCC');
+
+    await stopScanner();
+    oszSscc=data.sscc;
+    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>Теперь отсканируйте ШК товара на палете.';
+    document.getElementById('oszProductBtn').classList.remove('hidden');
+    successFeedback();
+  }catch(e){
+    await stopScanner();
+    showError(e.message);
+  }finally{
+    busy=false;
+  }
+}
+
+async function scanOszProduct(){
+  if(!oszSscc){showError('Сначала отсканируйте SSCC палеты ОСЗ.');return;}
+  await toggleCamera('osz_product');
+}
+
+async function prepareOszProduct(barcode){
+  busy=true;
+  try{
+    const r=await fetch('/api/osz/product-info',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({barcode:barcode})
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'Товар не найден');
+
+    await stopScanner();
+    oszProductBarcode=barcode;
+    oszProductMeta=data;
+    document.getElementById('oszProductInfo').innerHTML=
+      '<div style="margin-top:10px"><b>'+escapeHtml(data.article||data.name||'Товар')+'</b><br>'+
+      '<span class="small">'+escapeHtml(data.name||'')+
+      (data.standard_qty?'<br>Квант МойСклад: '+data.standard_qty+' шт.':'')+
+      '</span></div>';
+    document.getElementById('oszProductInfo').classList.remove('hidden');
+    document.getElementById('oszQtyLabel').classList.remove('hidden');
+    document.getElementById('oszQty').classList.remove('hidden');
+    document.getElementById('oszQty').value='';
+    document.getElementById('oszAcceptBtn').classList.remove('hidden');
+    document.getElementById('oszProductBtn').classList.add('hidden');
+    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>Проверьте количество по этикетке ОСЗ.';
+    setTimeout(()=>document.getElementById('oszQty').focus(),100);
+    successFeedback();
+  }catch(e){
+    await stopScanner();
+    showError(e.message);
+  }finally{
+    busy=false;
+  }
+}
+
+async function acceptOszPallet(){
+  if(!oszSscc||!oszProductBarcode){showError('Сначала отсканируйте SSCC и товар.');return;}
+  const qty=Number(document.getElementById('oszQty').value);
+  if(!Number.isFinite(qty)||qty<=0){showError('Введите количество с этикетки ОСЗ.');return;}
+
+  busy=true;
+  try{
+    const r=await fetch('/api/osz/accept',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        receipt_id:activeReceiptId,
+        sscc:oszSscc,
+        product_barcode:oszProductBarcode,
+        quantity:qty
+      })
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'Не удалось принять палету ОСЗ');
+
+    pallets+=1;
+    units+=Number(data.added||0);
+    document.getElementById('pallets').textContent=pallets;
+    document.getElementById('units').textContent=units;
+    successFeedback();
+    document.getElementById('result').innerHTML=
+      '<div class="ok"><b>Палета ОСЗ принята</b><br>'+
+      escapeHtml(data.article||data.name||'')+' · <b>'+data.added+' шт.</b><br>'+
+      '<span class="small">SSCC '+escapeHtml(data.sscc)+'</span></div>';
+
+    resetOszForm();
+    document.getElementById('oszForm').classList.add('hidden');
+  }catch(e){
+    showError(e.message);
+  }finally{
+    busy=false;
+  }
+}
+
+async function cancelOszFlow(){
+  if(scanner)await stopScanner();
+  resetOszForm();
+  document.getElementById('oszForm').classList.add('hidden');
+}
+
 async function sendScan(barcode,quantity=null){
   if(busy)return;
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
