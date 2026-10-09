@@ -28,7 +28,7 @@ TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
 
 # Быстрый индекс палетных штрихкодов в памяти Render.
 # После первого прогрева скан не перебирает каталог МойСклад заново.
-PACK_CACHE = {}
+PACK_CACHE = {}\nPRODUCT_BARCODE_CACHE = {}
 PRODUCT_LIST_CACHE = {"ts": 0.0, "rows": []}
 DETAILED_PRODUCT_IDS = set()
 CACHE_LOCK = threading.RLock()
