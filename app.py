@@ -454,23 +454,39 @@ async function toggleCamera(mode='full'){
     return;
   }
 
+  const scanWidth=Math.max(240,Math.min(360,window.innerWidth-56));
+  const formats=(mode==='osz_sscc')
+    ? [Html5QrcodeSupportedFormats.CODE_128]
+    : [Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.CODE_128];
+
   document.getElementById('reader').classList.remove('hidden');
+  document.getElementById('result').innerHTML='<div class="info">Наведи камеру на ШК целиком и держи его горизонтально.</div>';
   scanner=new Html5Qrcode("reader");
 
   try{
     await scanner.start(
       {facingMode:"environment"},
-      {fps:15,qrbox:{width:320,height:160},formatsToSupport:[
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.QR_CODE
-      ]},
+      {
+        fps:25,
+        qrbox:{width:scanWidth,height:110},
+        aspectRatio:1.7777778,
+        disableFlip:true,
+        experimentalFeatures:{useBarCodeDetectorIfSupported:true},
+        formatsToSupport:formats
+      },
       async(decodedText)=>{
         if(busy)return;
         const now=Date.now();
-        if(decodedText===lastBarcode && now-lastScanAt<3000)return;
+        if(decodedText===lastBarcode && now-lastScanAt<1800)return;
         lastBarcode=decodedText;
         lastScanAt=now;
+
+        // Камеру закрываем сразу после распознавания, не ждём сеть/API.
+        // Так пользователь мгновенно понимает, что код уже считан,
+        // и камера не успевает повторно поймать тот же штрихкод.
+        await stopScanner();
+        document.getElementById('result').innerHTML='<div class="info"><b>ШК считан.</b> Обрабатываю…</div>';
+
         if(scanMode==='partial') await preparePartial(decodedText);
         else if(scanMode==='osz_sscc') await handleOszSscc(decodedText);
         else if(scanMode==='osz_product') await prepareOszProduct(decodedText);
