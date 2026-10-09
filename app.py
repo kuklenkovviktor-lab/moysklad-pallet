@@ -738,6 +738,8 @@ def _pack_barcodes(pack):
 def _index_product(product):
     added = 0
     with CACHE_LOCK:
+        for barcode in _barcode_values(product.get("barcodes")):
+            PRODUCT_BARCODE_CACHE[str(barcode).strip()] = product
         for pack in product.get("packs", []) or []:
             for barcode in _pack_barcodes(pack):
                 PACK_CACHE[barcode] = {"product": product, "pack": pack}
@@ -834,6 +836,70 @@ def find_product_pack_by_barcode(barcode):
 
     return None, None
 
+def find_product_by_any_barcode(barcode):
+    target = str(barcode).strip()
+
+    with CACHE_LOCK:
+        pack_found = PACK_CACHE.get(target)
+        product_found = PRODUCT_BARCODE_CACHE.get(target)
+    if pack_found:
+        return pack_found["product"], pack_found["pack"]
+    if product_found:
+        return product_found, {"name": "ШК товара", "quantity": 1}
+
+    rows = _get_product_list()
+
+    with CACHE_LOCK:
+        pack_found = PACK_CACHE.get(target)
+        product_found = PRODUCT_BARCODE_CACHE.get(target)
+    if pack_found:
+        return pack_found["product"], pack_found["pack"]
+    if product_found:
+        return product_found, {"name": "ШК товара", "quantity": 1}
+
+    for product in rows:
+        product_id = product.get("id")
+        with CACHE_LOCK:
+            already_detailed = bool(product_id and product_id in DETAILED_PRODUCT_IDS)
+        if already_detailed:
+            continue
+
+        _load_full_product(product)
+        with CACHE_LOCK:
+            pack_found = PACK_CACHE.get(target)
+            product_found = PRODUCT_BARCODE_CACHE.get(target)
+        if pack_found:
+            return pack_found["product"], pack_found["pack"]
+        if product_found:
+            return product_found, {"name": "ШК товара", "quantity": 1}
+
+    return None, None
+
+
+def normalize_sscc(value):
+    raw = str(value or "").strip().replace(" ", "")
+    if raw.startswith("]C1"):
+        raw = raw[3:]
+    if raw.startswith("(00)"):
+        raw = raw[4:]
+    elif raw.startswith("00") and len(raw) == 20 and raw.isdigit():
+        raw = raw[2:]
+
+    if len(raw) != 18 or not raw.isdigit():
+        raise ValueError("Это не SSCC ОСЗ: ожидается GS1 код (00) + 18 цифр.")
+
+    body = raw[:-1]
+    supplied = int(raw[-1])
+    total = 0
+    for index, digit in enumerate(reversed(body)):
+        total += int(digit) * (3 if index % 2 == 0 else 1)
+    expected = (10 - (total % 10)) % 10
+    if supplied != expected:
+        raise ValueError("SSCC считан с ошибкой: не сходится контрольная цифра.")
+
+    return raw
+
+
 def _warm_pack_cache_worker():
     try:
         with CACHE_LOCK:
@@ -876,7 +942,7 @@ def get_receipt(receipt_id):
     r.raise_for_status()
     return r.json()
 
-def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
+def add_or_increment_position(receipt_id, product, pack, requested_qty=None, enforce_pack_limit=True):
     receipt = get_receipt(receipt_id)
     if receipt.get("applicable"):
         raise ValueError("Это Оприходование уже проведено. Открой черновик или создай новое.")
@@ -888,7 +954,7 @@ def add_or_increment_position(receipt_id, product, pack, requested_qty=None):
 
     if add_qty <= 0:
         raise ValueError("Количество должно быть больше нуля.")
-    if add_qty > standard_qty:
+    if enforce_pack_limit and add_qty > standard_qty:
         raise ValueError(f"Количество {add_qty:g} больше стандартной палеты {standard_qty:g}.")
 
     for pos in positions:
