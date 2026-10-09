@@ -190,7 +190,7 @@ let scanMode='full';
 let partialBarcode='';
 let partialStandardQty=0;
 let lastBarcode='';
-let lastScanAt=0;
+let lastScanAt=0;\nlet oszSscc='';\nlet oszProductBarcode='';\nlet oszProductMeta=null;
 
 function initAudio(){
   try{
@@ -246,6 +246,7 @@ function setActiveReceipt(id,name,meta=''){
   const enabled=!!activeReceiptId;
   document.getElementById('cameraBtn').disabled=!enabled;
   document.getElementById('partialBtn').disabled=!enabled;
+  document.getElementById('oszBtn').disabled=!enabled;
   document.getElementById('manualBtn').disabled=!enabled;
   document.getElementById('completeBtn').disabled=!enabled;
 
@@ -430,6 +431,7 @@ async function stopScanner(){
   document.getElementById('reader').classList.add('hidden');
   document.getElementById('cameraBtn').textContent='📷 Сканировать полную палету';
   document.getElementById('partialBtn').textContent='📦 Неполная палета';
+  document.getElementById('oszBtn').textContent='🏭 Палета ОСЗ / SSCC';
 }
 
 async function toggleCamera(mode='full'){
@@ -473,6 +475,7 @@ async function toggleCamera(mode='full'){
       ()=>{}
     );
     if(scanMode==='partial') document.getElementById('partialBtn').textContent='⏹ Остановить камеру';
+    else if(scanMode==='osz_sscc'||scanMode==='osz_product') document.getElementById('oszBtn').textContent='⏹ Остановить камеру';
     else document.getElementById('cameraBtn').textContent='⏹ Остановить камеру';
   }catch(e){
     await stopScanner();
