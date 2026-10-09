@@ -509,7 +509,7 @@ function focusHid(){
 }
 
 function normalizeHidCode(value){
- return String(value||'').replace(/[\r\n\t]/g,'').trim();
+ return String(value||'').replace(/[\\r\\n\\t]/g,'').trim();
 }
 
 function submitHidValue(){
