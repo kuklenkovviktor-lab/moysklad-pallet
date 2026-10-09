@@ -124,9 +124,21 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
   <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Сканировать полную палету</button>
   <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>📦 Неполная палета</button>
+  <button class="secondary" id="oszBtn" onclick="startOszFlow()" disabled>🏭 Палета ОСЗ / SSCC</button>
   <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>⌨️ Ручной ввод / ТСД</button>
 
   <div id="reader" class="hidden"></div>
+
+  <div id="oszForm" class="info hidden">
+    <b>Палета ОСЗ</b>
+    <div class="small" id="oszStatus">Сначала отсканируйте SSCC палеты.</div>
+    <div id="oszProductInfo" class="hidden"></div>
+    <label id="oszQtyLabel" class="hidden">Количество по этикетке ОСЗ, шт.</label>
+    <input id="oszQty" class="hidden" inputmode="numeric" type="number" min="1" step="1" placeholder="Например 440">
+    <button id="oszProductBtn" class="secondary hidden" onclick="scanOszProduct()">Сканировать ШК товара</button>
+    <button id="oszAcceptBtn" class="hidden" onclick="acceptOszPallet()">Принять палету ОСЗ</button>
+    <button class="secondary" onclick="cancelOszFlow()">Отмена</button>
+  </div>
 
   <div id="manual" class="hidden">
     <label>Штрихкод палеты</label>
@@ -454,6 +466,8 @@ async function toggleCamera(mode='full'){
         lastBarcode=decodedText;
         lastScanAt=now;
         if(scanMode==='partial') await preparePartial(decodedText);
+        else if(scanMode==='osz_sscc') await handleOszSscc(decodedText);
+        else if(scanMode==='osz_product') await prepareOszProduct(decodedText);
         else await sendScan(decodedText);
       },
       ()=>{}
