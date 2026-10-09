@@ -186,6 +186,18 @@ def init_wms_db():
             FOREIGN KEY(employee_id) REFERENCES employees(id)
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS external_pallets (
+            sscc TEXT PRIMARY KEY,
+            partner TEXT NOT NULL,
+            receipt_id TEXT NOT NULL,
+            employee_id TEXT,
+            product_barcode TEXT,
+            article TEXT,
+            quantity REAL NOT NULL,
+            accepted_at TEXT NOT NULL
+        )
+        """,
     ]
     with db_connect() as conn:
         cur = conn.cursor()
