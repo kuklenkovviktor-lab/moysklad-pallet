@@ -3,7 +3,7 @@ import time
 import threading
 import requests
 from flask import Flask, request, jsonify, session, redirect
-from wms import wms_bp, init_wms_db, get_session_employee, log_event
+from wms import wms_bp, init_wms_db, get_session_employee, log_event, query_one
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "mini-wms-warehouse-2026")
@@ -154,6 +154,14 @@ button:disabled{opacity:.45;cursor:not-allowed}
   </div>
 
   <button id="completeBtn" class="danger" onclick="completeReceipt()" disabled>✓ Провести оприходование</button>
+</div>
+
+<div class="card hidden" id="completionCard">
+  <h1>✅ Приёмка завершена</h1>
+  <div class="muted">Документ проведён. Приёмка закрыта, товар записан в МойСклад.</div>
+  <div id="completionSummary" class="stats"></div>
+  <button onclick="startAnotherReceipt()">＋ Новая приёмка</button>
+  <button class="secondary" onclick="location.href='/'">На главный экран</button>
 </div>
 
 </div>
@@ -351,22 +359,49 @@ async function completeReceipt(){
   if(!confirm('Провести это Оприходование? После этого документ будет проведён в МойСклад.'))return;
 
   try{
-    if(scanner){
-      try{await scanner.stop();}catch(e){}
-      scanner=null;
-      document.getElementById('reader').classList.add('hidden');
-      document.getElementById('cameraBtn').textContent='📷 Сканировать камерой';
-    }
+    if(scanner)await stopScanner();
 
+    const fallbackPallets=pallets;
+    const fallbackUnits=units;
     const r=await fetch('/api/receipts/'+activeReceiptId+'/complete',{method:'POST'});
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'Не удалось провести Оприходование');
 
-    document.getElementById('result').innerHTML='<div class="ok"><b>'+escapeHtml(data.name)+'</b><br>Оприходование проведено в МойСклад.</div>';
     setActiveReceipt('','','');
+
+    document.getElementById('docCard').classList.add('hidden');
+    document.getElementById('scanCard').classList.add('hidden');
+    document.getElementById('completionCard').classList.remove('hidden');
+
+    const acceptedPallets=Number(data.pallets||fallbackPallets||0);
+    const acceptedUnits=Number(data.total_units||fallbackUnits||0);
+    const positions=Number(data.positions||0);
+    const employee=data.employee||document.getElementById('navIdentity').textContent||'';
+
+    document.getElementById('completionSummary').innerHTML=
+      '<div style="margin-bottom:10px"><b>'+escapeHtml(data.name||'Оприходование')+'</b></div>'+
+      '<div class="row">'+
+        '<div><div class="small">Палет принято</div><div class="big">'+acceptedPallets+'</div></div>'+
+        '<div><div class="small">Единиц товара</div><div class="big">'+acceptedUnits+'</div></div>'+
+      '</div>'+
+      '<div style="margin-top:12px"><b>Позиций:</b> '+positions+'</div>'+
+      (employee?'<div style="margin-top:6px"><b>Сотрудник:</b> '+escapeHtml(employee)+'</div>':'')+
+      '<div style="margin-top:6px"><b>Статус:</b> Проведено</div>';
   }catch(e){
     showError(e.message);
   }
+}
+
+function startAnotherReceipt(){
+  pallets=0;
+  units=0;
+  document.getElementById('pallets').textContent='0';
+  document.getElementById('units').textContent='0';
+  document.getElementById('result').innerHTML='';
+  document.getElementById('completionCard').classList.add('hidden');
+  document.getElementById('docCard').classList.remove('hidden');
+  document.getElementById('scanCard').classList.remove('hidden');
+  showNewDoc();
 }
 
 function toggleManual(){
@@ -957,8 +992,46 @@ def new_receipt():
 @app.post("/api/receipts/<receipt_id>/complete")
 def finish_receipt(receipt_id):
     try:
+        # Сводку считаем по самому документу МойСклад, чтобы финальный экран
+        # не зависел от локальных счётчиков телефона.
+        before = get_receipt(receipt_id)
+        positions = (before.get("positions") or {}).get("rows", []) or []
+        positions_count = len(positions)
+        total_units = sum(float(x.get("quantity", 0) or 0) for x in positions)
+
+        scan_row = query_one(
+            """
+            SELECT COUNT(*)
+            FROM operation_events
+            WHERE operation_type = ? AND event_type = ? AND result = ?
+            """,
+            ("receiving", "scan", receipt_id),
+        )
+        pallets_count = int(scan_row[0]) if scan_row and scan_row[0] is not None else 0
+
         doc = complete_receipt(receipt_id)
-        return jsonify(ok=True, id=doc.get("id"), name=doc.get("name") or "Оприходование")
+        employee = get_session_employee()
+        if employee:
+            log_event(
+                employee["id"],
+                "receiving",
+                "complete",
+                object_code=receipt_id,
+                quantity=total_units,
+                result=doc.get("name") or receipt_id,
+            )
+
+        # Целые количества показываем без .0.
+        total_units_out = int(total_units) if float(total_units).is_integer() else total_units
+        return jsonify(
+            ok=True,
+            id=doc.get("id"),
+            name=doc.get("name") or "Оприходование",
+            positions=positions_count,
+            total_units=total_units_out,
+            pallets=pallets_count,
+            employee=(employee or {}).get("name", ""),
+        )
     except requests.HTTPError as e:
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
