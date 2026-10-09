@@ -602,9 +602,16 @@ async function handleOszSscc(raw){
 
     await stopScanner();
     oszSscc=data.sscc;
-    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>Теперь отсканируйте ШК товара на палете.';
+    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>SSCC принят. Готовлю сканирование ШК товара…';
     document.getElementById('oszProductBtn').classList.remove('hidden');
     successFeedback();
+
+    // Второй этап открываем автоматически: грузчику не нужен лишний тап.
+    setTimeout(()=>{
+      if(oszSscc && !scanner && !oszProductBarcode){
+        toggleCamera('osz_product');
+      }
+    },250);
   }catch(e){
     await stopScanner();
     showError(e.message);
