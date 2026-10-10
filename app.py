@@ -13,9 +13,35 @@ app.register_blueprint(wms_bp)
 @app.before_request
 def require_employee_login():
     path = request.path
-    public_paths = {"/login", "/api/auth/login", "/api/health", "/supervisor-terminal", "/api/supervisor-terminal/qr"}
+    public_paths = {
+        "/login",
+        "/api/auth/login",
+        "/api/health",
+        "/supervisor-terminal",
+        "/api/supervisor-terminal/qr",
+        "/manager-login",
+        "/api/manager/login",
+    }
     if path in public_paths or path.startswith("/static/"):
         return None
+
+    # Отдельная браузерная сессия руководителя для ПК.
+    # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
+    manager_paths = {
+        "/manager",
+        "/stats",
+        "/fbs-journal",
+        "/badges",
+        "/api/manager/logout",
+        "/api/fbs/dashboard",
+        "/api/fbs/overview",
+        "/api/fbs/journal",
+        "/api/stats/employees",
+        "/api/admin/badges",
+    }
+    if session.get("manager_web") is True and path in manager_paths:
+        return None
+
     employee = get_session_employee()
     if employee:
         return None
