@@ -1044,19 +1044,32 @@ STATS_PAGE = """<!doctype html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
-.wrap{max-width:1500px;margin:auto;padding:16px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
-.head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.actions{display:flex;gap:7px;flex-wrap:wrap}.actions a{padding:8px 11px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:700;font-size:13px}
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}.content{min-width:0;padding:16px}.wrap{max-width:1500px;margin:auto}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+.head{margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
 .layout{display:grid;grid-template-columns:1.05fr 1.95fr;gap:12px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.section-title b{font-size:16px}
 .worker{display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.name b{font-size:14px}
 .table-wrap{overflow:auto;max-height:520px;border:1px solid #dde5eb;border-radius:11px}table{width:100%;border-collapse:collapse;min-width:880px;background:#fff}th,td{padding:9px 10px;border-bottom:1px solid #e6ebef;text-align:left;font-size:12px;white-space:nowrap}th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}
 .toplist{display:grid;gap:6px}.toprow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 10px;background:#eef3f6;border-radius:9px;font-size:13px}
 .modal{position:fixed;inset:0;background:rgba(20,30,40,.48);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.open{display:flex}.modal-card{width:min(430px,96vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.22);text-align:center}.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.modal-head h2{margin:0;font-size:21px}.close-btn{border:0;background:#eef3f6;color:#25313d;border-radius:9px;width:38px;height:38px;font-size:22px;cursor:pointer}.qrbox{display:flex;justify-content:center;align-items:center;min-height:290px;margin:14px 0}.ttl{font-size:30px;font-weight:850}.qr-note{font-size:12px;color:#6b7785;margin-top:5px}
-@media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.head{flex-direction:column}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
-</style></head><body><div class="wrap">
+@media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
+</style></head><body>
+<div class="app">
+<aside class="sidebar">
+ <div class="brand"><b>📦 Mini WMS</b><span>Панель руководителя</span></div>
+ <nav class="side-nav">
+  <a class="active" href="/manager">🖥️ Главная</a>
+  <a href="/fbs-journal">📋 Журнал FBS</a>
+  <a href="/badges">🪪 Бейджи</a>
+  <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
+  <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
+ </nav>
+</aside>
+<main class="content">
+<div class="wrap">
 <div class="card head">
- <div><h1>🖥️ Mini WMS · Руководитель</h1><div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div></div>
- <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="#" onclick="openExitQr();return false">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a></div>
+ <h1>🖥️ Mini WMS · Руководитель</h1>
+ <div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div>
 </div>
 
 <div class="kpis">
@@ -1085,6 +1098,8 @@ STATS_PAGE = """<!doctype html>
   </table></div>
  </div>
 </div>
+</div>
+</main>
 </div>
 
 <div id="exitQrModal" class="modal" onclick="if(event.target===this)closeExitQr()">
