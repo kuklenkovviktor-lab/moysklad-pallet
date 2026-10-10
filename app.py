@@ -1,9 +1,21 @@
 import os
+import json
 import time
 import threading
 import requests
 from flask import Flask, request, jsonify, session, redirect
-from wms import wms_bp, init_wms_db, get_session_employee, log_event, query_one, execute, now_iso
+from wms import (
+    wms_bp,
+    init_wms_db,
+    get_session_employee,
+    log_event,
+    query_one,
+    query_all,
+    execute,
+    now_iso,
+    manager_access,
+    WB_STRICT_MATCHING,
+)
 from storage_backup import restore_if_needed, start_worker as start_backup_worker, backup_now, status as backup_status
 
 app = Flask(__name__)
@@ -41,6 +53,8 @@ def require_employee_login():
         "/api/admin/supervisor-exit-code",
         "/receiving-monitor",
         "/api/receiving/overview",
+        "/api/wb/status",
+        "/api/wb/sync",
     }
     if session.get("manager_web") is True and path in manager_paths:
         return None
@@ -56,6 +70,19 @@ def require_employee_login():
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN = os.getenv("MOYSKLAD_TOKEN", "").strip()
 
+WB_API_BASE = "https://marketplace-api.wildberries.ru"
+WB_API_TOKEN = os.getenv("WB_API_TOKEN", "").strip()
+WB_SYNC_DAYS = max(1, min(30, int(os.getenv("WB_SYNC_DAYS", "5") or 5)))
+WB_SYNC_LOCK = threading.Lock()
+WB_SYNC_STATE = {
+    "running": False,
+    "last_error": "",
+    "last_started_at": None,
+    "last_finished_at": None,
+    "orders_seen": 0,
+    "stickers_saved": 0,
+}
+
 # Быстрый индекс палетных штрихкодов в памяти Render.
 # После первого прогрева скан не перебирает каталог МойСклад заново.
 PACK_CACHE = {}
@@ -65,6 +92,188 @@ DETAILED_PRODUCT_IDS = set()
 CACHE_LOCK = threading.RLock()
 WARMUP_STATE = {"running": False, "ready": False, "indexed": 0, "error": ""}
 PRODUCT_LIST_TTL = 3600
+
+def _wb_headers():
+    return {
+        "Authorization": "Bearer " + WB_API_TOKEN,
+        "Content-Type": "application/json",
+    }
+
+
+def _wb_order_product(order):
+    product = order.get("product") if isinstance(order.get("product"), dict) else order
+    article = str(product.get("article") or order.get("article") or "").strip()
+    raw_skus = product.get("skus") or order.get("skus") or []
+    skus = [str(x).strip() for x in raw_skus if str(x).strip()]
+    nm_id = product.get("nmId") or order.get("nmId")
+    chrt_id = product.get("chrtId") or order.get("chrtId")
+    return article, skus, nm_id, chrt_id
+
+
+def _save_wb_order(order, sticker):
+    order_id = str(sticker.get("orderId") or order.get("id") or "").strip()
+    wb_barcode = str(sticker.get("barcode") or "").strip()
+    if not order_id or not wb_barcode:
+        return False
+
+    article, skus, nm_id, chrt_id = _wb_order_product(order)
+    supply_id = str(order.get("supplyId") or "").strip()
+    synced_at = now_iso()
+    existing = query_one("SELECT order_id FROM wb_orders WHERE order_id = ?", (order_id,))
+    values = (
+        wb_barcode,
+        article or None,
+        json.dumps(skus, ensure_ascii=False),
+        str(nm_id) if nm_id is not None else None,
+        str(chrt_id) if chrt_id is not None else None,
+        supply_id or None,
+        synced_at,
+        order_id,
+    )
+    if existing:
+        execute(
+            """
+            UPDATE wb_orders
+            SET wb_barcode = ?, article = ?, skus_json = ?, nm_id = ?, chrt_id = ?,
+                supply_id = ?, synced_at = ?
+            WHERE order_id = ?
+            """,
+            values,
+        )
+    else:
+        execute(
+            """
+            INSERT INTO wb_orders
+            (wb_barcode, article, skus_json, nm_id, chrt_id, supply_id, synced_at, order_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values,
+        )
+    return True
+
+
+def sync_wb_orders():
+    if not WB_API_TOKEN:
+        raise RuntimeError("WB_API_TOKEN не настроен")
+
+    with WB_SYNC_LOCK:
+        WB_SYNC_STATE.update({
+            "running": True,
+            "last_error": "",
+            "last_started_at": now_iso(),
+            "orders_seen": 0,
+            "stickers_saved": 0,
+        })
+        try:
+            now_ts = int(time.time())
+            date_from = now_ts - WB_SYNC_DAYS * 86400
+            cursor = 0
+            orders = {}
+            seen_cursors = set()
+
+            while True:
+                r = requests.get(
+                    WB_API_BASE + "/api/v3/orders",
+                    headers=_wb_headers(),
+                    params={
+                        "limit": 1000,
+                        "next": cursor,
+                        "dateFrom": date_from,
+                        "dateTo": now_ts,
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+                payload = r.json()
+                rows = payload.get("orders", []) or []
+                for order in rows:
+                    order_id = order.get("id")
+                    if order_id is not None:
+                        orders[str(order_id)] = order
+
+                next_cursor = payload.get("next")
+                if not rows or next_cursor in (None, 0, "0") or next_cursor == cursor:
+                    break
+                if str(next_cursor) in seen_cursors:
+                    break
+                seen_cursors.add(str(next_cursor))
+                cursor = next_cursor
+                time.sleep(0.22)
+
+            existing_rows = query_all("SELECT order_id FROM wb_orders WHERE wb_barcode IS NOT NULL AND wb_barcode <> ''")
+            existing_ids = {str(x[0]) for x in existing_rows}
+
+            # Стикер доступен после привязки заказа к поставке. Повторно уже
+            # известные стикеры не скачиваем: barcode заказа WB не меняется.
+            pending_ids = [
+                int(order_id)
+                for order_id, order in orders.items()
+                if order.get("supplyId") and order_id not in existing_ids
+            ]
+
+            saved = 0
+            for i in range(0, len(pending_ids), 100):
+                chunk = pending_ids[i:i + 100]
+                r = requests.post(
+                    WB_API_BASE + "/api/v3/orders/stickers",
+                    headers=_wb_headers(),
+                    params={"type": "zplv", "width": 40, "height": 30},
+                    json={"orders": chunk},
+                    timeout=30,
+                )
+                # Отдельная пачка не должна убить уже сохранённую синхронизацию.
+                if r.status_code == 409:
+                    time.sleep(0.22)
+                    continue
+                r.raise_for_status()
+                for sticker in (r.json().get("stickers", []) or []):
+                    order_id = str(sticker.get("orderId") or "")
+                    order = orders.get(order_id)
+                    if order and _save_wb_order(order, sticker):
+                        saved += 1
+                time.sleep(0.22)
+
+            WB_SYNC_STATE.update({
+                "last_finished_at": now_iso(),
+                "orders_seen": len(orders),
+                "stickers_saved": saved,
+            })
+        except Exception as exc:
+            WB_SYNC_STATE["last_error"] = str(exc)
+            WB_SYNC_STATE["last_finished_at"] = now_iso()
+        finally:
+            WB_SYNC_STATE["running"] = False
+
+
+@app.get("/api/wb/status")
+def wb_status():
+    init_wms_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    count = query_one("SELECT COUNT(*) FROM wb_orders")
+    last_sync = query_one("SELECT MAX(synced_at) FROM wb_orders")
+    return jsonify(
+        configured=bool(WB_API_TOKEN),
+        strict=bool(WB_STRICT_MATCHING),
+        local_orders=int(count[0] if count else 0),
+        last_sync=(last_sync[0] if last_sync else None),
+        sync_days=WB_SYNC_DAYS,
+        **dict(WB_SYNC_STATE),
+    )
+
+
+@app.post("/api/wb/sync")
+def wb_sync():
+    init_wms_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if not WB_API_TOKEN:
+        return jsonify(error="Сначала добавь WB_API_TOKEN в Render"), 503
+    if WB_SYNC_STATE.get("running"):
+        return jsonify(ok=True, running=True, message="Синхронизация WB уже идёт"), 202
+    threading.Thread(target=sync_wb_orders, name="wb-fbs-sync", daemon=True).start()
+    return jsonify(ok=True, running=True), 202
+
 
 PAGE = """<!doctype html>
 <html lang="ru">
