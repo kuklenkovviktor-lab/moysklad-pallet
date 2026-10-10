@@ -198,6 +198,10 @@ def init_wms_db():
             shift_id TEXT NOT NULL,
             employee_id TEXT NOT NULL,
             barcode TEXT NOT NULL,
+            product_barcode TEXT,
+            article TEXT,
+            product_name TEXT,
+            scan_type TEXT NOT NULL DEFAULT 'normal',
             scanned_at TEXT NOT NULL,
             marketplace TEXT NOT NULL DEFAULT 'WB',
             UNIQUE(shift_id, barcode),
@@ -266,6 +270,24 @@ def init_wms_db():
         for name, ddl in additions:
             if name not in cols:
                 cur.execute(f"ALTER TABLE employees ADD COLUMN {name} {ddl}")
+
+        # Миграция FBS-журнала: связываем WB-заказ с реально отсканированным товаром.
+        if DATABASE_URL:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'scans'")
+            scan_cols = {r[0] for r in cur.fetchall()}
+        else:
+            cur.execute("PRAGMA table_info(scans)")
+            scan_cols = {r[1] for r in cur.fetchall()}
+
+        scan_additions = [
+            ("product_barcode", "TEXT"),
+            ("article", "TEXT"),
+            ("product_name", "TEXT"),
+            ("scan_type", "TEXT NOT NULL DEFAULT 'normal'"),
+        ]
+        for name, ddl in scan_additions:
+            if name not in scan_cols:
+                cur.execute(f"ALTER TABLE scans ADD COLUMN {name} {ddl}")
 
         conn.commit()
         cur.close()
@@ -942,7 +964,7 @@ h1{margin:0 0 6px}.big{font-size:28px;font-weight:850}.small{font-size:12px;colo
 @media(max-width:700px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
 <div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">📊 Статистика</a></div>
-<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/supervisor-terminal/setup">📟 Настроить терминал выхода</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
+<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/supervisor-terminal/setup">📟 Настроить терминал выхода</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
 <div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
 <div class="card"><b>Сейчас работают</b><div id="workers" style="margin-top:8px">Загрузка…</div></div>
 <div class="card"><b>Сотрудники</b><div id="employees" style="margin-top:8px">Загрузка…</div></div>
@@ -953,11 +975,60 @@ async function load(){
  const r=await fetch('/api/fbs/dashboard'); if(r.status===403){location.href='/fbs';return} const d=await r.json();
  document.getElementById('active').textContent=d.workers.length;
  const box=document.getElementById('workers');
- box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+x.earned.toLocaleString('ru-RU')+' ₽</b><div class="small">заработано</div></div><div><b>'+x.percent+'%</b><div class="small">от '+x.target+'</div></div></div>').join(''):'Нет активных смен';
+ box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div><div><b>'+x.percent+'%</b><div class="small">от '+x.target+'</div></div></div>').join(''):'Нет активных смен';
  const er=await fetch('/api/stats/employees'),ed=await er.json();
  document.getElementById('employees').innerHTML=ed.employees.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.name)+'</b><div class="small">бейдж №'+(x.badge_number||'—')+' · '+esc(x.role)+'</div></div><div><b>'+x.shifts+'</b><div class="small">смен</div></div><div><b>'+x.orders+'</b><div class="small">FBS заказов</div></div><div><b>'+x.picking_hours+'</b><div class="small">ч чистой сборки</div></div><div><b>'+x.avg_speed+'</b><div class="small">ср. заказ/ч</div></div></div>').join('');
 }
 load();setInterval(load,10000);
+</script></body></html>"""
+
+
+FBS_JOURNAL_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Журнал FBS</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
+.wrap{max-width:1500px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px}.top a{padding:9px 12px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:750}
+h1{margin:0;font-size:24px}.small{font-size:12px;color:#6b7785}.filters{display:grid;grid-template-columns:1.2fr .8fr .7fr auto;gap:8px;margin-top:12px}
+input,select,button{min-height:40px;border:1px solid #cbd9e2;border-radius:9px;background:#fff;padding:8px 10px;font-size:14px;color:#25313d}
+button{background:#48647a;color:#fff;font-weight:750;cursor:pointer}
+.table-wrap{overflow:auto;max-height:72vh;border:1px solid #dde5eb;border-radius:11px;margin-top:10px}
+table{width:100%;border-collapse:collapse;min-width:1000px;background:#fff}th,td{padding:10px 11px;border-bottom:1px solid #e4eaee;text-align:left;font-size:13px;white-space:nowrap}
+th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}
+.type-debt{color:#8a5a12;font-weight:750}.type-normal{color:#356446;font-weight:750}
+@media(max-width:800px){.filters{grid-template-columns:1fr 1fr}.top{align-items:flex-start;flex-direction:column}}
+</style></head><body><div class="wrap">
+<div class="card">
+ <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/stats">← Панель руководителя</a></div>
+ <div class="filters">
+  <input id="q" placeholder="Артикул, ШК товара или ШК WB">
+  <select id="employee"><option value="">Все сотрудники</option></select>
+  <select id="type"><option value="">Все типы</option><option value="normal">Обычная сборка</option><option value="debt">Долг WB</option></select>
+  <button onclick="load()">Найти</button>
+ </div>
+ <div class="small" id="summary" style="margin-top:9px"></div>
+ <div class="table-wrap"><table><thead><tr><th>Время</th><th>Сотрудник</th><th>Артикул</th><th>Товар</th><th>ШК товара</th><th>ШК WB</th><th>Тип</th></tr></thead><tbody id="rows"></tbody></table></div>
+</div>
+</div>
+<script>
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleString('ru-RU')}catch(e){return ts}}
+async function employees(){
+ const r=await fetch('/api/stats/employees'),d=await r.json();
+ if(!r.ok)return;
+ document.getElementById('employee').innerHTML='<option value="">Все сотрудники</option>'+d.employees.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('');
+}
+async function load(){
+ const q=document.getElementById('q').value.trim(),employee=document.getElementById('employee').value,type=document.getElementById('type').value;
+ const p=new URLSearchParams({limit:'500'});if(q)p.set('q',q);if(employee)p.set('employee',employee);if(type)p.set('type',type);
+ const r=await fetch('/api/fbs/journal?'+p.toString());if(r.status===403){location.href='/fbs';return}
+ const d=await r.json();const box=document.getElementById('rows');
+ box.innerHTML=d.rows.length?d.rows.map(x=>'<tr><td>'+esc(fmt(x.scanned_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.product_barcode||'—')+'</td><td>'+esc(x.wb_barcode)+'</td><td class="'+(x.scan_type==='debt'?'type-debt':'type-normal')+'">'+(x.scan_type==='debt'?'Долг WB':'Обычная')+'</td></tr>').join(''):'<tr><td colspan="7">Ничего не найдено</td></tr>';
+ document.getElementById('summary').textContent='Показано записей: '+d.rows.length;
+}
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')load()});
+employees().then(load);
 </script></body></html>"""
 
 
@@ -1167,6 +1238,14 @@ def stats_page():
     return STATS_PAGE
 
 
+@wms_bp.get("/fbs-journal")
+def fbs_journal_page():
+    ensure_db()
+    if not is_manager():
+        return redirect("/fbs")
+    return FBS_JOURNAL_PAGE
+
+
 @wms_bp.get("/fbs-manager")
 def old_manager_page():
     return redirect("/stats")
@@ -1221,6 +1300,60 @@ def stats_employees():
     return jsonify(employees=out)
 
 
+@wms_bp.get("/api/fbs/journal")
+def fbs_journal_api():
+    ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
+
+    q = str(request.args.get("q", "")).strip()
+    employee_id = str(request.args.get("employee", "")).strip()
+    scan_type = str(request.args.get("type", "")).strip()
+    try:
+        limit = max(1, min(int(request.args.get("limit", "500")), 1000))
+    except Exception:
+        limit = 500
+
+    where = ["1=1"]
+    params = []
+    if employee_id:
+        where.append("s.employee_id = ?")
+        params.append(employee_id)
+    if scan_type in ("normal", "debt"):
+        where.append("COALESCE(s.scan_type, 'normal') = ?")
+        params.append(scan_type)
+    if q:
+        like = "%" + q + "%"
+        where.append("(s.barcode LIKE ? OR COALESCE(s.product_barcode,'') LIKE ? OR COALESCE(s.article,'') LIKE ? OR COALESCE(s.product_name,'') LIKE ?)")
+        params.extend([like, like, like, like])
+
+    params.append(limit)
+    rows = query_all(
+        """
+        SELECT s.scanned_at, e.name, s.article, s.product_name, s.product_barcode,
+               s.barcode, COALESCE(s.scan_type, 'normal')
+        FROM scans s
+        JOIN employees e ON e.id = s.employee_id
+        WHERE """ + " AND ".join(where) + """
+        ORDER BY s.scanned_at DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    return jsonify(rows=[
+        {
+            "scanned_at": r[0],
+            "employee": r[1],
+            "article": r[2],
+            "product_name": r[3],
+            "product_barcode": r[4],
+            "wb_barcode": r[5],
+            "scan_type": r[6] or "normal",
+        }
+        for r in rows
+    ])
+
+
 @wms_bp.get("/fbs")
 def fbs_page():
     ensure_db()
@@ -1268,8 +1401,16 @@ def fbs_scan():
     data = request.get_json(force=True)
     shift_id = str(data.get("shift_id", "")).strip()
     barcode = str(data.get("barcode", "")).strip()
+    product_barcode = str(data.get("product_barcode", "")).strip()
+    article = str(data.get("article", "")).strip()
+    product_name = str(data.get("product_name", "")).strip()
+    scan_type = str(data.get("scan_type", "normal")).strip().lower()
     if not barcode:
-        return jsonify(error="Пустой штрихкод"), 400
+        return jsonify(error="Пустой ШК WB"), 400
+    if not product_barcode:
+        return jsonify(error="Сначала отсканируй товар"), 400
+    if scan_type not in ("normal", "debt"):
+        scan_type = "normal"
 
     employee = get_session_employee()
     if not employee:
@@ -1299,8 +1440,12 @@ def fbs_scan():
 
     try:
         execute(
-            "INSERT INTO scans (id, shift_id, employee_id, barcode, scanned_at, marketplace) VALUES (?, ?, ?, ?, ?, 'WB')",
-            (str(uuid.uuid4()), shift_id, shift[0], barcode, now_iso()),
+            """
+            INSERT INTO scans
+            (id, shift_id, employee_id, barcode, product_barcode, article, product_name, scan_type, scanned_at, marketplace)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'WB')
+            """,
+            (str(uuid.uuid4()), shift_id, shift[0], barcode, product_barcode, article or None, product_name or None, scan_type, now_iso()),
         )
     except Exception:
         duplicate = query_one(
@@ -1311,7 +1456,15 @@ def fbs_scan():
             return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[0])), 409
         raise
 
-    log_event(shift[0], "fbs", "scan", shift_id=shift_id, object_code=barcode, quantity=1, result="ok")
+    log_event(
+        shift[0],
+        "fbs",
+        "scan",
+        shift_id=shift_id,
+        object_code=barcode,
+        quantity=1,
+        result=(article or product_barcode) + "|" + scan_type,
+    )
     stats = shift_stats(shift_id)
     return jsonify(ok=True, **stats)
 
