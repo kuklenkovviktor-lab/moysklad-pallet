@@ -1006,30 +1006,78 @@ refreshQr();setInterval(refreshQr,1000);
 
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Статистика</title>
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель руководителя</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
-.wrap{max-width:980px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
-.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}.nav a{display:flex;align-items:center;justify-content:center;min-height:40px;border-radius:10px;text-decoration:none;font-weight:750;background:#dde8ef;color:#314657}.nav a.active{background:#48647a;color:#fff}
-h1{margin:0 0 6px}.big{font-size:28px;font-weight:850}.small{font-size:12px;color:#6b7785}.worker{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}
-.actions{display:flex;gap:8px;flex-wrap:wrap}.actions a{padding:9px 12px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:700}
-@media(max-width:700px){.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
+.wrap{max-width:1500px;margin:auto;padding:16px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
+.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.nav a{display:flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:10px;text-decoration:none;font-weight:750;background:#dde8ef;color:#314657}.nav a.active{background:#48647a;color:#fff}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.actions{display:flex;gap:7px;flex-wrap:wrap}.actions a{padding:8px 11px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:700;font-size:13px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
+.layout{display:grid;grid-template-columns:1.05fr 1.95fr;gap:12px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.section-title b{font-size:16px}
+.worker{display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.name b{font-size:14px}
+.table-wrap{overflow:auto;max-height:520px;border:1px solid #dde5eb;border-radius:11px}table{width:100%;border-collapse:collapse;min-width:880px;background:#fff}th,td{padding:9px 10px;border-bottom:1px solid #e6ebef;text-align:left;font-size:12px;white-space:nowrap}th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}
+.toplist{display:grid;gap:6px}.toprow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 10px;background:#eef3f6;border-radius:9px;font-size:13px}
+@media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.head{flex-direction:column}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
-<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">📊 Статистика</a></div>
-<div class="card"><h1>📊 Статистика</h1><div class="small">Доступ руководителя. Сотрудникам этот раздел не показывается.</div><div class="actions" style="margin-top:10px"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи сотрудников</a><a href="/supervisor-qr">🔐 QR завершения смены</a><a href="/supervisor-terminal/setup">📟 Настроить терминал выхода</a><a href="/exit">🚪 Завершить мою смену</a></div></div>
-<div class="card"><div class="small">Активные смены</div><div class="big" id="active">0</div></div>
-<div class="card"><b>Сейчас работают</b><div id="workers" style="margin-top:8px">Загрузка…</div></div>
-<div class="card"><b>Сотрудники</b><div id="employees" style="margin-top:8px">Загрузка…</div></div>
+<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">🖥️ Панель руководителя</a></div>
+<div class="card head">
+ <div><h1>🖥️ Mini WMS · Руководитель</h1><div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div></div>
+ <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="/supervisor-qr">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="/exit">🚪 Моя смена</a></div>
+</div>
+
+<div class="kpis">
+ <div class="kpi"><div class="l">FBS сегодня</div><div class="v" id="todayOrders">0</div></div>
+ <div class="kpi"><div class="l">Активные сотрудники</div><div class="v" id="active">0</div></div>
+ <div class="kpi"><div class="l">Сборщиков сегодня</div><div class="v" id="todayWorkers">0</div></div>
+ <div class="kpi"><div class="l">Артикулов собрано</div><div class="v" id="todayArticles">0</div></div>
+</div>
+
+<div class="layout">
+ <div>
+  <div class="card" style="margin-bottom:12px">
+   <div class="section-title"><b>Сейчас работают</b><span class="small">активные смены</span></div>
+   <div id="workers">Загрузка…</div>
+  </div>
+  <div class="card">
+   <div class="section-title"><b>Топ артикулов сегодня</b><span class="small">по двойным сканам</span></div>
+   <div id="topArticles" class="toplist">Загрузка…</div>
+  </div>
+ </div>
+ <div class="card">
+  <div class="section-title"><b>Последние FBS-сборки</b><a href="/fbs-journal" style="font-size:12px;color:#536f83;text-decoration:none;font-weight:700">Открыть весь журнал →</a></div>
+  <div class="table-wrap"><table>
+   <thead><tr><th>Время</th><th>Сотрудник</th><th>Артикул</th><th>Товар</th><th>ШК товара</th><th>ШК WB</th></tr></thead>
+   <tbody id="recent"></tbody>
+  </table></div>
+ </div>
+</div>
 </div>
 <script>
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
+function dayBounds(){
+ const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()),end=new Date(start);end.setDate(end.getDate()+1);
+ return {from:start.toISOString(),to:end.toISOString()};
+}
 async function load(){
- const r=await fetch('/api/fbs/dashboard'); if(r.status===403){location.href='/fbs';return} const d=await r.json();
+ const [dashR,ovR]=await Promise.all([
+  fetch('/api/fbs/dashboard'),
+  (()=>{const b=dayBounds(),p=new URLSearchParams(b);return fetch('/api/fbs/overview?'+p.toString())})()
+ ]);
+ if(dashR.status===403||ovR.status===403){location.href='/fbs';return}
+ const d=await dashR.json(),o=await ovR.json();
+
  document.getElementById('active').textContent=d.workers.length;
+ document.getElementById('todayOrders').textContent=o.orders||0;
+ document.getElementById('todayWorkers').textContent=o.workers||0;
+ document.getElementById('todayArticles').textContent=o.articles||0;
+
  const box=document.getElementById('workers');
- box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div><div><b>'+x.percent+'%</b><div class="small">от '+x.target+'</div></div></div>').join(''):'Нет активных смен';
- const er=await fetch('/api/stats/employees'),ed=await er.json();
- document.getElementById('employees').innerHTML=ed.employees.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.name)+'</b><div class="small">бейдж №'+(x.badge_number||'—')+' · '+esc(x.role)+'</div></div><div><b>'+x.shifts+'</b><div class="small">смен</div></div><div><b>'+x.orders+'</b><div class="small">FBS заказов</div></div><div><b>'+x.picking_hours+'</b><div class="small">ч чистой сборки</div></div><div><b>'+x.avg_speed+'</b><div class="small">ср. заказ/ч</div></div></div>').join('');
+ box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div class="name"><b>'+esc(x.employee)+'</b><div class="small">'+esc(x.activity||'')+'</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div></div>').join(''):'<div class="small">Нет активных смен</div>';
+
+ document.getElementById('topArticles').innerHTML=o.top_articles.length?o.top_articles.map(x=>'<div class="toprow"><div><b>'+esc(x.article||'Без артикула')+'</b><div class="small">'+esc(x.product_name||'')+'</div></div><b>'+x.count+' шт.</b></div>').join(''):'<div class="small">Сегодня двойных сканов ещё нет</div>';
+
+ document.getElementById('recent').innerHTML=o.recent.length?o.recent.map(x=>'<tr><td>'+esc(fmt(x.scanned_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.product_barcode||'—')+'</td><td>'+esc(x.wb_barcode)+'</td></tr>').join(''):'<tr><td colspan="6">Сегодня записей пока нет</td></tr>';
 }
 load();setInterval(load,10000);
 </script></body></html>"""
@@ -1582,6 +1630,76 @@ def stats():
     if result["employee_id"] != employee["id"] and not is_manager():
         return jsonify(error="Нет доступа к этой смене"), 403
     return jsonify(**result)
+
+
+@wms_bp.get("/api/fbs/overview")
+def fbs_overview():
+    ensure_db()
+    if not is_manager():
+        return jsonify(error="Доступ только руководителю"), 403
+
+    date_from = str(request.args.get("from", "")).strip()
+    date_to = str(request.args.get("to", "")).strip()
+    if not date_from or not date_to:
+        now = datetime.now(timezone.utc)
+        date_from = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        date_to = now.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+
+    totals = query_one(
+        """
+        SELECT COUNT(*), COUNT(DISTINCT employee_id),
+               COUNT(DISTINCT CASE WHEN article IS NOT NULL AND article <> '' THEN article END)
+        FROM scans
+        WHERE scanned_at >= ? AND scanned_at < ?
+        """,
+        (date_from, date_to),
+    )
+
+    recent_rows = query_all(
+        """
+        SELECT s.scanned_at, e.name, s.article, s.product_name, s.product_barcode, s.barcode
+        FROM scans s
+        JOIN employees e ON e.id = s.employee_id
+        WHERE s.scanned_at >= ? AND s.scanned_at < ?
+        ORDER BY s.scanned_at DESC
+        LIMIT 30
+        """,
+        (date_from, date_to),
+    )
+
+    top_rows = query_all(
+        """
+        SELECT article, product_name, COUNT(*)
+        FROM scans
+        WHERE scanned_at >= ? AND scanned_at < ?
+          AND article IS NOT NULL AND article <> ''
+        GROUP BY article, product_name
+        ORDER BY COUNT(*) DESC, article
+        LIMIT 8
+        """,
+        (date_from, date_to),
+    )
+
+    return jsonify(
+        orders=int(totals[0] or 0),
+        workers=int(totals[1] or 0),
+        articles=int(totals[2] or 0),
+        recent=[
+            {
+                "scanned_at": r[0],
+                "employee": r[1],
+                "article": r[2],
+                "product_name": r[3],
+                "product_barcode": r[4],
+                "wb_barcode": r[5],
+            }
+            for r in recent_rows
+        ],
+        top_articles=[
+            {"article": r[0], "product_name": r[1], "count": int(r[2] or 0)}
+            for r in top_rows
+        ],
+    )
 
 
 @wms_bp.get("/api/fbs/dashboard")
