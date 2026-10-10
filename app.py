@@ -64,8 +64,14 @@ def require_employee_login():
         "/api/manager/daily-plan",
         "/api/operations/deviations",
     }
-    if session.get("manager_web") is True and path in manager_paths:
-        return None
+    # Desktop manager routes are authenticated only by the dedicated
+    # manager password/session. Do not fall through to employee badge auth.
+    if path in manager_paths:
+        if session.get("manager_web") is True:
+            return None
+        if path.startswith("/api/"):
+            return jsonify(error="Требуется вход в ПК-панель"), 403
+        return redirect("/manager-login")
 
     employee = get_session_employee()
     if employee:
