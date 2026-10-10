@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+import threading
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
@@ -104,6 +105,8 @@ def parse_iso(value):
 
 
 _PG_POOL = None
+_DB_READY = False
+_DB_INIT_LOCK = threading.Lock()
 
 
 def _postgres_url():
@@ -173,6 +176,7 @@ def execute(query, params=()):
 
 
 def init_wms_db():
+    global _DB_READY
     statements = [
         """
         CREATE TABLE IF NOT EXISTS employees (
@@ -375,9 +379,17 @@ def init_wms_db():
     except Exception:
         pass
 
+    _DB_READY = True
+
 
 def ensure_db():
-    init_wms_db()
+    global _DB_READY
+    if _DB_READY:
+        return
+    with _DB_INIT_LOCK:
+        if _DB_READY:
+            return
+        init_wms_db()
 
 
 def get_session_employee():
