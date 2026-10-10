@@ -232,6 +232,9 @@ def init_wms_db():
             object_code TEXT,
             quantity REAL,
             result TEXT,
+            article TEXT,
+            product_name TEXT,
+            document_name TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY(employee_id) REFERENCES employees(id)
         )
@@ -289,6 +292,23 @@ def init_wms_db():
         for name, ddl in scan_additions:
             if name not in scan_cols:
                 cur.execute(f"ALTER TABLE scans ADD COLUMN {name} {ddl}")
+
+        # Метаданные операций нужны для desktop-мониторинга без повторных запросов к МойСклад.
+        if DATABASE_URL:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'operation_events'")
+            event_cols = {r[0] for r in cur.fetchall()}
+        else:
+            cur.execute("PRAGMA table_info(operation_events)")
+            event_cols = {r[1] for r in cur.fetchall()}
+
+        event_additions = [
+            ("article", "TEXT"),
+            ("product_name", "TEXT"),
+            ("document_name", "TEXT"),
+        ]
+        for name, ddl in event_additions:
+            if name not in event_cols:
+                cur.execute(f"ALTER TABLE operation_events ADD COLUMN {name} {ddl}")
 
         conn.commit()
         cur.close()
@@ -362,15 +382,27 @@ def manager_access():
     return bool(is_manager() or session.get("manager_web") is True)
 
 
-def log_event(employee_id, operation_type, event_type, shift_id=None, object_code=None, quantity=None, result=None):
+def log_event(
+    employee_id,
+    operation_type,
+    event_type,
+    shift_id=None,
+    object_code=None,
+    quantity=None,
+    result=None,
+    article=None,
+    product_name=None,
+    document_name=None,
+):
     if not employee_id:
         return
     try:
         execute(
             """
             INSERT INTO operation_events
-            (id, employee_id, shift_id, operation_type, event_type, object_code, quantity, result, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, employee_id, shift_id, operation_type, event_type, object_code, quantity, result,
+             article, product_name, document_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -381,6 +413,9 @@ def log_event(employee_id, operation_type, event_type, shift_id=None, object_cod
                 object_code,
                 quantity,
                 result,
+                article,
+                product_name,
+                document_name,
                 now_iso(),
             ),
         )
@@ -920,7 +955,7 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
 </style></head><body><div class="wrap">
-<div class="top"><a href="/manager">← Панель руководителя</a><button onclick="print()">Печать</button></div>
+<div class="top"><a href="/manager">← Панель управления</a><button onclick="print()">Печать</button></div>
 <div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
 </div><script>
 let lastCode='';
@@ -1020,7 +1055,7 @@ input{width:100%;margin-top:16px;padding:14px;border:1px solid #cbd9e2;border-ra
 button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}
 .err{margin-top:10px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
 </style></head><body><div class="wrap"><div class="card">
-<h1>🖥️ Панель руководителя</h1>
+<h1>🖥️ Панель управления</h1>
 <div class="muted">Отдельный вход с компьютера. Сканер и бейдж здесь не нужны.</div>
 <input id="password" type="password" autocomplete="current-password" placeholder="Пароль руководителя">
 <button onclick="login()">Войти</button>
@@ -1040,7 +1075,7 @@ document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='E
 
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель руководителя</title>
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель управления</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
@@ -1056,10 +1091,11 @@ STATS_PAGE = """<!doctype html>
 </style></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 Mini WMS</b><span>Панель руководителя</span></div>
+ <div class="brand"><b>📦 Mini WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
+  <a href="/receiving-monitor">📥 Приёмка</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
@@ -1068,7 +1104,7 @@ STATS_PAGE = """<!doctype html>
 <main class="content">
 <div class="wrap">
 <div class="card head">
- <h1>🖥️ Mini WMS · Руководитель</h1>
+ <h1>🖥️ Mini WMS</h1>
  <div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div>
 </div>
 
@@ -1170,6 +1206,62 @@ load();setInterval(load,10000);
 </script></body></html>"""
 
 
+RECEIVING_MONITOR_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Приёмка</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}
+.content{min-width:0;padding:16px}.wrap{max-width:1500px;margin:auto}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07);margin-bottom:12px}
+h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:30px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
+.table-wrap{overflow:auto;max-height:68vh;border:1px solid #dde5eb;border-radius:11px}table{width:100%;border-collapse:collapse;min-width:1050px;background:#fff}th,td{padding:10px 11px;border-bottom:1px solid #e4eaee;text-align:left;font-size:13px;white-space:nowrap}th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}.qty{font-weight:850}
+@media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}}
+</style></head><body>
+<div class="app">
+<aside class="sidebar">
+ <div class="brand"><b>📦 Mini WMS</b><span>Панель управления</span></div>
+ <nav class="side-nav">
+  <a href="/manager">🖥️ Главная</a>
+  <a href="/fbs-journal">📋 Журнал FBS</a>
+  <a class="active" href="/receiving-monitor">📥 Приёмка</a>
+  <a href="/badges">🪪 Бейджи</a>
+  <a href="/manager#qr" onclick="sessionStorage.setItem('openExitQr','1')">🔐 QR выхода</a>
+  <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
+ </nav>
+</aside>
+<main class="content"><div class="wrap">
+ <div class="card"><h1>📥 Приёмка</h1><div class="small">Онлайн-контроль фактически принятых палет и товара. Обновление каждые 10 секунд.</div></div>
+ <div class="kpis">
+  <div class="kpi"><div class="l">Принято единиц сегодня</div><div class="v" id="units">0</div></div>
+  <div class="kpi"><div class="l">Операций приёмки</div><div class="v" id="operations">0</div></div>
+  <div class="kpi"><div class="l">Приёмщиков сегодня</div><div class="v" id="workers">0</div></div>
+  <div class="kpi"><div class="l">Завершено документов</div><div class="v" id="completed">0</div></div>
+ </div>
+ <div class="card">
+  <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:9px"><b>Последние принятые позиции</b><span class="small">палетный ШК / ОСЗ / неполная палета</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Время</th><th>Сотрудник</th><th>Артикул</th><th>Товар</th><th>ШК / SSCC</th><th>Количество</th><th>Документ</th><th>Тип</th></tr></thead><tbody id="rows"></tbody></table></div>
+ </div>
+</div></main></div>
+<script>
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
+function bounds(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),n.getDate()),e=new Date(s);e.setDate(e.getDate()+1);return {from:s.toISOString(),to:e.toISOString()}}
+function typeLabel(t){return t==='external_pallet'?'ОСЗ / SSCC':t==='scan'?'Палета / товар':t==='complete'?'Завершение':'Операция'}
+async function load(){
+ const p=new URLSearchParams(bounds()),r=await fetch('/api/receiving/overview?'+p.toString());
+ if(r.status===403){location.href='/manager-login';return}
+ const d=await r.json();
+ document.getElementById('units').textContent=d.units||0;
+ document.getElementById('operations').textContent=d.operations||0;
+ document.getElementById('workers').textContent=d.workers||0;
+ document.getElementById('completed').textContent=d.completed||0;
+ document.getElementById('rows').innerHTML=d.recent.length?d.recent.map(x=>'<tr><td>'+esc(fmt(x.created_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.object_code||'—')+'</td><td class="qty">'+esc(x.quantity??'—')+'</td><td>'+esc(x.document_name||x.document_id||'—')+'</td><td>'+esc(typeLabel(x.event_type))+'</td></tr>').join(''):'<tr><td colspan="8">Сегодня приёмок ещё нет</td></tr>';
+}
+async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
+load();setInterval(load,10000);
+</script></body></html>"""
+
+
 FBS_JOURNAL_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>Mini WMS · Журнал FBS</title>
@@ -1187,7 +1279,7 @@ th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{fon
 @media(max-width:800px){.filters{grid-template-columns:1fr 1fr}.top{align-items:flex-start;flex-direction:column}}
 </style></head><body><div class="wrap">
 <div class="card">
- <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/manager">← Панель руководителя</a></div>
+ <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/manager">← Панель управления</a></div>
  <div class="filters">
   <input id="q" placeholder="Артикул, ШК товара или ШК WB">
   <select id="employee"><option value="">Все сотрудники</option></select>
@@ -1455,6 +1547,14 @@ def stats_page():
     return redirect("/manager")
 
 
+@wms_bp.get("/receiving-monitor")
+def receiving_monitor_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    return RECEIVING_MONITOR_PAGE
+
+
 @wms_bp.get("/fbs-journal")
 def fbs_journal_page():
     ensure_db()
@@ -1515,6 +1615,68 @@ def stats_employees():
             "avg_speed": round(orders / hours, 1) if hours > 0 else 0.0,
         })
     return jsonify(employees=out)
+
+
+@wms_bp.get("/api/receiving/overview")
+def receiving_overview_api():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+
+    date_from = str(request.args.get("from", "")).strip()
+    date_to = str(request.args.get("to", "")).strip()
+    if not date_from or not date_to:
+        now = datetime.now(timezone.utc)
+        date_from = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        date_to = now.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+
+    totals = query_one(
+        """
+        SELECT COALESCE(SUM(CASE WHEN event_type IN ('scan','external_pallet') THEN quantity ELSE 0 END),0),
+               SUM(CASE WHEN event_type IN ('scan','external_pallet') THEN 1 ELSE 0 END),
+               COUNT(DISTINCT CASE WHEN event_type IN ('scan','external_pallet') THEN employee_id END),
+               SUM(CASE WHEN event_type = 'complete' THEN 1 ELSE 0 END)
+        FROM operation_events
+        WHERE operation_type = 'receiving' AND created_at >= ? AND created_at < ?
+        """,
+        (date_from, date_to),
+    )
+
+    rows = query_all(
+        """
+        SELECT oe.created_at, e.name, oe.article, oe.product_name, oe.object_code,
+               oe.quantity, oe.result, oe.document_name, oe.event_type
+        FROM operation_events oe
+        JOIN employees e ON e.id = oe.employee_id
+        WHERE oe.operation_type = 'receiving'
+          AND oe.event_type IN ('scan','external_pallet')
+          AND oe.created_at >= ? AND oe.created_at < ?
+        ORDER BY oe.created_at DESC
+        LIMIT 200
+        """,
+        (date_from, date_to),
+    )
+
+    return jsonify(
+        units=float(totals[0] or 0),
+        operations=int(totals[1] or 0),
+        workers=int(totals[2] or 0),
+        completed=int(totals[3] or 0),
+        recent=[
+            {
+                "created_at": r[0],
+                "employee": r[1],
+                "article": r[2],
+                "product_name": r[3],
+                "object_code": r[4],
+                "quantity": r[5],
+                "document_id": r[6],
+                "document_name": r[7],
+                "event_type": r[8],
+            }
+            for r in rows
+        ],
+    )
 
 
 @wms_bp.get("/api/fbs/journal")
