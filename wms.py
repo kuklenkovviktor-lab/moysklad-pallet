@@ -1110,16 +1110,14 @@ STATS_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}
-.content{min-width:0;padding:16px}.wrap{max-width:1500px;margin:auto}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}.head{margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
-.progress-card{margin-bottom:12px}.progress-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.progress-main{display:flex;align-items:baseline;gap:8px}.progress-main .done{font-size:32px;font-weight:850}.progress-main .plan{font-size:18px;color:#6b7785;font-weight:750}.progress{height:14px;background:#dce4ea;border-radius:999px;overflow:hidden;margin:12px 0 7px}.progress>div{height:100%;background:#607f95;width:0%;transition:width .2s}.plan-edit{display:flex;align-items:center;gap:7px}.plan-edit input{width:110px;padding:8px 9px;border:1px solid #cbd9e2;border-radius:9px;font-size:14px;background:#fff}.plan-edit button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:9px 11px;font-weight:750;cursor:pointer}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.section-title b{font-size:16px}.section-link{font-size:12px;color:#536f83;text-decoration:none;font-weight:750}
-.worker{display:grid;grid-template-columns:1.35fr .8fr .8fr .9fr;gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.worker b{font-size:14px}.op{font-weight:750}
-.receiving-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mini{background:#eef3f6;border-radius:10px;padding:11px}.mini .n{font-size:24px;font-weight:850}.mini .t{font-size:11px;color:#6b7785;margin-top:2px}
+.content{min-width:0;padding:16px}.wrap{max-width:1500px;margin:auto}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}.head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.live{display:flex;align-items:center;gap:7px;font-size:12px;color:#4f6a59;font-weight:750}.pulse{width:9px;height:9px;border-radius:50%;background:#5e9a70;box-shadow:0 0 0 0 rgba(94,154,112,.35);animation:pulse 1.8s infinite}@keyframes pulse{70%{box-shadow:0 0 0 8px rgba(94,154,112,0)}100%{box-shadow:0 0 0 0 rgba(94,154,112,0)}}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}.kpi .sub{font-size:11px;color:#7a8792;margin-top:4px}
+.grid2{display:grid;grid-template-columns:1.15fr .85fr;gap:12px;margin-bottom:12px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.section-title b{font-size:16px}.section-link{font-size:12px;color:#536f83;text-decoration:none;font-weight:750}
+.worker{display:grid;grid-template-columns:1.35fr .8fr .8fr .9fr;gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.worker b{font-size:14px}.op{font-weight:750}.receiving-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mini{background:#eef3f6;border-radius:10px;padding:11px}.mini .n{font-size:24px;font-weight:850}.mini .t{font-size:11px;color:#6b7785;margin-top:2px}
 .dev{display:grid;grid-template-columns:80px 110px 140px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid #e1e7eb;align-items:center;font-size:12px}.dev:last-child{border:0}.dev .why{font-weight:750}.danger{color:#944747}.warn{color:#916d2d}.empty{padding:16px 0;color:#6b7785;font-size:13px}
 .wbbar{display:none;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 14px;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px}.wbstate{display:flex;align-items:center;gap:9px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:#a7b2bb;flex:0 0 auto}.dot.ok{background:#4f8a64}.dot.warn{background:#c08a32}.dot.err{background:#ad5757}.wbbar button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:8px 11px;font-weight:750;cursor:pointer}.wbbar button:disabled{opacity:.55;cursor:wait}
 .modal{position:fixed;inset:0;background:rgba(20,30,40,.48);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.open{display:flex}.modal-card{width:min(430px,96vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.22);text-align:center}.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.modal-head h2{margin:0;font-size:21px}.close-btn{border:0;background:#eef3f6;color:#25313d;border-radius:9px;width:38px;height:38px;font-size:22px;cursor:pointer}.qrbox{display:flex;justify-content:center;align-items:center;min-height:290px;margin:14px 0}.ttl{font-size:30px;font-weight:850}.qr-note{font-size:12px;color:#6b7785;margin-top:5px}
-@media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:1fr 1fr}.worker>div:first-child{grid-column:1/-1}.progress-head{align-items:flex-start;flex-direction:column}.dev{grid-template-columns:70px 95px 1fr}.dev .object{display:none}}
+@media(max-width:1150px){.kpis{grid-template-columns:repeat(3,1fr)}}@media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:1fr 1fr}.worker>div:first-child{grid-column:1/-1}.dev{grid-template-columns:70px 95px 1fr}.dev .object{display:none}}
 </style></head><body>
 <div class="app">
 <aside class="sidebar">
@@ -1135,7 +1133,10 @@ STATS_PAGE = """<!doctype html>
 </aside>
 
 <main class="content"><div class="wrap">
- <div class="card head"><h1>🖥️ Mini WMS</h1><div class="small">Оперативная картина склада. Обновление каждые 10 секунд.</div></div>
+ <div class="card head">
+  <div><h1>🖥️ Mini WMS</h1><div class="small">Оперативная картина склада.</div></div>
+  <div class="live"><span class="pulse"></span><span id="liveText">LIVE · обновление 2 сек.</span></div>
+ </div>
 
  <div id="wbBar" class="wbbar">
   <div class="wbstate"><span id="wbDot" class="dot"></span><div><b id="wbTitle">WB-защита</b><div class="small" id="wbText"></div></div></div>
@@ -1143,30 +1144,16 @@ STATS_PAGE = """<!doctype html>
  </div>
 
  <div class="kpis">
-  <div class="kpi"><div class="l">WB FBS собрано сегодня</div><div class="v" id="todayOrders">0</div></div>
-  <div class="kpi"><div class="l">Осталось по плану</div><div class="v" id="remaining">—</div></div>
-  <div class="kpi"><div class="l">Приёмка сегодня, шт.</div><div class="v" id="receivingUnits">0</div></div>
-  <div class="kpi"><div class="l">Отклонения сегодня</div><div class="v" id="deviationCount">0</div></div>
- </div>
-
- <div class="card progress-card">
-  <div class="progress-head">
-   <div>
-    <div class="small">Прогресс WB FBS</div>
-    <div class="progress-main"><span class="done" id="progressDone">0</span><span class="plan" id="progressPlan">/ план не задан</span></div>
-   </div>
-   <div class="plan-edit">
-    <input id="planInput" type="number" min="0" step="1" placeholder="План на день">
-    <button onclick="savePlan()">Сохранить план</button>
-   </div>
-  </div>
-  <div class="progress"><div id="progressBar"></div></div>
-  <div class="small" id="progressText">Задай план на день, чтобы видеть остаток и процент выполнения.</div>
+  <div class="kpi"><div class="l">WB FBS собрано сегодня</div><div class="v" id="todayOrders">0</div><div class="sub" id="lastScan">последний скан —</div></div>
+  <div class="kpi"><div class="l">Темп за последние 15 мин</div><div class="v" id="rate15">0</div><div class="sub">заказов/ч по текущему темпу</div></div>
+  <div class="kpi"><div class="l">Активные сотрудники</div><div class="v" id="active">0</div><div class="sub">сейчас в смене</div></div>
+  <div class="kpi"><div class="l">Приёмка сегодня</div><div class="v" id="receivingUnits">0</div><div class="sub">единиц принято</div></div>
+  <div class="kpi"><div class="l">Отклонения сегодня</div><div class="v" id="deviationCount">0</div><div class="sub">требуют внимания</div></div>
  </div>
 
  <div class="grid2">
   <div class="card">
-   <div class="section-title"><b>Сейчас работают</b><span class="small"><span id="active">0</span> активных</span></div>
+   <div class="section-title"><b>Сейчас работают</b><span class="small">операция · время · скорость</span></div>
    <div id="workers">Загрузка…</div>
   </div>
 
@@ -1199,67 +1186,42 @@ STATS_PAGE = """<!doctype html>
 </div>
 
 <script>
-let currentPlan=0,exitQrTimer=null,lastExitQrCode='';
+let exitQrTimer=null,lastExitQrCode='';
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
 function dayBounds(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),n.getDate()),e=new Date(s);e.setDate(e.getDate()+1);return {from:s.toISOString(),to:e.toISOString()}}
-function dayKey(){const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),x=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+x}
 function activityName(v){return ({picking:'Сборка',replenishment:'Пополнение',receiving:'Приёмка',shipping:'Отгрузка',pallets:'Палеты',kgt:'КГТ',downtime:'Простой',other:'Другое'})[v]||v||'—'}
 function activityMinutes(ts){if(!ts)return 0;return Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/60000))}
+function ago(ts){if(!ts)return '—';const s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000));if(s<60)return s+' сек. назад';const m=Math.floor(s/60);if(m<60)return m+' мин. назад';return Math.floor(m/60)+' ч. назад'}
 function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
 function deviationClass(v){return ['product_mismatch','duplicate_wb','product_not_found'].includes(v)?'danger':'warn'}
 
-function renderProgress(done){
- document.getElementById('progressDone').textContent=done;
- if(currentPlan>0){
-  const rem=Math.max(currentPlan-done,0),pct=Math.min(done/currentPlan*100,100);
-  document.getElementById('remaining').textContent=rem;
-  document.getElementById('progressPlan').textContent='/ '+currentPlan;
-  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
-  document.getElementById('progressText').textContent='Выполнено '+pct.toFixed(1)+'% · осталось '+rem+' заказов';
- }else{
-  document.getElementById('remaining').textContent='—';
-  document.getElementById('progressPlan').textContent='/ план не задан';
-  document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='Задай план на день, чтобы видеть остаток и процент выполнения.';
- }
-}
-
 async function load(){
- const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
- const [dashR,fbsR,recR,planR,devR]=await Promise.all([
+ const b=dayBounds(),p=new URLSearchParams(b);
+ const [dashR,fbsR,recR,devR]=await Promise.all([
   fetch('/api/fbs/dashboard'),
   fetch('/api/fbs/overview?'+p.toString()),
   fetch('/api/receiving/overview?'+p.toString()),
-  fetch('/api/manager/daily-plan?date='+encodeURIComponent(date)),
   fetch('/api/operations/deviations?'+p.toString())
  ]);
- if([dashR,fbsR,recR,planR,devR].some(r=>r.status===403)){location.href='/manager-login';return}
- const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json();
+ if([dashR,fbsR,recR,devR].some(r=>r.status===403)){location.href='/manager-login';return}
+ const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),dev=await devR.json();
 
- currentPlan=Number(plan.wb_fbs_plan||0);
- document.getElementById('planInput').value=currentPlan||'';
  document.getElementById('todayOrders').textContent=f.orders||0;
+ document.getElementById('rate15').textContent=f.rolling_hour_rate||0;
+ document.getElementById('active').textContent=d.workers.length;
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
- document.getElementById('active').textContent=d.workers.length;
- renderProgress(Number(f.orders||0));
+ document.getElementById('lastScan').textContent='последний скан '+ago(f.last_scan_at);
 
  const box=document.getElementById('workers');
- box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(activityName(x.activity))+' · '+activityMinutes(x.activity_started_at)+' мин</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div></div>').join(''):'<div class="empty">Нет активных смен</div>';
+ box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(activityName(x.activity))+' · '+activityMinutes(x.activity_started_at)+' мин</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">ср. заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div></div>').join(''):'<div class="empty">Нет активных смен</div>';
 
  document.getElementById('receivingOps').textContent=r.operations||0;
  document.getElementById('receivingWorkers').textContent=r.workers||0;
  document.getElementById('receivingCompleted').textContent=r.completed||0;
-
  document.getElementById('deviations').innerHTML=dev.rows.length?dev.rows.slice(0,8).map(x=>'<div class="dev"><div>'+esc(fmt(x.created_at))+'</div><div><b>'+esc(x.employee)+'</b></div><div class="why '+deviationClass(x.event_type)+'">'+esc(deviationLabel(x.event_type))+'</div><div class="object">'+esc(x.article||x.object_code||x.result||'—')+'</div></div>').join(''):'<div class="empty">Отклонений сегодня нет ✅</div>';
-}
-
-async function savePlan(){
- const input=document.getElementById('planInput'),v=Math.max(0,parseInt(input.value||'0',10)||0);
- const r=await fetch('/api/manager/daily-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:dayKey(),wb_fbs_plan:v})});
- const d=await r.json();if(!r.ok){alert(d.error||'Не удалось сохранить план');return}
- currentPlan=v;load();
+ document.getElementById('liveText').textContent='LIVE · '+new Date().toLocaleTimeString('ru-RU')+' · каждые 2 сек.';
 }
 
 async function refreshExitQr(){
@@ -1289,7 +1251,7 @@ async function loadWbStatus(){
 async function syncWb(){const btn=document.getElementById('wbSyncBtn');btn.disabled=true;btn.textContent='Запускаю…';const r=await fetch('/api/wb/sync',{method:'POST'}),d=await r.json();if(!r.ok){btn.disabled=false;btn.textContent='Обновить WB';document.getElementById('wbText').textContent=d.error||'Ошибка запуска WB';return}loadWbStatus()}
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
 
-load();loadWbStatus();setInterval(load,10000);setInterval(loadWbStatus,10000);
+load();loadWbStatus();setInterval(load,2000);setInterval(loadWbStatus,10000);
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
 </script></body></html>"""
 
@@ -2200,12 +2162,23 @@ def fbs_overview():
     totals = query_one(
         """
         SELECT COUNT(*), COUNT(DISTINCT employee_id),
-               COUNT(DISTINCT CASE WHEN article IS NOT NULL AND article <> '' THEN article END)
+               COUNT(DISTINCT CASE WHEN article IS NOT NULL AND article <> '' THEN article END),
+               MAX(scanned_at)
         FROM scans
         WHERE scanned_at >= ? AND scanned_at < ?
         """,
         (date_from, date_to),
     )
+
+    now = datetime.now(timezone.utc)
+    rolling_from = (now.timestamp() - 15 * 60)
+    rolling_from_iso = datetime.fromtimestamp(rolling_from, tz=timezone.utc).isoformat()
+    rolling_row = query_one(
+        "SELECT COUNT(*) FROM scans WHERE scanned_at >= ? AND scanned_at <= ?",
+        (rolling_from_iso, now.isoformat()),
+    )
+    rolling_15m = int(rolling_row[0] if rolling_row else 0)
+    rolling_hour_rate = rolling_15m * 4
 
     recent_rows = query_all(
         """
@@ -2236,6 +2209,9 @@ def fbs_overview():
         orders=int(totals[0] or 0),
         workers=int(totals[1] or 0),
         articles=int(totals[2] or 0),
+        last_scan_at=totals[3] if totals else None,
+        rolling_15m=rolling_15m,
+        rolling_hour_rate=rolling_hour_rate,
         recent=[
             {
                 "scanned_at": r[0],
