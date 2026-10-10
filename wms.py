@@ -1482,15 +1482,15 @@ BADGES_PAGE = """<!doctype html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:900px;margin:auto;padding:16px}
-.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.top a,.top button{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750}
+.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.top a,.top button,.print-one{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750}.print-one{margin-top:12px;cursor:pointer;width:100%}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.badge{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:16px;text-align:center}.qr{display:flex;justify-content:center;margin:12px 0}.code128{margin:10px auto 4px;max-width:100%;overflow:hidden}.code128 svg{width:100%;height:auto;max-height:90px}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}
-@media print{body{background:#fff}.top{display:none}.badge{break-inside:avoid;box-shadow:none}}
-</style></head><body><div class="wrap"><div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="window.print()">Печать бейджей</button></div><div id="grid" class="grid"></div></div>
+@media print{body{background:#fff}.top,.print-one{display:none!important}.badge{break-inside:avoid;box-shadow:none}body.print-single .badge{display:none!important}body.print-single .badge.print-target{display:block!important;margin:0 auto;max-width:420px;border:0}}
+</style></head><body><div class="wrap"><div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div><div id="grid" class="grid"></div></div>
 <script>
 async function load(){
  const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
  const g=document.getElementById('grid');
- g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div></div>').join('');
+ g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" onclick="printBadge(\''+x.id+'\')">Печать этого бейджа</button></div>').join('');
  d.employees.forEach(x=>{
   try{
    new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150});
@@ -1508,6 +1508,23 @@ async function load(){
   }
  });
 }
+function clearPrintSelection(){
+ document.body.classList.remove('print-single');
+ document.querySelectorAll('.badge.print-target').forEach(el=>el.classList.remove('print-target'));
+}
+function printAllBadges(){
+ clearPrintSelection();
+ window.print();
+}
+function printBadge(id){
+ clearPrintSelection();
+ const badge=document.getElementById('badge_'+id);
+ if(!badge)return;
+ badge.classList.add('print-target');
+ document.body.classList.add('print-single');
+ window.print();
+}
+window.addEventListener('afterprint',clearPrintSelection);
 load();
 </script></body></html>"""
 
