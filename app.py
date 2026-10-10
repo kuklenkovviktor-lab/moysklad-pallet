@@ -4,6 +4,7 @@ import threading
 import requests
 from flask import Flask, request, jsonify, session, redirect
 from wms import wms_bp, init_wms_db, get_session_employee, log_event, query_one, execute, now_iso
+from storage_backup import restore_if_needed, start_worker as start_backup_worker, backup_now, status as backup_status
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "mini-wms-warehouse-2026")
@@ -1284,12 +1285,14 @@ def health():
     except Exception as e:
         db_error = str(e)
 
+    backup = backup_status()
     return jsonify(
         ok=bool(db_ok and TOKEN),
         token_configured=bool(TOKEN),
         database_backend=db_backend,
         database_ok=db_ok,
         database_error=db_error,
+        backup=backup,
     )
 
 @app.get("/api/bootstrap")
@@ -1377,6 +1380,11 @@ def finish_receipt(receipt_id):
                 quantity=total_units,
                 result=doc.get("name") or receipt_id,
             )
+
+        # После завершения приёмки сразу делаем аварийную копию WMS,
+        # но не задерживаем ответ сотруднику ожиданием Object Storage.
+        if not os.getenv("DATABASE_URL", "").strip():
+            threading.Thread(target=backup_now, kwargs={"force": True}, daemon=True).start()
 
         # Целые количества показываем без .0.
         total_units_out = int(total_units) if float(total_units).is_integer() else total_units
@@ -1628,7 +1636,11 @@ def scan():
         return jsonify(error=str(e)), 500
 
 try:
+    # На бесплатном Render локальный диск временный.
+    # Если контейнер новый, сначала возвращаем последнюю SQLite-копию из Yandex Object Storage.
+    restore_if_needed()
     init_wms_db()
+    start_backup_worker()
 except Exception as e:
     print(f"WMS DB init warning: {e}")
     if os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on"):
