@@ -267,6 +267,14 @@ def init_wms_db():
             synced_at TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS daily_targets (
+            date_key TEXT PRIMARY KEY,
+            wb_fbs_plan INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT
+        )
+        """,
     ]
     with db_connect() as conn:
         cur = conn.cursor()
@@ -554,6 +562,7 @@ def shift_stats(shift_id):
         "orders_per_hour": speed,
         "picking_seconds": int(pick_sec),
         "activity": active["type"] if active else None,
+        "activity_started_at": active["started_at"] if active else None,
         "target_done": orders >= target,
     }
 
@@ -1668,6 +1677,114 @@ def stats_employees():
     return jsonify(employees=out)
 
 
+@wms_bp.get("/api/manager/daily-plan")
+def manager_daily_plan_get():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    date_key = str(request.args.get("date", "")).strip()
+    if not date_key:
+        return jsonify(error="Не указана дата"), 400
+    row = query_one(
+        "SELECT wb_fbs_plan, updated_at, updated_by FROM daily_targets WHERE date_key = ?",
+        (date_key,),
+    )
+    return jsonify(
+        date=date_key,
+        wb_fbs_plan=int(row[0] or 0) if row else 0,
+        updated_at=row[1] if row else None,
+        updated_by=row[2] if row else None,
+    )
+
+
+@wms_bp.post("/api/manager/daily-plan")
+def manager_daily_plan_set():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    data = request.get_json(silent=True) or {}
+    date_key = str(data.get("date", "")).strip()
+    try:
+        plan = int(data.get("wb_fbs_plan", 0) or 0)
+    except Exception:
+        return jsonify(error="План должен быть целым числом"), 400
+    if not date_key:
+        return jsonify(error="Не указана дата"), 400
+    if plan < 0:
+        return jsonify(error="План не может быть отрицательным"), 400
+
+    updated_by = "ПК"
+    emp = get_session_employee()
+    if emp:
+        updated_by = emp["name"]
+
+    if query_one("SELECT date_key FROM daily_targets WHERE date_key = ?", (date_key,)):
+        execute(
+            "UPDATE daily_targets SET wb_fbs_plan = ?, updated_at = ?, updated_by = ? WHERE date_key = ?",
+            (plan, now_iso(), updated_by, date_key),
+        )
+    else:
+        execute(
+            "INSERT INTO daily_targets (date_key, wb_fbs_plan, updated_at, updated_by) VALUES (?, ?, ?, ?)",
+            (date_key, plan, now_iso(), updated_by),
+        )
+    return jsonify(ok=True, date=date_key, wb_fbs_plan=plan)
+
+
+@wms_bp.get("/api/operations/deviations")
+def operations_deviations():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+
+    date_from = str(request.args.get("from", "")).strip()
+    date_to = str(request.args.get("to", "")).strip()
+    if not date_from or not date_to:
+        now = datetime.now(timezone.utc)
+        date_from = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        date_to = now.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+
+    event_types = (
+        "product_mismatch",
+        "wb_order_missing",
+        "duplicate_wb",
+        "product_not_found",
+        "logout_denied",
+        "scan_rejected",
+    )
+    placeholders = ",".join(["?"] * len(event_types))
+    params = tuple(event_types) + (date_from, date_to)
+    rows = query_all(
+        """
+        SELECT oe.created_at, e.name, oe.operation_type, oe.event_type,
+               oe.object_code, oe.article, oe.product_name, oe.result
+        FROM operation_events oe
+        JOIN employees e ON e.id = oe.employee_id
+        WHERE oe.event_type IN (""" + placeholders + """)
+          AND oe.created_at >= ? AND oe.created_at < ?
+        ORDER BY oe.created_at DESC
+        LIMIT 50
+        """,
+        params,
+    )
+    return jsonify(
+        count=len(rows),
+        rows=[
+            {
+                "created_at": r[0],
+                "employee": r[1],
+                "operation_type": r[2],
+                "event_type": r[3],
+                "object_code": r[4],
+                "article": r[5],
+                "product_name": r[6],
+                "result": r[7],
+            }
+            for r in rows
+        ],
+    )
+
+
 @wms_bp.get("/api/receiving/overview")
 def receiving_overview_api():
     ensure_db()
@@ -1859,6 +1976,16 @@ def fbs_scan():
 
     active = current_activity(shift_id)
     if not active or active["type"] != "picking":
+        log_event(
+            shift[0],
+            "fbs",
+            "scan_rejected",
+            shift_id=shift_id,
+            object_code=barcode,
+            result="activity=" + str((active or {}).get("type") or "none"),
+            article=article or None,
+            product_name=product_name or None,
+        )
         return jsonify(error="Сейчас включена не сборка. Переключи операцию на «Сборка»."), 409
 
     wb_order_id = None
@@ -1914,6 +2041,16 @@ def fbs_scan():
         (barcode,),
     )
     if duplicate:
+        log_event(
+            shift[0],
+            "fbs",
+            "duplicate_wb",
+            shift_id=shift_id,
+            object_code=barcode,
+            result="already=" + str(duplicate[1]),
+            article=article or None,
+            product_name=product_name or None,
+        )
         return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[1])), 409
 
     try:
