@@ -570,7 +570,7 @@ def shift_stats(shift_id):
 LOGIN_PAGE = """<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Вход</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Вход</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
@@ -581,7 +581,7 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
 #reader{margin-top:12px;overflow:hidden;border-radius:12px}.scanbox{margin-top:14px;padding:14px;border:1px dashed #9fb0bd;border-radius:12px;background:#eef3f6;text-align:center;font-weight:700}
 </style></head>
 <body><div class="wrap"><div class="card">
-<h1>Mini WMS · Вход</h1>
+<h1>ONIX WMS · Вход</h1>
 <div class="muted">Вход только по личному QR-бейджу сотрудника. Выбор имени и ручной вход отключены.</div>
 <div class="scanbox">Поднеси бейдж к сканеру<br><span class="muted">или используй камеру TSD</span></div>
 <input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
@@ -931,7 +931,7 @@ updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentit
 EXIT_PAGE = """<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Завершение смены</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Завершение смены</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
@@ -978,7 +978,7 @@ async function toggleCamera(){
 
 SUPERVISOR_QR_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · QR старшего</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · QR старшего</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
@@ -1009,7 +1009,7 @@ refreshQr();setInterval(refreshQr,1000);
 
 SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Терминал выхода</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Терминал выхода</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
 </style></head><body><div class="wrap"><div class="card">
@@ -1034,7 +1034,7 @@ async function activate(){
 
 SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · QR выхода</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · QR выхода</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
@@ -1076,7 +1076,7 @@ refreshQr();setInterval(refreshQr,1000);
 
 MANAGER_LOGIN_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Вход руководителя</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Вход руководителя</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}
 .wrap{width:100%;max-width:460px;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:22px;box-shadow:0 3px 14px rgba(52,72,91,.08)}
@@ -1105,7 +1105,7 @@ document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='E
 
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель управления</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Панель управления</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
@@ -1121,7 +1121,7 @@ STATS_PAGE = """<!doctype html>
 </style></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 Mini WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b>📦 ONIX WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
@@ -1134,7 +1134,7 @@ STATS_PAGE = """<!doctype html>
 
 <main class="content"><div class="wrap">
  <div class="card head">
-  <div><h1>🖥️ Mini WMS</h1><div class="small">Оперативная картина склада.</div></div>
+  <div><h1>🖥️ ONIX WMS</h1><div class="small">Оперативная картина склада.</div></div>
   <div class="live"><span class="pulse"></span><span id="liveText">LIVE · обновление 2 сек.</span></div>
  </div>
 
@@ -1258,7 +1258,7 @@ if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openEx
 
 RECEIVING_MONITOR_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Приёмка</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Приёмка</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}
@@ -1269,7 +1269,7 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
 </style></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 Mini WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b>📦 ONIX WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
@@ -1314,7 +1314,7 @@ load();setInterval(load,10000);
 
 FBS_JOURNAL_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Журнал FBS</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Журнал FBS</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .wrap{max-width:1500px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
@@ -1363,7 +1363,7 @@ employees().then(load);
 
 BADGES_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Бейджи</title>
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Бейджи</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:900px;margin:auto;padding:16px}
@@ -1391,14 +1391,14 @@ def bootstrap_viktor_badge():
     code = make_badge_code("viktor")
     page = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Mini WMS · Бейдж Виктора</title>
+<title>ONIX WMS · Бейдж Виктора</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:22px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}.btn{display:block;margin-top:14px;padding:12px;border-radius:11px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}@media print{body{background:#fff}.wrap{padding:0}.btn,.hint{display:none}.card{border:0}}
 </style></head><body><div class="wrap"><div class="card">
 <div class="small">MINI WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
-<a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в Mini WMS.</div>
+<a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в ONIX WMS.</div>
 </div></div><script>new QRCode(document.getElementById('qr'),{text:"__VIKTOR_BADGE_CODE__",width:260,height:260});</script></body></html>"""
     return page
 
