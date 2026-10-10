@@ -1413,7 +1413,7 @@ BADGES_PAGE = """<!doctype html>
 async function load(){
  const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
  const g=document.getElementById('grid');
- g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">MINI WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div></div>').join('');
+ g.innerHTML=d.employees.map(x=>'<div class="badge"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div></div>').join('');
  d.employees.forEach(x=>{
   new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150});
   JsBarcode('#b_'+x.id,x.scanner_code,{format:'CODE128',displayValue:true,fontSize:11,height:58,margin:2,width:1});
@@ -1434,7 +1434,7 @@ def bootstrap_viktor_badge():
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:22px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}.btn{display:block;margin-top:14px;padding:12px;border-radius:11px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}@media print{body{background:#fff}.wrap{padding:0}.btn,.hint{display:none}.card{border:0}}
 </style></head><body><div class="wrap"><div class="card">
-<div class="small">MINI WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
+<div class="small">ONIX WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
 <a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в ONIX WMS.</div>
 </div></div><script>new QRCode(document.getElementById('qr'),{text:"__VIKTOR_BADGE_CODE__",width:260,height:260});</script></body></html>"""
