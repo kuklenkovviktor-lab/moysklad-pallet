@@ -1041,6 +1041,7 @@ document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='E
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель руководителя</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .wrap{max-width:1500px;margin:auto;padding:16px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
@@ -1050,11 +1051,12 @@ STATS_PAGE = """<!doctype html>
 .worker{display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.name b{font-size:14px}
 .table-wrap{overflow:auto;max-height:520px;border:1px solid #dde5eb;border-radius:11px}table{width:100%;border-collapse:collapse;min-width:880px;background:#fff}th,td{padding:9px 10px;border-bottom:1px solid #e6ebef;text-align:left;font-size:12px;white-space:nowrap}th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}
 .toplist{display:grid;gap:6px}.toprow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 10px;background:#eef3f6;border-radius:9px;font-size:13px}
+.modal{position:fixed;inset:0;background:rgba(20,30,40,.48);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.open{display:flex}.modal-card{width:min(430px,96vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.22);text-align:center}.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.modal-head h2{margin:0;font-size:21px}.close-btn{border:0;background:#eef3f6;color:#25313d;border-radius:9px;width:38px;height:38px;font-size:22px;cursor:pointer}.qrbox{display:flex;justify-content:center;align-items:center;min-height:290px;margin:14px 0}.ttl{font-size:30px;font-weight:850}.qr-note{font-size:12px;color:#6b7785;margin-top:5px}
 @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.head{flex-direction:column}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
 <div class="card head">
  <div><h1>🖥️ Mini WMS · Руководитель</h1><div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div></div>
- <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="/supervisor-qr">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a></div>
+ <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="#" onclick="openExitQr();return false">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a></div>
 </div>
 
 <div class="kpis">
@@ -1084,6 +1086,18 @@ STATS_PAGE = """<!doctype html>
  </div>
 </div>
 </div>
+
+<div id="exitQrModal" class="modal" onclick="if(event.target===this)closeExitQr()">
+ <div class="modal-card">
+  <div class="modal-head"><h2>🔐 QR завершения смены</h2><button class="close-btn" onclick="closeExitQr()" aria-label="Закрыть">×</button></div>
+  <div class="small" style="margin-top:6px">Код меняется каждые 30 секунд и остаётся актуальным независимо от того, открыт этот экран или нет.</div>
+  <div id="managerExitQr" class="qrbox"></div>
+  <div class="ttl"><span id="managerExitTtl">—</span> сек.</div>
+  <div class="qr-note">до следующего QR</div>
+  <div id="managerExitError" class="small" style="margin-top:8px"></div>
+ </div>
+</div>
+
 <script>
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
@@ -1111,6 +1125,31 @@ async function load(){
 
  document.getElementById('recent').innerHTML=o.recent.length?o.recent.map(x=>'<tr><td>'+esc(fmt(x.scanned_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.product_barcode||'—')+'</td><td>'+esc(x.wb_barcode)+'</td></tr>').join(''):'<tr><td colspan="6">Сегодня записей пока нет</td></tr>';
 }
+let exitQrTimer=null,lastExitQrCode='';
+async function refreshExitQr(){
+ try{
+  const r=await fetch('/api/admin/supervisor-exit-code',{cache:'no-store'});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('managerExitError').textContent=d.error||'Не удалось получить QR';return}
+  document.getElementById('managerExitError').textContent='';
+  document.getElementById('managerExitTtl').textContent=d.expires_in;
+  if(d.code!==lastExitQrCode){
+   lastExitQrCode=d.code;
+   const box=document.getElementById('managerExitQr');box.innerHTML='';
+   new QRCode(box,{text:d.code,width:280,height:280});
+  }
+ }catch(e){document.getElementById('managerExitError').textContent='Ошибка обновления QR'}
+}
+function openExitQr(){
+ document.getElementById('exitQrModal').classList.add('open');
+ refreshExitQr();
+ if(!exitQrTimer)exitQrTimer=setInterval(refreshExitQr,1000);
+}
+function closeExitQr(){
+ document.getElementById('exitQrModal').classList.remove('open');
+ if(exitQrTimer){clearInterval(exitQrTimer);exitQrTimer=null}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExitQr()});
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
 load();setInterval(load,10000);
 </script></body></html>"""
@@ -1288,7 +1327,7 @@ def supervisor_qr_page():
 @wms_bp.get("/api/admin/supervisor-exit-code")
 def supervisor_exit_code_api():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     code, step, remaining = current_supervisor_exit_code()
     return jsonify(code=code, expires_in=remaining, period=SUPERVISOR_QR_PERIOD, step=step)
