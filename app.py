@@ -25,7 +25,15 @@ from storage_backup import (
 )
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "mini-wms-warehouse-2026")
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY is required in the environment")
+app.secret_key = SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
 app.register_blueprint(wms_bp)
 
 @app.before_request
