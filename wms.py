@@ -713,7 +713,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 </div>
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
-let scanner=null,busy=false,audioCtx=null;
+let scanner=null,busy=false,audioCtx=null,lastCameraCode='',lastCameraAt=0;
 
 function beep(ok=true){
  try{
@@ -772,12 +772,45 @@ async function activity(type){
  const d=await r.json();if(!r.ok){showErr(d.error);return}await refresh();
 }
 async function toggleCamera(){
- if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').classList.add('hidden');return}
+ if(scanner){
+  try{await scanner.stop()}catch(e){}
+  scanner=null;
+  document.getElementById('reader').classList.add('hidden');
+  return
+ }
  if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
- document.getElementById('reader').classList.remove('hidden');scanner=new Html5Qrcode('reader');
+
+ const scanWidth=Math.max(260,Math.min(380,window.innerWidth-36));
+ document.getElementById('reader').classList.remove('hidden');
+ document.getElementById('result').innerHTML='<div class="ok">Камера WB: держи ШК горизонтально и заполняй им рамку.</div>';
+ scanner=new Html5Qrcode('reader');
+
  try{
-  await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:320,height:160}},txt=>sendScan(txt),()=>{});
- }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
+  await scanner.start(
+   {facingMode:'environment'},
+   {
+    fps:25,
+    qrbox:{width:scanWidth,height:96},
+    disableFlip:true,
+    formatsToSupport:[Html5QrcodeSupportedFormats.CODE_128]
+   },
+   async txt=>{
+    if(busy)return;
+    const now=Date.now();
+    if(txt===lastCameraCode && now-lastCameraAt<1800)return;
+    lastCameraCode=txt;
+    lastCameraAt=now;
+
+    document.getElementById('result').innerHTML='<div class="ok">ШК считан. Засчитываю…</div>';
+    await sendScan(txt);
+   },
+   ()=>{}
+  );
+ }catch(e){
+  scanner=null;
+  document.getElementById('reader').classList.add('hidden');
+  showErr('Камера не открылась: '+e);
+ }
 }
 function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
 loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
