@@ -16,7 +16,13 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
-from storage_backup import restore_if_needed, start_worker as start_backup_worker, backup_now, status as backup_status
+from storage_backup import (
+    restore_if_needed,
+    start_worker as start_backup_worker,
+    backup_now,
+    status as backup_status,
+    RestoreRequiredError,
+)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "mini-wms-warehouse-2026")
@@ -1941,6 +1947,10 @@ try:
     restore_if_needed()
     init_wms_db()
     start_backup_worker()
+except RestoreRequiredError as e:
+    # Fail closed: если настроенный backup не восстановился, не создаём пустую БД.
+    print(f"WMS restore blocked startup: {e}")
+    raise
 except Exception as e:
     print(f"WMS DB init warning: {e}")
     if os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on"):
