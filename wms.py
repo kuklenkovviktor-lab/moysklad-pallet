@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 import hashlib
 import hmac
+import json
 import time
 from datetime import datetime, timezone
 from contextlib import contextmanager
@@ -21,6 +22,8 @@ SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
 WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "mini-wms-terminal-secret-v1").encode("utf-8")
 SUPERVISOR_TERMINAL_VERSION = os.getenv("SUPERVISOR_TERMINAL_VERSION", "1").strip() or "1"
 MANAGER_WEB_PASSWORD = os.getenv("MANAGER_WEB_PASSWORD", "").strip()
+WB_API_TOKEN = os.getenv("WB_API_TOKEN", "").strip()
+WB_STRICT_MATCHING = os.getenv("WB_STRICT_MATCHING", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def make_token(purpose):
@@ -202,6 +205,7 @@ def init_wms_db():
             product_barcode TEXT,
             article TEXT,
             product_name TEXT,
+            wb_order_id TEXT,
             scan_type TEXT NOT NULL DEFAULT 'normal',
             scanned_at TEXT NOT NULL,
             marketplace TEXT NOT NULL DEFAULT 'WB',
@@ -251,6 +255,18 @@ def init_wms_db():
             accepted_at TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS wb_orders (
+            order_id TEXT PRIMARY KEY,
+            wb_barcode TEXT UNIQUE,
+            article TEXT,
+            skus_json TEXT NOT NULL DEFAULT '[]',
+            nm_id TEXT,
+            chrt_id TEXT,
+            supply_id TEXT,
+            synced_at TEXT NOT NULL
+        )
+        """,
     ]
     with db_connect() as conn:
         cur = conn.cursor()
@@ -287,6 +303,7 @@ def init_wms_db():
             ("product_barcode", "TEXT"),
             ("article", "TEXT"),
             ("product_name", "TEXT"),
+            ("wb_order_id", "TEXT"),
             ("scan_type", "TEXT NOT NULL DEFAULT 'normal'"),
         ]
         for name, ddl in scan_additions:
@@ -343,6 +360,10 @@ def init_wms_db():
         pass
     try:
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_scanner_code ON employees(scanner_code)")
+    except Exception:
+        pass
+    try:
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_wb_orders_barcode ON wb_orders(wb_barcode)")
     except Exception:
         pass
 
@@ -1810,6 +1831,54 @@ def fbs_scan():
     if not active or active["type"] != "picking":
         return jsonify(error="Сейчас включена не сборка. Переключи операцию на «Сборка»."), 409
 
+    wb_order_id = None
+    expected = query_one(
+        "SELECT order_id, article, skus_json FROM wb_orders WHERE wb_barcode = ? LIMIT 1",
+        (barcode,),
+    )
+    if expected:
+        wb_order_id = str(expected[0])
+        expected_article = str(expected[1] or "").strip()
+        try:
+            expected_skus = [str(x).strip() for x in json.loads(expected[2] or "[]") if str(x).strip()]
+        except Exception:
+            expected_skus = []
+
+        sku_ok = product_barcode in expected_skus if expected_skus else False
+        article_ok = bool(expected_article and article and expected_article == article)
+
+        if WB_STRICT_MATCHING and not (sku_ok or (not expected_skus and article_ok)):
+            log_event(
+                shift[0],
+                "fbs",
+                "product_mismatch",
+                shift_id=shift_id,
+                object_code=barcode,
+                result=f"scanned={article or product_barcode};expected={expected_article or ','.join(expected_skus)}",
+                article=article or None,
+                product_name=product_name or None,
+            )
+            expected_text = expected_article or (", ".join(expected_skus[:3]) if expected_skus else "неизвестный товар")
+            return jsonify(
+                error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа ожидается: " + expected_text,
+                expected_article=expected_article,
+                expected_skus=expected_skus,
+            ), 409
+    elif WB_STRICT_MATCHING:
+        log_event(
+            shift[0],
+            "fbs",
+            "wb_order_missing",
+            shift_id=shift_id,
+            object_code=barcode,
+            result="not-synced",
+            article=article or None,
+            product_name=product_name or None,
+        )
+        return jsonify(
+            error="WB-заказ не найден в локальном справочнике. На ПК обнови синхронизацию WB."
+        ), 409
+
     duplicate = query_one(
         "SELECT s.id, e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
         (barcode,),
@@ -1821,10 +1890,10 @@ def fbs_scan():
         execute(
             """
             INSERT INTO scans
-            (id, shift_id, employee_id, barcode, product_barcode, article, product_name, scan_type, scanned_at, marketplace)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'WB')
+            (id, shift_id, employee_id, barcode, product_barcode, article, product_name, wb_order_id, scan_type, scanned_at, marketplace)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'WB')
             """,
-            (str(uuid.uuid4()), shift_id, shift[0], barcode, product_barcode, article or None, product_name or None, scan_type, now_iso()),
+            (str(uuid.uuid4()), shift_id, shift[0], barcode, product_barcode, article or None, product_name or None, wb_order_id, scan_type, now_iso()),
         )
     except Exception:
         duplicate = query_one(
