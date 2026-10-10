@@ -213,12 +213,6 @@ def restore_if_needed():
 
 
 def _worker():
-    with _STATUS_LOCK:
-        _STATUS["running"] = True
-        _STATUS["configured"] = configured()
-
-    # Первый снимок делаем вскоре после старта, а не ждём полный интервал.
-    time.sleep(10)
     first = True
     while True:
         ok = False
@@ -240,6 +234,15 @@ def start_worker():
         return False
 
     _WORKER_STARTED = True
+    # Ставим отметку ДО запуска потока. Так health сразу показывает,
+    # что первый backup действительно поставлен в очередь.
+    with _STATUS_LOCK:
+        _STATUS.update({
+            "running": True,
+            "configured": True,
+            "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+            "phase": "queued",
+        })
     thread = threading.Thread(target=_worker, name="wms-object-storage-backup", daemon=True)
     thread.start()
     return True
