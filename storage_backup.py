@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
@@ -25,10 +26,12 @@ _LAST_DAILY = None
 _STATUS = {
     "configured": False,
     "running": False,
+    "last_attempt_at": None,
     "last_backup_at": None,
     "last_restore_at": None,
     "last_error": "",
     "latest_key": None,
+    "phase": "idle",
 }
 
 
@@ -43,6 +46,12 @@ def _client():
         region_name=REGION,
         aws_access_key_id=ACCESS_KEY_ID,
         aws_secret_access_key=SECRET_ACCESS_KEY,
+        config=Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"max_attempts": 2, "mode": "standard"},
+            s3={"addressing_style": "path"},
+        ),
     )
 
 
@@ -92,19 +101,40 @@ def _snapshot_file():
 def backup_now(force=False):
     global _LAST_SOURCE_STAMP, _LAST_DAILY
 
+    attempt = datetime.now(timezone.utc).isoformat()
+    with _STATUS_LOCK:
+        _STATUS.update({
+            "configured": configured(),
+            "last_attempt_at": attempt,
+            "phase": "preparing",
+        })
+
     if not configured():
         with _STATUS_LOCK:
-            _STATUS["configured"] = False
+            _STATUS.update({
+                "configured": False,
+                "last_error": "Object Storage backup is not configured",
+                "phase": "idle",
+            })
         return False
 
     stamp = _source_stamp()
     if not stamp:
+        with _STATUS_LOCK:
+            _STATUS.update({
+                "last_error": f"SQLite file not found at {DB_PATH}",
+                "phase": "idle",
+            })
         return False
     if not force and stamp == _LAST_SOURCE_STAMP:
+        with _STATUS_LOCK:
+            _STATUS["phase"] = "idle"
         return False
 
     snapshot_path = _snapshot_file()
     try:
+        with _STATUS_LOCK:
+            _STATUS["phase"] = "uploading"
         s3 = _client()
         latest = _latest_key()
         s3.upload_file(snapshot_path, BUCKET, latest)
@@ -122,6 +152,7 @@ def backup_now(force=False):
                 "last_backup_at": now,
                 "last_error": "",
                 "latest_key": latest,
+                "phase": "idle",
             })
         return True
     except Exception as exc:
@@ -129,6 +160,7 @@ def backup_now(force=False):
             _STATUS.update({
                 "configured": True,
                 "last_error": str(exc),
+                "phase": "idle",
             })
         return False
     finally:
@@ -186,14 +218,18 @@ def _worker():
         _STATUS["configured"] = configured()
 
     # Первый снимок делаем вскоре после старта, а не ждём полный интервал.
-    time.sleep(15)
+    time.sleep(10)
+    first = True
     while True:
+        ok = False
         try:
-            backup_now(force=False)
+            ok = backup_now(force=first)
         except Exception as exc:
             with _STATUS_LOCK:
-                _STATUS["last_error"] = str(exc)
-        time.sleep(INTERVAL)
+                _STATUS.update({"last_error": str(exc), "phase": "idle"})
+        first = False
+        # При ошибке пробуем снова через минуту, после успешной копии — по расписанию.
+        time.sleep(INTERVAL if ok else 60)
 
 
 def start_worker():
