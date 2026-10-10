@@ -1795,8 +1795,17 @@ def operations_deviations():
         """,
         params,
     )
+    total_row = query_one(
+        """
+        SELECT COUNT(*)
+        FROM operation_events
+        WHERE event_type IN (""" + placeholders + """)
+          AND created_at >= ? AND created_at < ?
+        """,
+        params,
+    )
     return jsonify(
-        count=len(rows),
+        count=int(total_row[0] if total_row else 0),
         rows=[
             {
                 "created_at": r[0],
