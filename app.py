@@ -55,6 +55,8 @@ def require_employee_login():
         "/api/receiving/overview",
         "/api/wb/status",
         "/api/wb/sync",
+        "/api/manager/daily-plan",
+        "/api/operations/deviations",
     }
     if session.get("manager_web") is True and path in manager_paths:
         return None
@@ -1690,6 +1692,15 @@ def fbs_product_info():
 
         product, pack = find_product_by_any_barcode(barcode)
         if not product:
+            employee = get_session_employee()
+            if employee:
+                log_event(
+                    employee["id"],
+                    "fbs",
+                    "product_not_found",
+                    object_code=barcode,
+                    result="not-found",
+                )
             return jsonify(error=f"Товар со штрихкодом {barcode} не найден"), 404
 
         qty = float(pack.get("quantity") or 1)
