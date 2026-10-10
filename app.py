@@ -39,6 +39,8 @@ def require_employee_login():
         "/api/stats/employees",
         "/api/admin/badges",
         "/api/admin/supervisor-exit-code",
+        "/receiving-monitor",
+        "/api/receiving/overview",
     }
     if session.get("manager_web") is True and path in manager_paths:
         return None
@@ -1363,6 +1365,17 @@ def new_receipt():
         except Exception:
             pass
 
+        employee = get_session_employee()
+        if employee:
+            log_event(
+                employee["id"],
+                "receiving",
+                "create",
+                object_code=doc.get("id"),
+                result=state_name or "",
+                document_name=doc.get("name") or "Новое Оприходование",
+            )
+
         return jsonify(
             ok=True,
             id=doc.get("id"),
@@ -1406,6 +1419,7 @@ def finish_receipt(receipt_id):
                 object_code=receipt_id,
                 quantity=total_units,
                 result=doc.get("name") or receipt_id,
+                document_name=doc.get("name") or receipt_id,
             )
 
         # После завершения приёмки сразу делаем аварийную копию WMS,
@@ -1577,6 +1591,8 @@ def osz_accept():
                 object_code=sscc,
                 quantity=result["added"],
                 result=receipt_id,
+                article=product.get("article"),
+                product_name=product.get("name"),
             )
 
         added = result["added"]
@@ -1678,6 +1694,8 @@ def scan():
                 object_code=barcode,
                 quantity=result["added"],
                 result=receipt_id,
+                article=product.get("article"),
+                product_name=product.get("name"),
             )
         return jsonify(
             ok=True,
