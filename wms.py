@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+import threading
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
@@ -104,6 +105,8 @@ def parse_iso(value):
 
 
 _PG_POOL = None
+_DB_READY = False
+_DB_INIT_LOCK = threading.Lock()
 
 
 def _postgres_url():
@@ -173,6 +176,7 @@ def execute(query, params=()):
 
 
 def init_wms_db():
+    global _DB_READY
     statements = [
         """
         CREATE TABLE IF NOT EXISTS employees (
@@ -358,6 +362,8 @@ def init_wms_db():
                 (emp_id, name, RATE, TARGET, role, badge_number, badge_code, scanner_code),
             )
 
+    _DB_READY = True
+
     try:
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_badge_code ON employees(badge_code)")
     except Exception:
@@ -377,7 +383,13 @@ def init_wms_db():
 
 
 def ensure_db():
-    init_wms_db()
+    global _DB_READY
+    if _DB_READY:
+        return
+    with _DB_INIT_LOCK:
+        if _DB_READY:
+            return
+        init_wms_db()
 
 
 def get_session_employee():
@@ -1196,7 +1208,11 @@ function ago(ts){if(!ts)return '—';const s=Math.max(0,Math.round((Date.now()-n
 function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
 function deviationClass(v){return ['product_mismatch','duplicate_wb','product_not_found'].includes(v)?'danger':'warn'}
 
+let dashboardLoading=false;
 async function load(){
+ if(dashboardLoading)return;
+ dashboardLoading=true;
+ try{
  const b=dayBounds(),p=new URLSearchParams(b);
  const [dashR,fbsR,recR,devR]=await Promise.all([
   fetch('/api/fbs/dashboard'),
@@ -1221,7 +1237,10 @@ async function load(){
  document.getElementById('receivingWorkers').textContent=r.workers||0;
  document.getElementById('receivingCompleted').textContent=r.completed||0;
  document.getElementById('deviations').innerHTML=dev.rows.length?dev.rows.slice(0,8).map(x=>'<div class="dev"><div>'+esc(fmt(x.created_at))+'</div><div><b>'+esc(x.employee)+'</b></div><div class="why '+deviationClass(x.event_type)+'">'+esc(deviationLabel(x.event_type))+'</div><div class="object">'+esc(x.article||x.object_code||x.result||'—')+'</div></div>').join(''):'<div class="empty">Отклонений сегодня нет ✅</div>';
- document.getElementById('liveText').textContent='LIVE · '+new Date().toLocaleTimeString('ru-RU')+' · каждые 2 сек.';
+ document.getElementById('liveText').textContent='LIVE · '+new Date().toLocaleTimeString('ru-RU')+' · каждые 3 сек.';
+ }finally{
+  dashboardLoading=false;
+ }
 }
 
 async function refreshExitQr(){
@@ -1251,7 +1270,7 @@ async function loadWbStatus(){
 async function syncWb(){const btn=document.getElementById('wbSyncBtn');btn.disabled=true;btn.textContent='Запускаю…';const r=await fetch('/api/wb/sync',{method:'POST'}),d=await r.json();if(!r.ok){btn.disabled=false;btn.textContent='Обновить WB';document.getElementById('wbText').textContent=d.error||'Ошибка запуска WB';return}loadWbStatus()}
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
 
-load();loadWbStatus();setInterval(load,2000);setInterval(loadWbStatus,10000);
+load();loadWbStatus();setInterval(load,3000);setInterval(loadWbStatus,10000);
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
 </script></body></html>"""
 
