@@ -18,9 +18,16 @@ TARGET = int(os.getenv("FBS_TARGET", "1600"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("WMS_DB_PATH", "/tmp/wms.db")
 REQUIRE_POSTGRES = os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on")
-WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").encode("utf-8")
+_WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "").strip()
+_WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "").strip()
+if not _WMS_BADGE_SECRET:
+    raise RuntimeError("WMS_BADGE_SECRET is required in the environment")
+if not _WMS_TERMINAL_SECRET:
+    raise RuntimeError("WMS_TERMINAL_SECRET is required in the environment")
+
+WMS_BADGE_SECRET = _WMS_BADGE_SECRET.encode("utf-8")
 SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
-WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "mini-wms-terminal-secret-v1").encode("utf-8")
+WMS_TERMINAL_SECRET = _WMS_TERMINAL_SECRET.encode("utf-8")
 SUPERVISOR_TERMINAL_VERSION = os.getenv("SUPERVISOR_TERMINAL_VERSION", "1").strip() or "1"
 MANAGER_WEB_PASSWORD = os.getenv("MANAGER_WEB_PASSWORD", "").strip()
 WB_API_TOKEN = os.getenv("WB_API_TOKEN", "").strip()
