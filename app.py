@@ -38,6 +38,7 @@ def require_employee_login():
         "/api/fbs/journal",
         "/api/stats/employees",
         "/api/admin/badges",
+        "/api/admin/supervisor-exit-code",
     }
     if session.get("manager_web") is True and path in manager_paths:
         return None
