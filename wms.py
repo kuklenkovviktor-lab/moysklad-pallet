@@ -30,6 +30,11 @@ SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
 WMS_TERMINAL_SECRET = _WMS_TERMINAL_SECRET.encode("utf-8")
 SUPERVISOR_TERMINAL_VERSION = os.getenv("SUPERVISOR_TERMINAL_VERSION", "1").strip() or "1"
 MANAGER_WEB_PASSWORD = os.getenv("MANAGER_WEB_PASSWORD", "").strip()
+MANAGER_LOGIN_MAX_ATTEMPTS = max(3, int(os.getenv("MANAGER_LOGIN_MAX_ATTEMPTS", "8") or 8))
+MANAGER_LOGIN_WINDOW_SECONDS = max(60, int(os.getenv("MANAGER_LOGIN_WINDOW_SECONDS", "600") or 600))
+MANAGER_LOGIN_BLOCK_SECONDS = max(60, int(os.getenv("MANAGER_LOGIN_BLOCK_SECONDS", "900") or 900))
+_MANAGER_LOGIN_LOCK = threading.Lock()
+_MANAGER_LOGIN_ATTEMPTS = {}
 WB_API_TOKEN = os.getenv("WB_API_TOKEN", "").strip()
 WB_STRICT_MATCHING = os.getenv("WB_STRICT_MATCHING", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -428,6 +433,58 @@ def is_manager():
 
 def manager_access():
     return bool(is_manager() or session.get("manager_web") is True)
+
+
+def _manager_client_ip():
+    forwarded = str(request.headers.get("X-Forwarded-For", "")).strip()
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return str(request.remote_addr or "unknown")
+
+
+def _manager_rate_state(ip, now_ts=None):
+    now_ts = float(now_ts if now_ts is not None else time.time())
+    with _MANAGER_LOGIN_LOCK:
+        state = _MANAGER_LOGIN_ATTEMPTS.get(ip)
+        if not state:
+            return {"blocked": False, "remaining": 0, "attempts": 0}
+
+        blocked_until = float(state.get("blocked_until", 0) or 0)
+        if blocked_until > now_ts:
+            return {
+                "blocked": True,
+                "remaining": int(blocked_until - now_ts) + 1,
+                "attempts": int(state.get("attempts", 0) or 0),
+            }
+
+        window_started = float(state.get("window_started", 0) or 0)
+        if now_ts - window_started >= MANAGER_LOGIN_WINDOW_SECONDS:
+            _MANAGER_LOGIN_ATTEMPTS.pop(ip, None)
+            return {"blocked": False, "remaining": 0, "attempts": 0}
+
+        return {
+            "blocked": False,
+            "remaining": 0,
+            "attempts": int(state.get("attempts", 0) or 0),
+        }
+
+
+def _manager_register_failed_login(ip, now_ts=None):
+    now_ts = float(now_ts if now_ts is not None else time.time())
+    with _MANAGER_LOGIN_LOCK:
+        state = _MANAGER_LOGIN_ATTEMPTS.get(ip)
+        if not state or now_ts - float(state.get("window_started", 0) or 0) >= MANAGER_LOGIN_WINDOW_SECONDS:
+            state = {"window_started": now_ts, "attempts": 0, "blocked_until": 0}
+        state["attempts"] = int(state.get("attempts", 0) or 0) + 1
+        if state["attempts"] >= MANAGER_LOGIN_MAX_ATTEMPTS:
+            state["blocked_until"] = now_ts + MANAGER_LOGIN_BLOCK_SECONDS
+        _MANAGER_LOGIN_ATTEMPTS[ip] = state
+        return dict(state)
+
+
+def _manager_clear_failed_logins(ip):
+    with _MANAGER_LOGIN_LOCK:
+        _MANAGER_LOGIN_ATTEMPTS.pop(ip, None)
 
 
 def log_event(
@@ -1625,12 +1682,34 @@ def manager_login_page():
 
 @wms_bp.post("/api/manager/login")
 def manager_login_api():
+    ip = _manager_client_ip()
+    state = _manager_rate_state(ip)
+    if state["blocked"]:
+        return jsonify(
+            error="Слишком много неверных попыток. Повтори вход позже.",
+            retry_after=state["remaining"],
+        ), 429
+
     data = request.get_json(silent=True) or {}
     password = str(data.get("password", ""))
     if not MANAGER_WEB_PASSWORD:
         return jsonify(error="Пароль руководителя не настроен в Render"), 503
+
     if not hmac.compare_digest(password, MANAGER_WEB_PASSWORD):
-        return jsonify(error="Неверный пароль"), 403
+        failed = _manager_register_failed_login(ip)
+        if int(failed.get("attempts", 0)) >= MANAGER_LOGIN_MAX_ATTEMPTS:
+            return jsonify(
+                error="Слишком много неверных попыток. Вход временно заблокирован.",
+                retry_after=MANAGER_LOGIN_BLOCK_SECONDS,
+            ), 429
+        remaining_attempts = max(MANAGER_LOGIN_MAX_ATTEMPTS - int(failed.get("attempts", 0)), 0)
+        return jsonify(
+            error="Неверный пароль",
+            attempts_left=remaining_attempts,
+        ), 403
+
+    _manager_clear_failed_logins(ip)
+    session.clear()
     session["manager_web"] = True
     return jsonify(ok=True)
 
