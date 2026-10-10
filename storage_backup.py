@@ -35,6 +35,10 @@ _STATUS = {
 }
 
 
+class RestoreRequiredError(RuntimeError):
+    """Local SQLite is missing and the configured backup could not be restored."""
+
+
 def configured():
     return bool(BUCKET and ACCESS_KEY_ID and SECRET_ACCESS_KEY and not os.getenv("DATABASE_URL", "").strip())
 
@@ -171,13 +175,31 @@ def backup_now(force=False):
 
 
 def restore_if_needed():
-    if os.getenv("DATABASE_URL", "").strip() or os.path.exists(DB_PATH) or not configured():
+    # Existing local DB or PostgreSQL: nothing to restore.
+    if os.getenv("DATABASE_URL", "").strip() or os.path.exists(DB_PATH):
+        return False
+
+    # If backup is not configured, preserve current behavior for local/dev setups.
+    if not configured():
         return False
 
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     tmp = DB_PATH + ".restore"
     try:
+        with _STATUS_LOCK:
+            _STATUS["phase"] = "restoring"
+
         _client().download_file(BUCKET, _latest_key(), tmp)
+
+        # Refuse to replace the working DB path with an unreadable/corrupt SQLite file.
+        conn = sqlite3.connect(tmp, timeout=10)
+        try:
+            check = conn.execute("PRAGMA integrity_check").fetchone()
+            if not check or str(check[0]).lower() != "ok":
+                raise RuntimeError("Backup SQLite integrity_check failed")
+        finally:
+            conn.close()
+
         os.replace(tmp, DB_PATH)
         now = datetime.now(timezone.utc).isoformat()
         with _STATUS_LOCK:
@@ -186,24 +208,20 @@ def restore_if_needed():
                 "last_restore_at": now,
                 "last_error": "",
                 "latest_key": _latest_key(),
+                "phase": "idle",
             })
         return True
-    except ClientError as exc:
-        code = str(exc.response.get("Error", {}).get("Code", ""))
-        if code in ("404", "NoSuchKey", "NoSuchBucket"):
-            with _STATUS_LOCK:
-                _STATUS.update({
-                    "configured": True,
-                    "last_error": "" if code != "NoSuchBucket" else "Bucket not found",
-                })
-            return False
-        with _STATUS_LOCK:
-            _STATUS.update({"configured": True, "last_error": str(exc)})
-        return False
     except Exception as exc:
+        message = "Local DB is missing and backup restore failed: " + str(exc)
         with _STATUS_LOCK:
-            _STATUS.update({"configured": True, "last_error": str(exc)})
-        return False
+            _STATUS.update({
+                "configured": True,
+                "last_error": message,
+                "phase": "restore-failed",
+            })
+        # Critical protection: do NOT continue to init_wms_db(), otherwise a new
+        # empty DB could be created and later overwrite the valid remote backup.
+        raise RestoreRequiredError(message) from exc
     finally:
         try:
             if os.path.exists(tmp):
