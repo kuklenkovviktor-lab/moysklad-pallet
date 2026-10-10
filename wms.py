@@ -1102,6 +1102,7 @@ STATS_PAGE = """<!doctype html>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}.content{min-width:0;padding:16px}.wrap{max-width:1500px;margin:auto}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
 .head{margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}
+.wbbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:12px 14px;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px}.wbstate{display:flex;align-items:center;gap:9px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:#a7b2bb;flex:0 0 auto}.dot.ok{background:#4f8a64}.dot.warn{background:#c08a32}.dot.err{background:#ad5757}.wbbar button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:9px 12px;font-weight:750;cursor:pointer;white-space:nowrap}.wbbar button:disabled{opacity:.55;cursor:wait}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
 .layout{display:grid;grid-template-columns:1.05fr 1.95fr;gap:12px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.section-title b{font-size:16px}
 .worker{display:grid;grid-template-columns:1.3fr repeat(3,1fr);gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.name b{font-size:14px}
@@ -1127,6 +1128,11 @@ STATS_PAGE = """<!doctype html>
 <div class="card head">
  <h1>🖥️ Mini WMS</h1>
  <div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div>
+</div>
+
+<div class="wbbar">
+ <div class="wbstate"><span id="wbDot" class="dot"></span><div><b id="wbTitle">WB-защита</b><div class="small" id="wbText">Проверяю подключение…</div></div></div>
+ <button id="wbSyncBtn" onclick="syncWb()">Обновить WB</button>
 </div>
 
 <div class="kpis">
@@ -1222,8 +1228,32 @@ function closeExitQr(){
  if(exitQrTimer){clearInterval(exitQrTimer);exitQrTimer=null}
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExitQr()});
+async function loadWbStatus(){
+ try{
+  const r=await fetch('/api/wb/status',{cache:'no-store'}),d=await r.json();
+  const dot=document.getElementById('wbDot'),title=document.getElementById('wbTitle'),txt=document.getElementById('wbText'),btn=document.getElementById('wbSyncBtn');
+  dot.className='dot';
+  btn.disabled=!!d.running;
+  btn.textContent=d.running?'Синхронизация…':'Обновить WB';
+  if(!d.configured){
+   dot.classList.add('warn');title.textContent='WB-защита не подключена';txt.textContent='Нужен API-токен Marketplace.';
+  }else if(d.last_error){
+   dot.classList.add('err');title.textContent='Ошибка синхронизации WB';txt.textContent=d.last_error;
+  }else if(d.strict){
+   dot.classList.add('ok');title.textContent='WB-защита включена';txt.textContent='Заказов в локальном справочнике: '+d.local_orders+(d.last_sync?' · обновлено '+new Date(d.last_sync).toLocaleString('ru-RU'):'');
+  }else{
+   dot.classList.add('warn');title.textContent='WB подключён, проверка пока тестовая';txt.textContent='Заказов в локальном справочнике: '+d.local_orders+(d.last_sync?' · обновлено '+new Date(d.last_sync).toLocaleString('ru-RU'):'');
+  }
+ }catch(e){}
+}
+async function syncWb(){
+ const btn=document.getElementById('wbSyncBtn');btn.disabled=true;btn.textContent='Запускаю…';
+ const r=await fetch('/api/wb/sync',{method:'POST'}),d=await r.json();
+ if(!r.ok){btn.disabled=false;btn.textContent='Обновить WB';document.getElementById('wbText').textContent=d.error||'Ошибка запуска WB';return}
+ loadWbStatus();setTimeout(loadWbStatus,1500);
+}
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
-load();setInterval(load,10000);
+load();loadWbStatus();setInterval(load,10000);setInterval(loadWbStatus,5000);
 </script></body></html>"""
 
 
