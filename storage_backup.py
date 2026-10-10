@@ -17,7 +17,7 @@ ACCESS_KEY_ID = os.getenv("YC_S3_ACCESS_KEY_ID", "").strip()
 SECRET_ACCESS_KEY = os.getenv("YC_S3_SECRET_ACCESS_KEY", "").strip()
 ENDPOINT = os.getenv("YC_S3_ENDPOINT", "https://storage.yandexcloud.net").strip()
 REGION = os.getenv("YC_S3_REGION", "ru-central1").strip()
-PREFIX = os.getenv("YC_S3_PREFIX", "onix-wms").strip().strip("/")
+PREFIX = os.getenv("YC_S3_PREFIX", "mini-wms").strip().strip("/")
 
 # Optional independent S3-compatible storage. It can be another provider entirely.
 SECONDARY_BUCKET = os.getenv("WMS_SECONDARY_S3_BUCKET", "").strip()
