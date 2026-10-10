@@ -1427,6 +1427,41 @@ def osz_check():
         return jsonify(error=str(e)), 500
 
 
+@app.post("/api/fbs/product-info")
+def fbs_product_info():
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    try:
+        data = request.get_json(force=True)
+        barcode = str(data.get("barcode", "")).strip()
+        if not barcode:
+            return jsonify(error="Пустой ШК товара"), 400
+
+        product, pack = find_product_by_any_barcode(barcode)
+        if not product:
+            return jsonify(error=f"Товар со штрихкодом {barcode} не найден"), 404
+
+        qty = float(pack.get("quantity") or 1)
+        if qty > 1:
+            qty_out = int(qty) if qty.is_integer() else qty
+            return jsonify(
+                error=f"Считан ШК упаковки на {qty_out} шт. Для FBS нужен ШК одной единицы товара."
+            ), 409
+
+        return jsonify(
+            ok=True,
+            barcode=barcode,
+            article=product.get("article"),
+            name=product.get("name"),
+        )
+    except requests.HTTPError as e:
+        body = e.response.text[:800] if e.response is not None else ""
+        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
 @app.post("/api/osz/product-info")
 def osz_product_info():
     try:
