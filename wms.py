@@ -1044,7 +1044,6 @@ STATS_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .wrap{max-width:1500px;margin:auto;padding:16px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
-.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.nav a{display:flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:10px;text-decoration:none;font-weight:750;background:#dde8ef;color:#314657}.nav a.active{background:#48647a;color:#fff}
 .head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.head h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.actions{display:flex;gap:7px;flex-wrap:wrap}.actions a{padding:8px 11px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:700;font-size:13px}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
 .layout{display:grid;grid-template-columns:1.05fr 1.95fr;gap:12px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.section-title b{font-size:16px}
@@ -1053,7 +1052,6 @@ STATS_PAGE = """<!doctype html>
 .toplist{display:grid;gap:6px}.toprow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 10px;background:#eef3f6;border-radius:9px;font-size:13px}
 @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.head{flex-direction:column}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
-<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/manager">🖥️ Панель руководителя</a></div>
 <div class="card head">
  <div><h1>🖥️ Mini WMS · Руководитель</h1><div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div></div>
  <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="/supervisor-qr">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a></div>
