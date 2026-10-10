@@ -71,6 +71,7 @@ def require_employee_login():
         "/api/wb/sync",
         "/api/manager/daily-plan",
         "/api/operations/deviations",
+        "/api/system/status",
     }
     # Desktop manager routes are authenticated only by the dedicated
     # manager password/session. Do not fall through to employee badge auth.
@@ -1534,8 +1535,7 @@ def add_or_increment_position(receipt_id, product, pack, requested_qty=None, enf
 def index():
     return PAGE
 
-@app.get("/api/health")
-def health():
+def _system_status_payload():
     db_backend = "postgres" if os.getenv("DATABASE_URL", "").strip() else "sqlite"
     db_ok = False
     db_error = ""
@@ -1546,14 +1546,28 @@ def health():
         db_error = str(e)
 
     backup = backup_status()
-    return jsonify(
-        ok=bool(db_ok and TOKEN),
-        token_configured=bool(TOKEN),
-        database_backend=db_backend,
-        database_ok=db_ok,
-        database_error=db_error,
-        backup=backup,
-    )
+    return {
+        "ok": bool(db_ok and TOKEN),
+        "token_configured": bool(TOKEN),
+        "database_backend": db_backend,
+        "database_ok": db_ok,
+        "database_error": db_error,
+        "backup": backup,
+    }
+
+
+@app.get("/api/health")
+def health():
+    # Public endpoint for Render/liveness checks. Do not expose infrastructure details.
+    payload = _system_status_payload()
+    return jsonify(ok=bool(payload["ok"])), (200 if payload["ok"] else 503)
+
+
+@app.get("/api/system/status")
+def system_status():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    return jsonify(**_system_status_payload())
 
 @app.get("/api/bootstrap")
 def bootstrap():
