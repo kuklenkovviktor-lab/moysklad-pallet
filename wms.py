@@ -686,7 +686,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 </div>
 <div class="card">
 <h1>🚀 FBS · Выработка</h1>
-<div class="muted">Скан заказа фиксирует сотрудника, время, выработку и оплату. Дубли не засчитываются.</div>
+<div class="muted">Двойной контроль: сначала ШК товара, затем ШК WB. Заказ засчитывается только после двух успешных сканов.</div>
 <div class="small" style="margin-top:6px"><span id="identity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 </div>
 
@@ -702,7 +702,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 <div class="big"><span id="orders">0</span> / <span id="target">1600</span></div>
 <div class="progress"><div id="bar"></div></div>
 <div class="grid">
-<div class="stat"><div class="small">Заработано</div><div class="big" id="money">0 ₽</div></div>
+<div class="stat"><div class="small">Чистая сборка</div><div class="big" id="pickTime">0 мин</div></div>
 <div class="stat"><div class="small">Заказов/час</div><div class="big" id="speed">0</div></div>
 </div>
 <div class="small" style="margin-top:10px" id="remaining"></div>
@@ -710,11 +710,17 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 </div>
 
 <div class="card">
-<h2>Скан заказа WB</h2>
+<h2>Двойной скан FBS</h2>
+<div class="stat" id="scanStageBox">
+ <div class="small">Сейчас нужен</div>
+ <div style="font-size:18px;font-weight:850;margin-top:3px" id="scanStage">1. ШК товара</div>
+ <div class="small" style="margin-top:5px" id="productInfo">После товара система попросит ШК WB.</div>
+</div>
 <button onclick="toggleCamera()">📷 Камера телефона</button>
 <div id="reader" class="hidden"></div>
-<input id="barcode" autocomplete="off" inputmode="text" placeholder="ШК заказа / сканер" style="margin-top:10px">
-<button class="secondary" onclick="manualScan()">Засчитать заказ</button>
+<input id="barcode" autocomplete="off" inputmode="text" placeholder="Сканируй ШК товара" style="margin-top:10px">
+<button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
+<button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сбросить выбранный товар</button>
 </div>
 
 <div class="card">
@@ -735,7 +741,7 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 </div>
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
-let scanner=null,busy=false,audioCtx=null;
+let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
 
 function beep(ok=true){
  try{
@@ -771,23 +777,69 @@ async function refresh(){
  document.getElementById('startCard').classList.add('hidden');document.getElementById('work').classList.remove('hidden');
  document.getElementById('employeeName').textContent=d.employee;
  document.getElementById('orders').textContent=d.orders;document.getElementById('target').textContent=d.target;
- document.getElementById('money').textContent=d.earned.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₽';
+ document.getElementById('pickTime').textContent=Math.round((d.picking_seconds||0)/60)+' мин';
  document.getElementById('speed').textContent=d.orders_per_hour;
  document.getElementById('bar').style.width=Math.min(d.percent,100)+'%';
  document.getElementById('remaining').textContent=d.target_done?'✅ Минималка выполнена':'До 1600: '+d.remaining;
  document.querySelectorAll('[data-a]').forEach(b=>b.classList.toggle('active',b.dataset.a===d.activity));
 }
-async function sendScan(code){
- code=(code||'').trim();if(!code||busy||!shiftId)return;busy=true;
- try{
-  const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,barcode:code})});
-  const d=await r.json();
-  if(!r.ok){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(d.error||'Ошибка')+'</div>';return}
-  beep(true);document.getElementById('result').innerHTML='<div class="ok">✅ +1 заказ · '+esc(code)+'</div>';await refresh();
- }finally{setTimeout(()=>busy=false,250)}
+function updateScanStage(){
+ const input=document.getElementById('barcode');
+ const reset=document.getElementById('resetProduct');
+ if(pendingProduct){
+  document.getElementById('scanStage').textContent='2. ШК WB';
+  document.getElementById('productInfo').innerHTML='<b>'+esc(pendingProduct.article||'Без артикула')+'</b> · '+esc(pendingProduct.name||'Товар')+'<br>ШК товара: '+esc(pendingProduct.barcode);
+  input.placeholder='Теперь сканируй ШК WB';
+  reset.classList.remove('hidden');
+ }else{
+  document.getElementById('scanStage').textContent='1. ШК товара';
+  document.getElementById('productInfo').textContent='После товара система попросит ШК WB.';
+  input.placeholder='Сканируй ШК товара';
+  reset.classList.add('hidden');
+ }
 }
-function manualScan(){const el=document.getElementById('barcode');const v=el.value;el.value='';el.focus();sendScan(v)}
-document.getElementById('barcode').addEventListener('keydown',e=>{if(e.key==='Enter')manualScan()});
+function clearPendingProduct(){
+ pendingProduct=null;updateScanStage();
+ document.getElementById('result').innerHTML='<div class="ok">Товар сброшен. Сканируй товар заново.</div>';
+ const el=document.getElementById('barcode');el.value='';el.focus();
+}
+async function acceptProduct(code){
+ const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code})});
+ const d=await r.json();
+ if(!r.ok){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(d.error||'Товар не найден')+'</div>';return false}
+ pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
+ updateScanStage();beep(true);
+ document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
+ return true;
+}
+async function acceptWb(code){
+ const p=pendingProduct;if(!p)return false;
+ const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  shift_id:shiftId,barcode:code,product_barcode:p.barcode,article:p.article,product_name:p.name,scan_type:'normal'
+ })});
+ const d=await r.json();
+ if(!r.ok){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(d.error||'Ошибка ШК WB')+'</div>';return false}
+ pendingProduct=null;updateScanStage();beep(true);
+ document.getElementById('result').innerHTML='<div class="ok">✅ +1 заказ · '+esc(p.article||p.barcode)+' → '+esc(code)+'</div>';
+ await refresh();return true;
+}
+async function handleScan(code){
+ code=(code||'').trim();if(!code||busy||!shiftId)return;
+ busy=true;
+ try{
+  if(pendingProduct)await acceptWb(code);
+  else await acceptProduct(code);
+ }finally{
+  setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},220);
+ }
+}
+function manualScan(){const el=document.getElementById('barcode');const v=el.value;el.value='';handleScan(v)}
+document.getElementById('barcode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualScan()}});
+function cameraScan(code){
+ const now=Date.now();
+ if(code===lastCameraCode && now-lastCameraAt<2500)return;
+ lastCameraCode=code;lastCameraAt=now;handleScan(code);
+}
 
 async function activity(type){
  const r=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:type})});
@@ -798,11 +850,11 @@ async function toggleCamera(){
  if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
  document.getElementById('reader').classList.remove('hidden');scanner=new Html5Qrcode('reader');
  try{
-  await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:320,height:160}},txt=>sendScan(txt),()=>{});
+  await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:320,height:160}},txt=>cameraScan(txt),()=>{});
  }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
 }
 function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
-loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
+updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
 </script></body></html>"""
 
 
