@@ -20,6 +20,7 @@ WMS_BADGE_SECRET = os.getenv("WMS_BADGE_SECRET", "mini-wms-badge-secret-v1").enc
 SUPERVISOR_QR_PERIOD = max(10, int(os.getenv("SUPERVISOR_QR_PERIOD", "30")))
 WMS_TERMINAL_SECRET = os.getenv("WMS_TERMINAL_SECRET", "mini-wms-terminal-secret-v1").encode("utf-8")
 SUPERVISOR_TERMINAL_VERSION = os.getenv("SUPERVISOR_TERMINAL_VERSION", "1").strip() or "1"
+MANAGER_WEB_PASSWORD = os.getenv("MANAGER_WEB_PASSWORD", "").strip()
 
 
 def make_token(purpose):
@@ -355,6 +356,10 @@ def get_session_employee():
 def is_manager():
     emp = get_session_employee()
     return bool(emp and emp["role"] == "manager")
+
+
+def manager_access():
+    return bool(is_manager() or session.get("manager_web") is True)
 
 
 def log_event(employee_id, operation_type, event_type, shift_id=None, object_code=None, quantity=None, result=None):
@@ -915,7 +920,7 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
 </style></head><body><div class="wrap">
-<div class="top"><a href="/stats">← Статистика</a><button onclick="print()">Печать</button></div>
+<div class="top"><a href="/manager">← Панель руководителя</a><button onclick="print()">Печать</button></div>
 <div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
 </div><script>
 let lastCode='';
@@ -1004,6 +1009,35 @@ refreshQr();setInterval(refreshQr,1000);
 </script></body></html>"""
 
 
+MANAGER_LOGIN_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>Mini WMS · Вход руководителя</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}
+.wrap{width:100%;max-width:460px;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:22px;box-shadow:0 3px 14px rgba(52,72,91,.08)}
+h1{margin:0 0 8px;font-size:25px}.muted{color:#6b7785;font-size:14px;line-height:1.45}
+input{width:100%;margin-top:16px;padding:14px;border:1px solid #cbd9e2;border-radius:10px;font-size:16px;background:#fff}
+button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}
+.err{margin-top:10px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+</style></head><body><div class="wrap"><div class="card">
+<h1>🖥️ Панель руководителя</h1>
+<div class="muted">Отдельный вход с компьютера. Сканер и бейдж здесь не нужны.</div>
+<input id="password" type="password" autocomplete="current-password" placeholder="Пароль руководителя">
+<button onclick="login()">Войти</button>
+<div id="result"></div>
+</div></div>
+<script>
+async function login(){
+ const password=document.getElementById('password').value;
+ const r=await fetch('/api/manager/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+ const d=await r.json();
+ if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Ошибка входа')+'</div>';return}
+ location.href='/manager';
+}
+document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+</script></body></html>"""
+
+
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>Mini WMS · Панель руководителя</title>
@@ -1019,10 +1053,10 @@ STATS_PAGE = """<!doctype html>
 .toplist{display:grid;gap:6px}.toprow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 10px;background:#eef3f6;border-radius:9px;font-size:13px}
 @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}.layout{grid-template-columns:1fr}.head{flex-direction:column}.worker{grid-template-columns:1fr 1fr}.name{grid-column:1/-1}}
 </style></head><body><div class="wrap">
-<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/stats">🖥️ Панель руководителя</a></div>
+<div class="nav"><a href="/">📦 Приёмка</a><a href="/fbs">🚀 FBS</a><a class="active" href="/manager">🖥️ Панель руководителя</a></div>
 <div class="card head">
  <div><h1>🖥️ Mini WMS · Руководитель</h1><div class="small">Оперативный контроль склада с компьютера. Обновление каждые 10 секунд.</div></div>
- <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="/supervisor-qr">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="/exit">🚪 Моя смена</a></div>
+ <div class="actions"><a href="/fbs-journal">📋 Журнал FBS</a><a href="/badges">🪪 Бейджи</a><a href="/supervisor-qr">🔐 QR выхода</a><a href="/supervisor-terminal/setup">📟 Терминал выхода</a><a href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a></div>
 </div>
 
 <div class="kpis">
@@ -1079,6 +1113,7 @@ async function load(){
 
  document.getElementById('recent').innerHTML=o.recent.length?o.recent.map(x=>'<tr><td>'+esc(fmt(x.scanned_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.product_barcode||'—')+'</td><td>'+esc(x.wb_barcode)+'</td></tr>').join(''):'<tr><td colspan="6">Сегодня записей пока нет</td></tr>';
 }
+async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
 load();setInterval(load,10000);
 </script></body></html>"""
 
@@ -1100,7 +1135,7 @@ th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{fon
 @media(max-width:800px){.filters{grid-template-columns:1fr 1fr}.top{align-items:flex-start;flex-direction:column}}
 </style></head><body><div class="wrap">
 <div class="card">
- <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/stats">← Панель руководителя</a></div>
+ <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/manager">← Панель руководителя</a></div>
  <div class="filters">
   <input id="q" placeholder="Артикул, ШК товара или ШК WB">
   <select id="employee"><option value="">Все сотрудники</option></select>
@@ -1330,19 +1365,49 @@ def current_shift_api():
     return jsonify(active=True, stats=shift_stats(row[0]))
 
 
+@wms_bp.get("/manager-login")
+def manager_login_page():
+    if manager_access():
+        return redirect("/manager")
+    return MANAGER_LOGIN_PAGE
+
+
+@wms_bp.post("/api/manager/login")
+def manager_login_api():
+    data = request.get_json(silent=True) or {}
+    password = str(data.get("password", ""))
+    if not MANAGER_WEB_PASSWORD:
+        return jsonify(error="Пароль руководителя не настроен в Render"), 503
+    if not hmac.compare_digest(password, MANAGER_WEB_PASSWORD):
+        return jsonify(error="Неверный пароль"), 403
+    session["manager_web"] = True
+    return jsonify(ok=True)
+
+
+@wms_bp.post("/api/manager/logout")
+def manager_logout_api():
+    session.pop("manager_web", None)
+    return jsonify(ok=True)
+
+
+@wms_bp.get("/manager")
+def manager_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    return STATS_PAGE
+
+
 @wms_bp.get("/stats")
 def stats_page():
-    ensure_db()
-    if not is_manager():
-        return redirect("/fbs")
-    return STATS_PAGE
+    return redirect("/manager")
 
 
 @wms_bp.get("/fbs-journal")
 def fbs_journal_page():
     ensure_db()
-    if not is_manager():
-        return redirect("/fbs")
+    if not manager_access():
+        return redirect("/manager-login")
     return FBS_JOURNAL_PAGE
 
 
@@ -1354,15 +1419,15 @@ def old_manager_page():
 @wms_bp.get("/badges")
 def badges_page():
     ensure_db()
-    if not is_manager():
-        return redirect("/fbs")
+    if not manager_access():
+        return redirect("/manager-login")
     return BADGES_PAGE
 
 
 @wms_bp.get("/api/admin/badges")
 def admin_badges():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     rows = query_all("SELECT id, name, role, badge_number, badge_code, scanner_code FROM employees WHERE active = 1 ORDER BY badge_number, name")
     return jsonify(employees=[
@@ -1374,7 +1439,7 @@ def admin_badges():
 @wms_bp.get("/api/stats/employees")
 def stats_employees():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     rows = query_all("SELECT id, name, role, badge_number FROM employees WHERE active = 1 ORDER BY badge_number, name")
     out = []
@@ -1403,7 +1468,7 @@ def stats_employees():
 @wms_bp.get("/api/fbs/journal")
 def fbs_journal_api():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
 
     q = str(request.args.get("q", "")).strip()
@@ -1635,7 +1700,7 @@ def stats():
 @wms_bp.get("/api/fbs/overview")
 def fbs_overview():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
 
     date_from = str(request.args.get("from", "")).strip()
@@ -1705,7 +1770,7 @@ def fbs_overview():
 @wms_bp.get("/api/fbs/dashboard")
 def dashboard():
     ensure_db()
-    if not is_manager():
+    if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     rows = query_all(
         """
