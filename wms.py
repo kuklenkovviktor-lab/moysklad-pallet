@@ -1480,6 +1480,7 @@ BADGES_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Бейджи</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:900px;margin:auto;padding:16px}
 .top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.top a,.top button,.print-one{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750}.print-one{margin-top:12px;cursor:pointer;width:100%}
@@ -1490,7 +1491,7 @@ BADGES_PAGE = """<!doctype html>
 async function load(){
  const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
  const g=document.getElementById('grid');
- g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" onclick="printBadge(\''+x.id+'\')">Печать этого бейджа</button></div>').join('');
+ g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" data-employee-id="'+x.id+'" onclick="printBadge(this.dataset.employeeId)">Печать этого бейджа</button></div>').join('');
  d.employees.forEach(x=>{
   try{
    new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150});
