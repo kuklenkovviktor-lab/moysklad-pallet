@@ -658,48 +658,45 @@ LOGIN_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:#e9eef3;color:#25313d}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%}
-.wrap{width:100%;max-width:980px;margin:auto;padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
-.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
-.brand{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-.logo{width:36px;height:36px;border-radius:10px;background:#48647a;color:#fff;display:grid;place-items:center;font-weight:900;font-size:15px;letter-spacing:.4px}
-h1{margin:0;font-size:24px}.muted{color:#6b7785;font-size:13px;line-height:1.35}
-.login-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px;align-items:stretch;margin-top:12px}
-.scanbox{height:100%;min-height:180px;padding:18px;border:2px dashed #9fb0bd;border-radius:14px;background:#eef3f6;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:800;font-size:20px}
-.scanbox .muted{font-size:13px;margin-top:6px}
-.controls{display:flex;flex-direction:column;justify-content:center}
-input{width:100%;padding:14px;border:2px solid #9fb0bd;border-radius:11px;background:#fff;font-size:16px;text-align:center;color:#48647a;font-weight:700;outline:none}
-button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:11px;background:#48647a;color:white;font-size:16px;font-weight:800}
-button.secondary{background:#dde8ef;color:#314657;border:1px solid #cbd9e2}
-.err,.ok{margin-top:10px;padding:10px;border-radius:10px;font-size:13px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
-#reader{margin-top:10px;overflow:hidden;border-radius:12px;max-height:42dvh}
-@media (orientation:landscape){
- body{overflow:hidden}
- .wrap{max-width:none;height:100dvh;padding:max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:center}
- .card{width:min(980px,100%);height:calc(100dvh - max(16px,env(safe-area-inset-top)) - max(16px,env(safe-area-inset-bottom)));padding:12px 14px;border-radius:14px;overflow:auto}
- .brand{margin-bottom:2px}.logo{width:32px;height:32px;border-radius:9px;font-size:13px}h1{font-size:20px}.muted{font-size:11px}
- .login-grid{grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;height:calc(100% - 62px)}
- .scanbox{min-height:0;height:100%;font-size:18px;padding:12px}
- .controls{min-height:0}
- input{padding:10px;font-size:14px}
- button{padding:10px;font-size:14px;margin-top:7px}
- #reader{max-height:140px;margin-top:6px}
- .err,.ok{margin-top:6px;padding:7px;font-size:11px}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%;overflow:hidden}
+.wrap{width:100%;height:100dvh;padding:max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:center}
+.card{width:min(980px,100%);height:100%;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:10px 12px;box-shadow:0 2px 10px rgba(52,72,91,.07);display:grid;grid-template-rows:auto 1fr;gap:8px;overflow:hidden}
+.brand{display:flex;align-items:center;gap:9px;min-height:34px}
+.logo{width:32px;height:32px;border-radius:9px;background:#48647a;color:#fff;display:grid;place-items:center;font-weight:900;font-size:13px;letter-spacing:.4px}
+h1{margin:0;font-size:20px;line-height:1}.muted{color:#6b7785;font-size:11px;line-height:1.25}
+.terminal{display:grid;grid-template-columns:1.18fr .82fr;gap:10px;min-height:0}
+.scan-panel{border:2px dashed #9fb0bd;border-radius:13px;background:#eef3f6;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:0}
+.scan-title{font-size:20px;font-weight:850;line-height:1.15}
+.scan-sub{font-size:11px;color:#6b7785;margin-top:5px}
+.controls{display:flex;flex-direction:column;justify-content:center;min-height:0}
+.label{font-size:11px;color:#6b7785;margin:0 0 5px 2px}
+input{width:100%;padding:10px;border:2px solid #9fb0bd;border-radius:10px;background:#fff;font-size:14px;text-align:center;color:#48647a;font-weight:750;outline:none}
+button{width:100%;margin-top:7px;padding:11px;border:0;border-radius:10px;background:#48647a;color:white;font-size:14px;font-weight:850}
+.err,.ok{margin-top:6px;padding:7px;border-radius:9px;font-size:11px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
+#reader{margin-top:7px;border-radius:10px;overflow:hidden;background:#111;min-height:0}
+#reader video{width:100%!important;height:auto!important;max-height:125px!important;object-fit:cover!important}
+#reader__dashboard_section_csr button,#reader__dashboard_section_swaplink{display:none!important}
+@media (orientation:portrait){
+ body{overflow:auto}.wrap{height:auto;min-height:100dvh}.card{height:auto;min-height:calc(100dvh - 16px)}.terminal{grid-template-columns:1fr}.scan-panel{min-height:180px}
 }
 @media (orientation:landscape) and (max-height:420px){
- .card{padding:8px 10px}.brand{gap:8px}.logo{width:28px;height:28px;font-size:12px}h1{font-size:18px}.muted{font-size:10px}
- .login-grid{height:calc(100% - 50px);gap:8px;margin-top:5px}.scanbox{font-size:16px}.scanbox .muted{font-size:10px}
- input{padding:8px;font-size:13px}button{padding:8px;font-size:13px;margin-top:5px}#reader{max-height:100px}
+ .card{padding:7px 9px;gap:5px}.brand{min-height:28px}.logo{width:28px;height:28px;font-size:11px}h1{font-size:17px}.muted{font-size:9px}
+ .terminal{gap:7px}.scan-panel{padding:8px}.scan-title{font-size:17px}.scan-sub,.label{font-size:9px}
+ input{padding:8px;font-size:12px}button{padding:9px;font-size:12px;margin-top:5px}
+ #reader{margin-top:5px}#reader video{max-height:92px!important}
 }
 </style></head>
 <body><div class="wrap"><div class="card">
-<div class="brand"><div class="logo">ONX</div><div><h1>ONIX WMS</h1><div class="muted">Вход сотрудника в FBS-терминал</div></div></div>
-<div class="login-grid">
-  <div class="scanbox">Поднеси бейдж к сканеру<span class="muted">или используй камеру TSD</span></div>
+<div class="brand"><div class="logo">ONX</div><div><h1>ONIX WMS</h1><div class="muted">FBS-терминал сотрудника</div></div></div>
+<div class="terminal">
+  <div class="scan-panel">
+    <div class="scan-title">Поднеси бейдж к сканеру</div>
+    <div class="scan-sub">или используй камеру TSD</div>
+  </div>
   <div class="controls">
-    <input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Поле внешнего сканера">
-    <button onclick="submitHidValue()">Войти по считанному коду</button>
-    <button class="secondary" onclick="toggleCamera()">📷 Камера TSD</button>
+    <div class="label">Внешний сканер</div>
+    <input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Ожидание скана">
+    <button onclick="toggleCamera()">📷 Камера TSD</button>
     <div id="reader"></div>
     <div id="result"></div>
   </div>
@@ -708,6 +705,14 @@ button.secondary{background:#dde8ef;color:#314657;border:1px solid #cbd9e2}
 <script>
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
+
+async function enterTerminalFullscreen(){
+ try{
+  if(!document.fullscreenElement && document.documentElement.requestFullscreen){
+   await document.documentElement.requestFullscreen();
+  }
+ }catch(e){}
+}
 
 function focusHid(){
  try{hidBadge.focus({preventScroll:true})}catch(e){try{hidBadge.focus()}catch(_){}}
@@ -778,6 +783,7 @@ hidBadge.addEventListener('paste',()=>setTimeout(armHidSubmit,0));
 hidBadge.addEventListener('keydown',e=>{
  if(e.key==='Enter'||e.key==='Tab'){
   e.preventDefault();
+  enterTerminalFullscreen();
   submitHidValue();
  }
 });
@@ -804,6 +810,7 @@ window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
 setTimeout(focusHid,120);
 async function toggleCamera(){
+ await enterTerminalFullscreen();
  if(scanner){
   try{await scanner.stop()}catch(e){}
   scanner=null;
