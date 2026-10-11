@@ -921,120 +921,137 @@ FBS_PAGE = """<!doctype html>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 :root{--bg:#e9eef3;--panel:#f7f9fb;--panel2:#eef3f6;--text:#25313d;--muted:#6b7785;--line:#d7e0e7;--accent:#48647a;--accent2:#dde8ef}
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text)}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%}
-.wrap{width:100%;max-width:980px;margin:auto;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:clamp(11px,2vw,17px);box-shadow:0 2px 10px rgba(52,72,91,.07);margin-bottom:9px}
-h1{font-size:clamp(20px,3vw,25px);margin:0 0 5px}h2{font-size:clamp(15px,2.2vw,18px);margin:0 0 7px}
-.muted,.small{color:var(--muted)}.muted{font-size:clamp(12px,1.8vw,14px)}.small{font-size:clamp(10px,1.5vw,12px)}
-select,input{width:100%;padding:clamp(9px,1.6vw,13px);font-size:clamp(14px,2vw,16px);color:var(--text);border:1px solid var(--line);border-radius:10px;background:#fbfcfd;outline:none}
-button{width:100%;padding:clamp(9px,1.6vw,13px);font-size:clamp(13px,2vw,15px);font-weight:750;border:1px solid transparent;border-radius:10px;cursor:pointer;background:var(--accent);color:#f7fafc;margin-top:7px}
-button.secondary{background:var(--accent2);color:var(--text);border-color:#cbd9e2}button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:inset 0 0 0 1px #8ca7b9}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.stat{background:var(--panel2);border:1px solid #dde5eb;border-radius:11px;padding:9px}.big{font-size:clamp(22px,4vw,30px);font-weight:820;line-height:1.05}
-.ok,.err{padding:9px;border-radius:9px;margin-top:7px;font-size:12px}.ok{background:#e1f1e6;color:#2f6b45}.err{background:#f6e4e4;color:#8a4343}
-#reader{margin-top:7px;overflow:hidden;border-radius:11px;max-height:42dvh}.hidden{display:none!important}
-.progress{height:9px;background:#dbe3e9;border-radius:999px;overflow:hidden;margin:6px 0}.progress>div{height:100%;background:#6f8ca1;width:0%}
-.activities{display:grid;grid-template-columns:1fr 1fr;gap:5px}.activities button{margin:0;padding:9px;font-size:12px}
-a{color:#536f83;text-decoration:none;font-weight:650}
-.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
-.nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:38px;padding:7px 6px;border-radius:9px;background:#dde8ef;color:#314657;border:1px solid #cbd9e2;font-size:12px;font-weight:750}
-.nav a.active{background:#48647a;color:#fff;border-color:#48647a}
-@media (orientation:landscape) and (max-height:560px){
-body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(5px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
-.wrap>.nav + .card{height:42px;display:flex;align-items:center;gap:8px;padding:5px 9px;margin-bottom:5px;border-radius:10px}.wrap>.nav + .card h1{font-size:16px;margin:0;white-space:nowrap}.wrap>.nav + .card .muted{display:none}.wrap>.nav + .card div:last-child{margin:0!important;margin-left:auto!important;font-size:11px;white-space:nowrap}
-#startCard{max-width:540px;margin:5px auto;padding:11px}
-#work{display:grid!important;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr) minmax(0,.95fr);gap:5px;height:calc(100dvh - 52px - env(safe-area-inset-top) - env(safe-area-inset-bottom));align-items:stretch}
-#work>.card{min-width:0;height:100%;margin:0;padding:8px;border-radius:10px;overflow:auto;box-shadow:none}
-#work h2{font-size:13px;margin-bottom:4px}#work .big{font-size:clamp(19px,3vw,25px)}#work .small{font-size:9px}#work .stat{padding:6px}
-#work button{padding:6px 5px;font-size:11px;margin-top:4px;border-radius:8px}#work input{padding:7px;font-size:12px;border-radius:8px}
-#reader{margin-top:4px;max-height:135px}.activities{grid-template-columns:1fr 1fr;gap:3px}.activities button{padding:5px 3px;font-size:10px;min-height:28px}.progress{margin:4px 0;height:7px}.ok,.err{padding:6px;margin-top:4px;font-size:10px}
-}
-@media (orientation:landscape) and (max-width:760px){body{overflow:auto}.wrap{height:auto;overflow:visible}#work{grid-template-columns:1fr 1fr;height:auto}#work>.card{height:auto;overflow:visible}#work>.card:last-child{grid-column:1/-1}.activities{grid-template-columns:repeat(4,1fr)}}
-
+.wrap{width:100%;max-width:1100px;margin:auto;padding:10px}
+.hidden{display:none!important}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.nav{display:flex;gap:6px;margin-bottom:6px}
+.nav a{flex:1;display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:9px;background:var(--accent2);color:#314657;border:1px solid #cbd9e2;text-decoration:none;font-size:11px;font-weight:800}
+.nav a.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+#topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;padding:6px 9px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+#topbar .who{font-size:11px;font-weight:800}
+#topbar a{font-size:10px;color:#536f83;text-decoration:none;font-weight:800}
+#startCard{max-width:520px;margin:20px auto;padding:16px}
+#startCard h2{margin:0 0 5px;font-size:18px}
+#startCard .muted{font-size:11px;color:var(--muted)}
+button{width:100%;border:1px solid transparent;border-radius:9px;background:var(--accent);color:#fff;font-weight:850;padding:10px;font-size:12px;cursor:pointer;margin-top:6px}
+button.secondary{background:var(--accent2);color:var(--text);border-color:#cbd9e2}
+button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:inset 0 0 0 1px #8ca7b9}
+#work{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(230px,.8fr);gap:6px}
+#scanCard{display:flex;flex-direction:column;min-height:0}
+.scan-stage{background:var(--panel2);border:1px solid #dce5eb;border-radius:11px;padding:12px;text-align:center}
+.scan-stage .label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+#scanStage{font-size:28px;font-weight:900;line-height:1.05;margin-top:3px}
+#productInfo{font-size:10px;color:var(--muted);margin-top:5px;min-height:24px;line-height:1.25}
+#reader{margin-top:6px;border-radius:10px;overflow:hidden;max-height:150px}
+#barcode{width:100%;margin-top:7px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:11px;outline:none}
+#result{margin-top:6px}
+.ok,.err{padding:7px;border-radius:8px;font-size:10px}
+.ok{background:#e1f1e6;color:#2f6b45}.err{background:#f6e4e4;color:#8a4343}
+#side{display:flex;flex-direction:column;gap:6px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.stat{background:var(--panel2);border:1px solid #dde5eb;border-radius:9px;padding:7px}
+.stat.orders{grid-column:1/-1}
+.stat .small{font-size:8px;color:var(--muted)}
+.stat .big{font-size:20px;font-weight:900;line-height:1.05}
+.progress{height:6px;background:#dbe3e9;border-radius:999px;overflow:hidden;margin:5px 0}.progress>div{height:100%;background:#6f8ca1;width:0%}
+#remaining{font-size:8px;color:var(--muted)}
+#employeeName{display:none}
+.ops-title{font-size:9px;color:var(--muted);margin:1px 0 3px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.activities{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.activities button{margin:0;padding:7px 4px;font-size:10px;min-height:32px}
+.exit-btn{margin-top:auto}
 @media (orientation:landscape) and (max-height:600px){
- .nav{display:flex;gap:5px;margin-bottom:5px}
- .nav a{flex:1;min-height:30px;padding:5px 6px;font-size:10px;border-radius:8px}
- .wrap>.nav + .card{height:36px;padding:4px 8px;margin-bottom:4px}
- .wrap>.nav + .card h1{font-size:15px}
- .wrap>.nav + .card .small{font-size:9px}
- #startCard{max-width:600px;margin:4px auto;padding:8px}
- #startCard h2{font-size:13px}
- #startCard .muted{font-size:9px}
- #startCard button{padding:7px;font-size:11px}
- #work{grid-template-columns:minmax(0,.9fr) minmax(0,1.15fr) minmax(0,.95fr);gap:4px;height:calc(100dvh - 45px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
- #work>.card{padding:7px;border-radius:9px}
- #work h2{font-size:12px}
- #work .big{font-size:20px}
- #work .small{font-size:8px}
- #work .stat{padding:5px}
- #work button{padding:5px 4px;font-size:9px;margin-top:3px}
- #work input{padding:6px;font-size:11px}
- .activities{gap:2px}.activities button{padding:4px 2px;font-size:9px;min-height:25px}
- #reader{max-height:110px}
- .ok,.err{padding:5px;margin-top:3px;font-size:9px}
+ body{overflow:hidden}
+ .wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(4px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left))}
+ .nav{margin-bottom:4px}.nav a{min-height:28px;padding:4px 6px;font-size:9px}
+ #topbar{margin-bottom:4px;padding:4px 7px;min-height:28px}#topbar .who{font-size:9px}#topbar a{font-size:9px}
+ #work{height:calc(100dvh - 68px);grid-template-columns:minmax(0,1.9fr) minmax(210px,.72fr);gap:4px}
+ .card{padding:6px;border-radius:9px}
+ .scan-stage{padding:7px}.scan-stage .label{font-size:7px}#scanStage{font-size:23px}#productInfo{font-size:8px;min-height:18px;margin-top:3px}
+ #scanCard button{padding:6px;font-size:9px;margin-top:4px}
+ #reader{max-height:105px;margin-top:4px}
+ #barcode{padding:5px;font-size:9px;margin-top:4px}
+ .ok,.err{padding:5px;font-size:8px}
+ #side{gap:4px}.stats{gap:3px}.stat{padding:5px}.stat .small{font-size:7px}.stat .big{font-size:17px}.progress{height:5px;margin:3px 0}#remaining{font-size:7px}
+ .ops-title{font-size:7px;margin:0 0 2px}.activities{gap:3px}.activities button{padding:5px 2px;font-size:8px;min-height:25px}
+ .exit-btn{padding:6px!important;font-size:9px!important}
 }
 </style>
 </head>
 <body>
 <div class="wrap">
 <div class="nav">
-<a href="/">📦 Приёмка</a>
-<a class="active" href="/fbs">🚀 FBS</a>
-<a class="manager-only hidden" href="/stats">📊 Статистика</a>
+  <a href="/">📦 Приёмка</a>
+  <a class="active" href="/fbs">🚀 FBS</a>
 </div>
-<div class="card">
-<h1>🚀 FBS · Выработка</h1>
-<div class="muted">Двойной контроль: сначала ШК товара, затем ШК WB. Заказ засчитывается только после двух успешных сканов.</div>
-<div class="small" style="margin-top:6px"><span id="identity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
+
+<div id="topbar">
+  <div class="who"><span id="identity"></span></div>
+  <a href="/exit">🚪 Завершить смену</a>
 </div>
 
 <div class="card" id="startCard">
-<h2 id="startName">Сотрудник</h2>
-<div class="muted">Бейдж уже определил сотрудника. Начни или продолжи его смену.</div>
-<button onclick="startShift()">Начать / продолжить смену</button>
+  <h2 id="startName">Сотрудник</h2>
+  <div class="muted">Нажми кнопку и начинай работу.</div>
+  <button onclick="startShift()">Начать смену</button>
 </div>
 
 <div id="work" class="hidden">
-<div class="card">
-<div class="small" id="employeeName">Сотрудник</div>
-<div class="big"><span id="orders">0</span> / <span id="target">1600</span></div>
-<div class="progress"><div id="bar"></div></div>
-<div class="grid">
-<div class="stat"><div class="small">Чистая сборка</div><div class="big" id="pickTime">0 мин</div></div>
-<div class="stat"><div class="small">Заказов/час</div><div class="big" id="speed">0</div></div>
-</div>
-<div class="small" style="margin-top:10px" id="remaining"></div>
-<div id="result"></div>
-</div>
+  <div class="card" id="scanCard">
+    <div class="scan-stage" id="scanStageBox">
+      <div class="label">Сканируй сейчас</div>
+      <div id="scanStage">1. ТОВАР</div>
+      <div id="productInfo">После товара система попросит ШК WB.</div>
+    </div>
 
-<div class="card">
-<h2>Двойной скан FBS</h2>
-<div class="stat" id="scanStageBox">
- <div class="small">Сейчас нужен</div>
- <div style="font-size:18px;font-weight:850;margin-top:3px" id="scanStage">1. ШК товара</div>
- <div class="small" style="margin-top:5px" id="productInfo">После товара система попросит ШК WB.</div>
-</div>
-<button onclick="toggleCamera()">📷 Камера телефона</button>
-<div id="reader" class="hidden"></div>
-<input id="barcode" autocomplete="off" inputmode="text" placeholder="Сканируй ШК товара" style="margin-top:10px">
-<button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
-<button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сбросить выбранный товар</button>
-</div>
+    <button onclick="toggleCamera()">📷 Камера</button>
+    <div id="reader" class="hidden"></div>
 
-<div class="card">
-<h2>Текущая операция</h2>
-<div class="activities" id="activities">
-<button data-a="picking" onclick="activity('picking')">Сборка</button>
-<button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
-<button data-a="receiving" onclick="activity('receiving')">Приёмка</button>
-<button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
-<button data-a="pallets" onclick="activity('pallets')">Палеты</button>
-<button data-a="kgt" onclick="activity('kgt')">КГТ</button>
-<button data-a="downtime" onclick="activity('downtime')">Простой</button>
-<button data-a="other" onclick="activity('other')">Другое</button>
-</div>
-<button class="secondary" onclick="location.href='/exit'">🚪 Завершить смену</button>
-</div>
+    <input id="barcode" autocomplete="off" inputmode="text" placeholder="Сканируй ШК">
+    <button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
+    <button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сбросить товар</button>
+    <div id="result"></div>
+  </div>
+
+  <div id="side">
+    <div class="card">
+      <div id="employeeName">Сотрудник</div>
+      <div class="stats">
+        <div class="stat orders">
+          <div class="small">Заказы</div>
+          <div class="big"><span id="orders">0</span> / <span id="target">1600</span></div>
+          <div class="progress"><div id="bar"></div></div>
+          <div id="remaining"></div>
+        </div>
+        <div class="stat">
+          <div class="small">Заказов/час</div>
+          <div class="big" id="speed">0</div>
+        </div>
+        <div class="stat">
+          <div class="small">Сборка</div>
+          <div class="big" id="pickTime">0 мин</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ops-title">Операция</div>
+      <div class="activities" id="activities">
+        <button data-a="picking" onclick="activity('picking')">Сборка</button>
+        <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
+        <button data-a="receiving" onclick="activity('receiving')">Приёмка</button>
+        <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
+        <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
+        <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
+        <button data-a="downtime" onclick="activity('downtime')">Простой</button>
+        <button data-a="other" onclick="activity('other')">Другое</button>
+      </div>
+      <button class="secondary exit-btn" onclick="location.href='/exit'">🚪 Выход</button>
+    </div>
+  </div>
 </div>
 </div>
 <script>
@@ -1090,7 +1107,7 @@ function updateScanStage(){
   input.placeholder='Теперь сканируй ШК WB';
   reset.classList.remove('hidden');
  }else{
-  document.getElementById('scanStage').textContent='1. ШК товара';
+  document.getElementById('scanStage').textContent='1. ТОВАР';
   document.getElementById('productInfo').textContent='После товара система попросит ШК WB.';
   input.placeholder='Сканируй ШК товара';
   reset.classList.add('hidden');
