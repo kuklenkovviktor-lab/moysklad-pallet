@@ -337,6 +337,39 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
 .nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:44px;padding:9px 8px;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px;background:#e7edf2;color:#314657;border:1px solid #d2dde5}
 .nav a.active{background:#48647a;color:#fff;border-color:#48647a}
+
+@media (orientation:landscape) and (max-height:600px){
+ body{overflow:hidden;background:#e9eef3;color:#25313d}
+ .wrap{
+  max-width:none;width:100%;height:100dvh;margin:0;
+  padding:max(5px,env(safe-area-inset-top)) max(7px,env(safe-area-inset-right)) max(5px,env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));
+  display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);
+  grid-template-rows:auto auto auto minmax(0,1fr);gap:5px;overflow:hidden
+ }
+ .nav{grid-column:1/-1;display:flex;gap:5px;margin:0}
+ .nav a{flex:1;min-height:30px;padding:5px 7px;border-radius:8px;font-size:10px}
+ .wrap>.small{grid-column:1/-1;margin:0 2px!important;font-size:9px;line-height:1.1}
+ .wrap>.card:first-of-type{
+  grid-column:1/-1;margin:0;padding:6px 9px;border-radius:10px;
+  display:flex;align-items:center;gap:10px;box-shadow:none;border:1px solid #d7e0e7;background:#f7f9fb
+ }
+ .wrap>.card:first-of-type h1{font-size:15px;margin:0;white-space:nowrap}
+ .wrap>.card:first-of-type .muted{font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #docCard{grid-column:1;grid-row:4;margin:0;min-width:0;height:100%;padding:8px;border-radius:10px;overflow:auto;box-shadow:none;border:1px solid #d7e0e7;background:#f7f9fb}
+ #scanCard{grid-column:2;grid-row:4;margin:0;min-width:0;height:100%;padding:8px;border-radius:10px;overflow:auto;box-shadow:none;border:1px solid #d7e0e7;background:#f7f9fb}
+ #completionCard{position:fixed;inset:8px;z-index:50;margin:0;overflow:auto;border:2px solid #48647a}
+ #docCard h2,#scanCard h2{font-size:13px;margin:0 0 4px}
+ #docCard .muted,#scanCard .muted{font-size:9px;line-height:1.2}
+ label{margin:5px 0 2px;font-size:9px}
+ input,select{padding:7px 8px;font-size:11px;border-width:1px;border-radius:8px}
+ button{padding:7px 8px;font-size:11px;border-radius:8px;margin-top:5px}
+ .activeDoc{padding:7px;margin-top:5px;border-radius:8px;font-size:10px}
+ #reader{margin-top:5px;max-height:130px;border-radius:9px}
+ .ok,.err,.info{margin-top:5px;padding:7px;border-radius:8px;font-size:10px}
+ .stats{margin-top:5px;padding:7px;border-radius:8px}.big{font-size:20px}
+ .row{gap:5px}.qtypad{gap:4px;margin-top:5px}.qtypad button{padding:7px;font-size:14px}
+ .small{font-size:9px}
+}
 </style>
 </head>
 <body>
