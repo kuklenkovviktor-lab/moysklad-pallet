@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
-from flask import Blueprint, jsonify, request, session, redirect
+from flask import Blueprint, jsonify, request, session, redirect, Response
 
 wms_bp = Blueprint("wms", __name__)
 
@@ -646,7 +646,13 @@ def shift_stats(shift_id):
 LOGIN_PAGE = """<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Вход</title>
+<meta name="theme-color" content="#e9eef3">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="screen-orientation" content="landscape">
+<title>ONIX WMS · Вход</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
@@ -779,6 +785,12 @@ async function toggleCamera(){
  try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:280,height:180}},txt=>login(txt),()=>{})}
  catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>';setTimeout(focusHid,100)}
 }
+</script><script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
 </script></body></html>"""
 
 
@@ -788,6 +800,11 @@ FBS_PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="screen-orientation" content="landscape">
 <title>FBS · Выработка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -1001,6 +1018,12 @@ async function toggleCamera(){
 }
 function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
 updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
+</script><script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
 </script></body></html>"""
 
 
@@ -2065,6 +2088,66 @@ def fbs_journal_api():
         }
         for r in rows
     ])
+
+
+@wms_bp.get("/manifest.webmanifest")
+def pwa_manifest():
+    manifest = {
+        "name": "ONIX WMS · FBS терминал",
+        "short_name": "ONIX FBS",
+        "description": "Рабочий FBS-терминал ONIX WMS",
+        "start_url": "/fbs",
+        "scope": "/",
+        "display": "fullscreen",
+        "display_override": ["fullscreen", "standalone"],
+        "orientation": "landscape",
+        "background_color": "#e9eef3",
+        "theme_color": "#48647a",
+        "icons": [
+            {
+                "src": "/pwa-icon.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            }
+        ]
+    }
+    return Response(json.dumps(manifest, ensure_ascii=False), mimetype="application/manifest+json")
+
+
+@wms_bp.get("/pwa-icon.svg")
+def pwa_icon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="96" fill="#48647a"/>
+    <rect x="82" y="92" width="348" height="328" rx="42" fill="#f7f9fb"/>
+    <path d="M130 170h252v36H130zm0 68h252v36H130zm0 68h160v36H130z" fill="#48647a"/>
+    <circle cx="350" cy="324" r="58" fill="#48647a"/>
+    <path d="M326 324l17 18 34-39" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>"""
+    return Response(svg, mimetype="image/svg+xml")
+
+
+@wms_bp.get("/sw.js")
+def pwa_service_worker():
+    js = """
+const CACHE = 'onix-pwa-v1';
+self.addEventListener('install', event => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', event => {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  );
+});
+"""
+    response = Response(js, mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @wms_bp.get("/fbs")
