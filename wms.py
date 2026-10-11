@@ -873,7 +873,7 @@ async function toggleCamera(){
  scanner=formats?new Html5Qrcode('reader',{formatsToSupport:formats}):new Html5Qrcode('reader');
  try{
   await scanner.start(
-   {facingMode:{ideal:'environment'}},
+   {facingMode:'environment'},
    {
     fps:20,
     aspectRatio:1.333333,
