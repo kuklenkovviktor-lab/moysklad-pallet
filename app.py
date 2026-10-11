@@ -377,119 +377,134 @@ button:disabled{opacity:.45;cursor:not-allowed}
  .row{gap:5px}.qtypad{gap:4px;margin-top:5px}.qtypad button{padding:7px;font-size:14px}
  .small{font-size:9px}
 }
+
+.disabled-tab{opacity:.45;pointer-events:none}
+.step-kicker{font-size:10px;font-weight:900;letter-spacing:.1em;color:#6b7785;margin-bottom:3px}
+.scan-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px}
+.scan-head h2{font-size:28px;margin:0}
+.scan-counters{display:flex;gap:6px}
+.scan-counters>div{min-width:72px;background:#eef3f6;border:1px solid #d7e0e7;border-radius:10px;padding:6px 8px;text-align:center}
+.scan-counters span{display:block;font-size:22px;font-weight:900;line-height:1}
+.scan-counters small{font-size:8px;color:#6b7785}
+.quick-row{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.quick-row button{margin-top:5px}
+.finish-btn{margin-top:8px}
+@media (orientation:landscape) and (max-height:600px){
+ .wrap{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}
+ .nav{grid-column:1;grid-row:1}
+ .wrap>.small{grid-column:1;grid-row:2}
+ #docCard,#scanCard{grid-column:1;grid-row:3;width:min(900px,100%);justify-self:center;overflow:auto}
+ #scanCard{display:block}
+ .scan-head h2{font-size:24px}
+ .scan-counters>div{min-width:62px;padding:5px}.scan-counters span{font-size:19px}
+ .quick-row button{font-size:10px;padding:6px}
+ #reader{max-height:115px}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
 <div class="nav">
   <a class="active" href="/">📦 Приёмка</a>
-  <a href="/fbs">🚀 FBS</a>
-  <a id="statsLink" class="hidden" href="/stats">📊 Статистика</a>
+  <a href="/fbs">🧺 Сборка</a>
+  <a class="disabled-tab" href="#" onclick="return false">↔ Перемещение</a>
 </div>
 <div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 
 <div class="card" id="docCard">
-  <h2>Документ Оприходования</h2>
-
+  <div class="step-kicker">ПРИЁМКА</div>
+  <h2 id="docTitle">Выбери документ</h2>
   <div id="activeDoc" class="activeDoc hidden"></div>
 
-  <button id="newDocBtn" onclick="showNewDoc()">＋ Новое оприходование</button>
-  <button class="secondary" onclick="showExisting()">Открыть существующее</button>
+  <div id="docHome">
+    <button id="newDocBtn" onclick="showNewDoc()">＋ Новая приёмка</button>
+    <button class="secondary" onclick="showExisting()">Открыть существующую</button>
+  </div>
 
   <div id="newDocForm" class="hidden">
     <label>Склад</label>
     <select id="storeSelect"><option value="">Загрузка…</option></select>
-
-    <label>Поставщик (статус Оприходования)</label>
+    <label>Поставщик</label>
     <select id="stateSelect"><option value="">Загрузка…</option></select>
-
     <label>Организация</label>
     <select id="orgSelect"><option value="">Загрузка…</option></select>
-
-    <button onclick="createReceipt()">Создать оприходование</button>
-    <button class="secondary" onclick="hideDocForms()">Отмена</button>
+    <button onclick="createReceipt()">Начать приёмку</button>
+    <button class="secondary" onclick="hideDocForms()">Назад</button>
   </div>
 
   <div id="existingForm" class="hidden">
-    <label>Последние оприходования</label>
+    <label>Последние приёмки</label>
     <select id="receiptSelect"><option value="">Загрузка…</option></select>
-    <button onclick="useSelectedReceipt()">Открыть выбранное</button>
-    <button class="secondary" onclick="loadReceipts()">↻ Обновить список</button>
-    <button class="secondary" onclick="hideDocForms()">Отмена</button>
+    <button onclick="useSelectedReceipt()">Открыть</button>
+    <button class="secondary" onclick="loadReceipts()">↻ Обновить</button>
+    <button class="secondary" onclick="hideDocForms()">Назад</button>
   </div>
 </div>
 
-<div class="card" id="scanCard">
-  <h2>Сканирование палет</h2>
-  <div class="muted">Один скан палетного ШК добавляет количество из упаковки товара в активное Оприходование.</div>
+<div class="card hidden" id="scanCard">
+  <div class="scan-head">
+    <div>
+      <div class="step-kicker">ПРИЁМКА</div>
+      <h2 id="scanPrompt">Сканируй палету</h2>
+      <div id="scanDocName" class="muted"></div>
+    </div>
+    <div class="scan-counters">
+      <div><span id="pallets">0</span><small>палет</small></div>
+      <div><span id="units">0</span><small>шт.</small></div>
+    </div>
+  </div>
 
-  <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Сканировать полную палету</button>
-  <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>📦 Неполная палета</button>
-  <button class="secondary" id="oszBtn" onclick="startOszFlow()" disabled>🏭 Палета ОСЗ / SSCC</button>
-  <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>⌨️ Ручной ввод / ТСД</button>
+  <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Полная палета</button>
+  <div class="quick-row">
+    <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>Неполная</button>
+    <button class="secondary" id="oszBtn" onclick="startOszFlow()" disabled>ОСЗ / SSCC</button>
+    <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>ТСД / ввод</button>
+  </div>
 
   <div id="reader" class="hidden"></div>
 
   <div id="oszForm" class="info hidden">
-    <b>Палета ОСЗ</b>
-    <div class="small" id="oszStatus">Сначала отсканируйте SSCC палеты.</div>
+    <b>ОСЗ / SSCC</b>
+    <div class="small" id="oszStatus">Сканируй SSCC палеты.</div>
     <div id="oszProductInfo" class="hidden"></div>
-    <label id="oszQtyLabel" class="hidden">Количество по этикетке ОСЗ, шт.</label>
-    <input id="oszQty" class="hidden" inputmode="numeric" type="number" min="1" step="1" placeholder="Например 440">
+    <label id="oszQtyLabel" class="hidden">Количество, шт.</label>
+    <input id="oszQty" class="hidden" inputmode="numeric" type="number" min="1" step="1">
     <div id="oszQtyPad" class="qtypad hidden">
-      <button type="button" onclick="oszQtyDigit('1')">1</button>
-      <button type="button" onclick="oszQtyDigit('2')">2</button>
-      <button type="button" onclick="oszQtyDigit('3')">3</button>
-      <button type="button" onclick="oszQtyDigit('4')">4</button>
-      <button type="button" onclick="oszQtyDigit('5')">5</button>
-      <button type="button" onclick="oszQtyDigit('6')">6</button>
-      <button type="button" onclick="oszQtyDigit('7')">7</button>
-      <button type="button" onclick="oszQtyDigit('8')">8</button>
-      <button type="button" onclick="oszQtyDigit('9')">9</button>
-      <button type="button" class="action" onclick="oszQtyClear()">Очистить</button>
-      <button type="button" onclick="oszQtyDigit('0')">0</button>
-      <button type="button" class="action" onclick="oszQtyBackspace()">⌫</button>
+      <button type="button" onclick="oszQtyDigit('1')">1</button><button type="button" onclick="oszQtyDigit('2')">2</button><button type="button" onclick="oszQtyDigit('3')">3</button>
+      <button type="button" onclick="oszQtyDigit('4')">4</button><button type="button" onclick="oszQtyDigit('5')">5</button><button type="button" onclick="oszQtyDigit('6')">6</button>
+      <button type="button" onclick="oszQtyDigit('7')">7</button><button type="button" onclick="oszQtyDigit('8')">8</button><button type="button" onclick="oszQtyDigit('9')">9</button>
+      <button type="button" class="action" onclick="oszQtyClear()">Очистить</button><button type="button" onclick="oszQtyDigit('0')">0</button><button type="button" class="action" onclick="oszQtyBackspace()">⌫</button>
     </div>
-    <button id="oszProductBtn" class="secondary hidden" onclick="scanOszProduct()">Сканировать ШК товара</button>
-    <button id="oszAcceptBtn" class="hidden" onclick="acceptOszPallet()">Принять палету ОСЗ</button>
+    <button id="oszProductBtn" class="secondary hidden" onclick="scanOszProduct()">Сканировать товар</button>
+    <button id="oszAcceptBtn" class="hidden" onclick="acceptOszPallet()">Принять палету</button>
     <button class="secondary" onclick="cancelOszFlow()">Отмена</button>
   </div>
 
   <div id="manual" class="hidden">
-    <label>Штрихкод палеты</label>
-    <input id="barcode" inputmode="numeric" autocomplete="off" placeholder="Например 2000000000404">
-    <button onclick="sendManualFull()">Добавить как полную палету</button>
-    <button class="secondary" onclick="sendManualPartial()">Неполная палета вручную</button>
+    <input id="barcode" inputmode="numeric" autocomplete="off" placeholder="Сканируй штрихкод">
+    <button onclick="sendManualFull()">Принять</button>
+    <button class="secondary" onclick="sendManualPartial()">Неполная палета</button>
   </div>
 
   <div id="partialForm" class="info hidden">
     <b id="partialTitle">Неполная палета</b>
     <div class="small" id="partialMeta"></div>
-    <label>Фактически приехало, шт.</label>
-    <input id="partialQty" inputmode="numeric" type="number" min="1" step="1" placeholder="Например 100">
-    <button onclick="confirmPartial()">Принять фактическое количество</button>
+    <label>Фактически, шт.</label>
+    <input id="partialQty" inputmode="numeric" type="number" min="1" step="1">
+    <button onclick="confirmPartial()">Принять количество</button>
     <button class="secondary" onclick="cancelPartial()">Отмена</button>
   </div>
 
   <div id="result"></div>
-
-  <div class="stats">
-    <div class="row">
-      <div><div class="small">Палет принято</div><div class="big" id="pallets">0</div></div>
-      <div><div class="small">Единиц товара</div><div class="big" id="units">0</div></div>
-    </div>
-  </div>
-
-  <button id="completeBtn" class="danger" onclick="completeReceipt()" disabled>✓ Провести оприходование</button>
+  <button id="completeBtn" class="danger finish-btn" onclick="completeReceipt()" disabled>✓ Завершить приёмку</button>
 </div>
 
 <div class="card hidden" id="completionCard">
+  <div class="step-kicker">ГОТОВО</div>
   <h1>✅ Приёмка завершена</h1>
-  <div class="muted">Документ проведён. Приёмка закрыта, товар записан в МойСклад.</div>
   <div id="completionSummary" class="stats"></div>
   <button onclick="startAnotherReceipt()">＋ Новая приёмка</button>
-  <button class="secondary" onclick="location.href='/'">На главный экран</button>
-</div>
+</div></div>
 
 </div>
 
@@ -570,25 +585,37 @@ function setActiveReceipt(id,name,meta=''){
 
   if(enabled){
     box.classList.remove('hidden');
-    box.innerHTML='<b>'+escapeHtml(activeReceiptName)+'</b><br><span class="small">'+escapeHtml(meta||'Активная Приёмка')+'</span>';
+    box.innerHTML='<b>'+escapeHtml(activeReceiptName)+'</b><br><span class="small">'+escapeHtml(meta||'Активная приёмка')+'</span>';
+    document.getElementById('scanDocName').textContent=activeReceiptName;
+    document.getElementById('docCard').classList.add('hidden');
+    document.getElementById('scanCard').classList.remove('hidden');
   }else{
     box.classList.add('hidden');
     box.innerHTML='';
+    document.getElementById('scanDocName').textContent='';
+    document.getElementById('scanCard').classList.add('hidden');
+    document.getElementById('docCard').classList.remove('hidden');
   }
 }
 
 function showNewDoc(){
+  document.getElementById('docHome').classList.add('hidden');
   document.getElementById('newDocForm').classList.remove('hidden');
   document.getElementById('existingForm').classList.add('hidden');
+  document.getElementById('docTitle').textContent='Новая приёмка';
 }
 function showExisting(){
+  document.getElementById('docHome').classList.add('hidden');
   document.getElementById('existingForm').classList.remove('hidden');
   document.getElementById('newDocForm').classList.add('hidden');
+  document.getElementById('docTitle').textContent='Открыть приёмку';
   loadReceipts();
 }
 function hideDocForms(){
   document.getElementById('newDocForm').classList.add('hidden');
   document.getElementById('existingForm').classList.add('hidden');
+  document.getElementById('docHome').classList.remove('hidden');
+  document.getElementById('docTitle').textContent='Выбери документ';
 }
 
 async function loadBootstrap(){
@@ -1139,7 +1166,6 @@ async function loadWmsIdentity(){
     if(!r.ok){location.href='/login';return;}
     const d=await r.json();
     document.getElementById('navIdentity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
-    if(d.employee.role==='manager')document.getElementById('statsLink').classList.remove('hidden');
     await fetch('/api/operation/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation:'receiving'})});
   }catch(e){}
 }
