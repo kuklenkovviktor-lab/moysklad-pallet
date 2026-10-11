@@ -867,9 +867,35 @@ async function toggleCamera(){
   return
  }
  if(typeof Html5Qrcode==='undefined')return;
- scanner=new Html5Qrcode('reader');
- try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:220,height:120}},txt=>{const code=normalizeHidCode(txt);if(code===ZEBRA_SERVICE_CODE)setScannerReady();else login(code)},()=>{})}
- catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>';setTimeout(focusHid,100)}
+ const formats=(typeof Html5QrcodeSupportedFormats!=='undefined')
+  ? [Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.CODE_128]
+  : undefined;
+ scanner=formats?new Html5Qrcode('reader',{formatsToSupport:formats}):new Html5Qrcode('reader');
+ try{
+  await scanner.start(
+   {facingMode:{ideal:'environment'}},
+   {
+    fps:20,
+    aspectRatio:1.333333,
+    qrbox:(viewW,viewH)=>{
+     const side=Math.max(90,Math.min(180,Math.floor(Math.min(viewW,viewH)*0.78)));
+     return {width:side,height:side};
+    }
+   },
+   txt=>{
+    const code=normalizeHidCode(txt);
+    if(!code)return;
+    document.getElementById('result').innerHTML='<div class="ok">Код считан</div>';
+    if(code===ZEBRA_SERVICE_CODE)setScannerReady();
+    else login(code);
+   },
+   ()=>{}
+  );
+ } catch(e){
+  scanner=null;
+  document.getElementById('result').innerHTML='<div class="err">Камера не открылась: '+String((e&&e.message)||e||'ошибка')+'</div>';
+  setTimeout(focusHid,100);
+ }
 }
 </script><script>
 if ('serviceWorker' in navigator) {
