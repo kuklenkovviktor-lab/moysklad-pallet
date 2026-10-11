@@ -950,6 +950,8 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
 #result{margin-top:6px}
 .ok,.err{padding:7px;border-radius:8px;font-size:10px}
 .ok{background:#e1f1e6;color:#2f6b45}.err{background:#f6e4e4;color:#8a4343}
+.tsd-error{position:fixed;inset:0;z-index:5000;background:#b42318;color:#fff;display:none;align-items:center;justify-content:center;padding:20px}
+.tsd-error.open{display:flex}.tsd-error-box{width:min(720px,94vw);text-align:center}.tsd-error-icon{font-size:58px;font-weight:900;line-height:1}.tsd-error-title{font-size:34px;font-weight:950;margin-top:8px}.tsd-error-text{font-size:18px;font-weight:750;margin-top:10px;line-height:1.3}.tsd-error button{margin:18px auto 0;max-width:260px;background:#fff;color:#8a1f17;border:0;font-size:18px;padding:12px}
 #side{display:flex;flex-direction:column;gap:6px}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .stat{background:var(--panel2);border:1px solid #dde5eb;border-radius:9px;padding:7px}
@@ -1054,6 +1056,14 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
   </div>
 </div>
 </div>
+<div id="tsdError" class="tsd-error" onclick="closeTsdError()">
+ <div class="tsd-error-box" onclick="event.stopPropagation()">
+  <div class="tsd-error-icon">!</div>
+  <div class="tsd-error-title">ОШИБКА</div>
+  <div id="tsdErrorText" class="tsd-error-text">Скан отклонён</div>
+  <button onclick="closeTsdError()">OK</button>
+ </div>
+</div>
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
 let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
@@ -1071,6 +1081,15 @@ function beep(ok=true){
  }catch(e){}
 }
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function showTsdError(message){
+ beep(false);
+ document.getElementById('tsdErrorText').textContent=String(message||'Скан отклонён');
+ document.getElementById('tsdError').classList.add('open');
+}
+function closeTsdError(){
+ document.getElementById('tsdError').classList.remove('open');
+ setTimeout(()=>{const el=document.getElementById('barcode');if(el)el.focus()},60);
+}
 
 async function loadIdentity(){
  const r=await fetch('/api/auth/me'),d=await r.json();
@@ -1121,7 +1140,7 @@ function clearPendingProduct(){
 async function acceptProduct(code){
  const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code})});
  const d=await r.json();
- if(!r.ok){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(d.error||'Товар не найден')+'</div>';return false}
+ if(!r.ok){showTsdError(d.error||'Товар не найден');return false}
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
  updateScanStage();beep(true);
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
@@ -1133,7 +1152,7 @@ async function acceptWb(code){
   shift_id:shiftId,barcode:code,product_barcode:p.barcode,article:p.article,product_name:p.name,scan_type:'normal'
  })});
  const d=await r.json();
- if(!r.ok){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(d.error||'Ошибка ШК WB')+'</div>';return false}
+ if(!r.ok){showTsdError(d.error||'Ошибка ШК WB');return false}
  pendingProduct=null;updateScanStage();beep(true);
  document.getElementById('result').innerHTML='<div class="ok">✅ +1 заказ · '+esc(p.article||p.barcode)+' → '+esc(code)+'</div>';
  await refresh();return true;
@@ -1168,7 +1187,7 @@ async function toggleCamera(){
   await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:320,height:160}},txt=>cameraScan(txt),()=>{});
  }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
 }
-function showErr(m){beep(false);document.getElementById('result').innerHTML='<div class="err">'+esc(m)+'</div>'}
+function showErr(m){showTsdError(m)}
 updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
 </script><script>
 if ('serviceWorker' in navigator) {
@@ -1394,6 +1413,7 @@ STATS_PAGE = """<!doctype html>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
+  <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
@@ -1429,6 +1449,11 @@ STATS_PAGE = """<!doctype html>
   </div>
   <div class="progress"><div id="progressBar"></div></div>
   <div class="small" id="progressText">Задай план на день, чтобы видеть остаток и процент выполнения.</div>
+ </div>
+
+ <div class="card" style="margin-bottom:12px">
+  <div class="section-title"><b>FBS по часам</b><span class="small">собрано заказов за каждый час</span></div>
+  <div id="hourlyChart" style="height:170px;display:flex;align-items:flex-end;gap:5px;padding-top:10px"></div>
  </div>
 
  <div class="grid2">
@@ -1475,6 +1500,15 @@ function activityName(v){return ({picking:'Сборка',replenishment:'Попо
 function activityMinutes(ts){if(!ts)return 0;return Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/60000))}
 function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
 function deviationClass(v){return ['product_mismatch','duplicate_wb','product_not_found'].includes(v)?'danger':'warn'}
+function renderHourly(rows){
+ const hours=Array.from({length:24},(_,i)=>({h:i,n:0}));
+ rows.forEach(x=>{const d=new Date(x.scanned_at);if(!isNaN(d))hours[d.getHours()].n++});
+ const max=Math.max(1,...hours.map(x=>x.n)),box=document.getElementById('hourlyChart');
+ box.innerHTML=hours.map(x=>{
+  const pct=Math.max(x.n?6:1,Math.round(x.n/max*100));
+  return '<div title="'+String(x.h).padStart(2,'0')+':00 · '+x.n+'" style="flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px"><div style="font-size:9px;font-weight:800">'+(x.n||'')+'</div><div style="width:100%;height:'+pct+'%;min-height:2px;background:#607f95;border-radius:5px 5px 2px 2px"></div><div style="font-size:8px;color:#6b7785">'+String(x.h).padStart(2,'0')+'</div></div>';
+ }).join('');
+}
 
 function renderProgress(done){
  document.getElementById('progressDone').textContent=done;
@@ -1494,15 +1528,16 @@ function renderProgress(done){
 
 async function load(){
  const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
- const [dashR,fbsR,recR,planR,devR]=await Promise.all([
+ const [dashR,fbsR,recR,planR,devR,hourR]=await Promise.all([
   fetch('/api/fbs/dashboard'),
   fetch('/api/fbs/overview?'+p.toString()),
   fetch('/api/receiving/overview?'+p.toString()),
   fetch('/api/manager/daily-plan?date='+encodeURIComponent(date)),
-  fetch('/api/operations/deviations?'+p.toString())
+  fetch('/api/operations/deviations?'+p.toString()),
+  fetch('/api/fbs/hourly?'+p.toString())
  ]);
- if([dashR,fbsR,recR,planR,devR].some(r=>r.status===403)){location.href='/manager-login';return}
- const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json();
+ if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
+ const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
 
  currentPlan=Number(plan.wb_fbs_plan||0);
  document.getElementById('planInput').value=currentPlan||'';
@@ -1511,6 +1546,7 @@ async function load(){
  document.getElementById('deviationCount').textContent=dev.count||0;
  document.getElementById('active').textContent=d.workers.length;
  renderProgress(Number(f.orders||0));
+ renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
  box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(activityName(x.activity))+' · '+activityMinutes(x.activity_started_at)+' мин</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div></div>').join(''):'<div class="empty">Нет активных смен</div>';
@@ -1578,6 +1614,7 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
  <nav class="side-nav">
   <a href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
+  <a href="/history">🔎 История ШК</a>
   <a class="active" href="/receiving-monitor">📥 Приёмка</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="/manager#qr" onclick="sessionStorage.setItem('openExitQr','1')">🔐 QR выхода</a>
@@ -1663,6 +1700,41 @@ async function load(){
 }
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')load()});
 employees().then(load);
+</script></body></html>"""
+
+
+HISTORY_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · История ШК</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
+.wrap{max-width:1450px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px}.top a{padding:9px 12px;border-radius:9px;background:#dde8ef;color:#314657;text-decoration:none;font-weight:750}
+h1{margin:0;font-size:24px}.small{font-size:12px;color:#6b7785}.search{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:12px}
+input,button{min-height:44px;border:1px solid #cbd9e2;border-radius:9px;padding:9px 11px;font-size:15px}button{background:#48647a;color:#fff;font-weight:800;cursor:pointer}
+.timeline{margin-top:12px}.event{display:grid;grid-template-columns:155px 130px 160px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid #e1e7eb;align-items:center}.event:last-child{border:0}
+.time{font-size:12px;color:#6b7785}.who{font-weight:800}.type{font-weight:800}.meta{font-size:12px}.empty{padding:22px 0;color:#6b7785}
+@media(max-width:800px){.event{grid-template-columns:1fr 1fr}.meta{grid-column:1/-1}.top{align-items:flex-start;flex-direction:column}}
+</style></head><body><div class="wrap">
+<div class="card">
+ <div class="top"><div><h1>🔎 История ШК</h1><div class="small">Сканируй или введи ШК товара, WB, SSCC, артикул или код объекта.</div></div><a href="/manager">← Панель управления</a></div>
+ <div class="search"><input id="q" autofocus placeholder="ШК / WB / SSCC / артикул"><button onclick="load()">Найти</button></div>
+ <div id="summary" class="small" style="margin-top:9px"></div>
+ <div id="timeline" class="timeline"><div class="empty">Введи код объекта.</div></div>
+</div>
+</div>
+<script>
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleString('ru-RU')}catch(e){return ts}}
+function label(t){return ({scan:'Приёмка / скан',external_pallet:'ОСЗ / SSCC',complete:'Документ завершён',start:'Начало смены',end:'Конец смены',switch:'Смена операции',duplicate_wb:'Повторный WB',product_not_found:'Товар не найден',product_mismatch:'Не тот товар',scan_rejected:'Скан отклонён',fbs_scan:'FBS заказ'})[t]||t||'Событие'}
+async function load(){
+ const q=document.getElementById('q').value.trim();if(!q)return;
+ const r=await fetch('/api/history?q='+encodeURIComponent(q));if(r.status===403){location.href='/manager-login';return}
+ const d=await r.json();const box=document.getElementById('timeline');
+ document.getElementById('summary').textContent='Найдено событий: '+d.rows.length;
+ box.innerHTML=d.rows.length?d.rows.map(x=>'<div class="event"><div class="time">'+esc(fmt(x.created_at))+'</div><div class="who">'+esc(x.employee||'—')+'</div><div class="type">'+esc(label(x.event_type))+'</div><div class="meta"><b>'+esc(x.article||x.object_code||'—')+'</b> · '+esc(x.product_name||x.operation_type||'')+(x.quantity!=null?' · '+esc(x.quantity)+' шт.':'')+(x.result?' · '+esc(x.result):'')+'</div></div>').join(''):'<div class="empty">По этому коду история не найдена.</div>';
+}
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')load()});
 </script></body></html>"""
 
 
@@ -1973,6 +2045,89 @@ def fbs_journal_page():
 @wms_bp.get("/fbs-manager")
 def old_manager_page():
     return redirect("/stats")
+
+
+@wms_bp.get("/history")
+def history_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    return HISTORY_PAGE
+
+
+@wms_bp.get("/api/history")
+def history_api():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    q = str(request.args.get("q", "")).strip()
+    if not q:
+        return jsonify(rows=[])
+
+    like = "%" + q + "%"
+    rows = []
+
+    scan_rows = query_all(
+        """
+        SELECT s.scanned_at, e.name, s.article, s.product_name, s.product_barcode,
+               s.barcode, COALESCE(s.scan_type,'normal')
+        FROM scans s
+        JOIN employees e ON e.id = s.employee_id
+        WHERE s.barcode LIKE ? OR COALESCE(s.product_barcode,'') LIKE ?
+           OR COALESCE(s.article,'') LIKE ? OR COALESCE(s.product_name,'') LIKE ?
+        ORDER BY s.scanned_at DESC
+        LIMIT 200
+        """,
+        (like, like, like, like),
+    )
+    for r in scan_rows:
+        rows.append({
+            "created_at": r[0], "employee": r[1], "operation_type": "fbs",
+            "event_type": "fbs_scan", "object_code": r[5], "quantity": 1,
+            "result": r[6], "article": r[2], "product_name": r[3],
+        })
+
+    event_rows = query_all(
+        """
+        SELECT oe.created_at, e.name, oe.operation_type, oe.event_type,
+               oe.object_code, oe.quantity, oe.result, oe.article, oe.product_name
+        FROM operation_events oe
+        JOIN employees e ON e.id = oe.employee_id
+        WHERE COALESCE(oe.object_code,'') LIKE ? OR COALESCE(oe.article,'') LIKE ?
+           OR COALESCE(oe.product_name,'') LIKE ? OR COALESCE(oe.document_name,'') LIKE ?
+           OR COALESCE(oe.result,'') LIKE ?
+        ORDER BY oe.created_at DESC
+        LIMIT 300
+        """,
+        (like, like, like, like, like),
+    )
+    for r in event_rows:
+        rows.append({
+            "created_at": r[0], "employee": r[1], "operation_type": r[2],
+            "event_type": r[3], "object_code": r[4], "quantity": r[5],
+            "result": r[6], "article": r[7], "product_name": r[8],
+        })
+
+    rows.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    return jsonify(rows=rows[:400])
+
+
+@wms_bp.get("/api/fbs/hourly")
+def fbs_hourly_api():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    date_from = str(request.args.get("from", "")).strip()
+    date_to = str(request.args.get("to", "")).strip()
+    if not date_from or not date_to:
+        now = datetime.now(timezone.utc)
+        date_from = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        date_to = now.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+    rows = query_all(
+        "SELECT scanned_at FROM scans WHERE scanned_at >= ? AND scanned_at < ? ORDER BY scanned_at",
+        (date_from, date_to),
+    )
+    return jsonify(rows=[{"scanned_at": r[0]} for r in rows])
 
 
 @wms_bp.get("/badges")
