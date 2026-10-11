@@ -4,6 +4,7 @@ import uuid
 import hashlib
 import hmac
 import json
+import base64
 import time
 import threading
 from datetime import datetime, timezone
@@ -2093,6 +2094,7 @@ def fbs_journal_api():
 @wms_bp.get("/manifest.webmanifest")
 def pwa_manifest():
     manifest = {
+        "id": "/fbs",
         "name": "ONIX WMS · FBS терминал",
         "short_name": "ONIX FBS",
         "description": "Рабочий FBS-терминал ONIX WMS",
@@ -2104,33 +2106,33 @@ def pwa_manifest():
         "background_color": "#e9eef3",
         "theme_color": "#48647a",
         "icons": [
-            {
-                "src": "/pwa-icon.svg",
-                "sizes": "any",
-                "type": "image/svg+xml",
-                "purpose": "any maskable"
-            }
+            {"src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
         ]
     }
-    return Response(json.dumps(manifest, ensure_ascii=False), mimetype="application/manifest+json")
+    response = Response(json.dumps(manifest, ensure_ascii=False), mimetype="application/manifest+json")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 
-@wms_bp.get("/pwa-icon.svg")
-def pwa_icon():
-    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-    <rect width="512" height="512" rx="96" fill="#48647a"/>
-    <rect x="82" y="92" width="348" height="328" rx="42" fill="#f7f9fb"/>
-    <path d="M130 170h252v36H130zm0 68h252v36H130zm0 68h160v36H130z" fill="#48647a"/>
-    <circle cx="350" cy="324" r="58" fill="#48647a"/>
-    <path d="M326 324l17 18 34-39" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>"""
-    return Response(svg, mimetype="image/svg+xml")
+_PWA_ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAADOUlEQVR42u3dQU7yUBiGUWi6OBy6Bxy5AxwYByzBEYtwyPJwZKKJIqXQ9rvvOUPzx/i339PbAl7Xm+3utIJQnUOAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAHAPfVVftCP9zdnq5jH59fF/4zrJf+JJEMvhsgADL4QYp8BDH/blnZ+OweH5PPcOSgkn+/OwSD5vHcOAsnn3xthROuS68cqYAXACgACcPtD4G2QFQArAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAUE/fwn+iwiasrar+i02d4Sf5+LsFwjMACAAEAAIAAYAAQAAggMWyxaLjP0bvJGAFAAGAAEAAIAAQAAgABAACAAGAAEAAIAAozMZYjGJjLMMfzcZYIAAQAAgABAACAAGAAEAAd2JPIMd/DBtjYQUAAYAAQAAgABAACADa1TsEmS75Ta6E91cEYOgv+vetxiAAgz/oe7QWggAMfnQIHoIN/yK/vxWAxQ9mC6uBjbG4yfGvGoGNsYg+D54BiCYAolcBARAdgQAY5HjYuwUie/j/i6DSKiAArrryHw/7JlYDAXCXW6Iqq4AAGHXf//D0YgWYkz2BDP8YNsYqaKrbi7H3+BU+IuEWiKuGv4WrvwCIHn4BGOrBWhp+AYQN/yURtP7QK4DwK/+5AU8bfgGE3vb89vXWPuMjAM5etb8PfNJDrwBE8GPwk4dfAEUNfXPp2iEeO/wV3qAUgJUg8sovABHED78Agm6Dph7uKp/PEoCVIPbqL4DQVeCvQb/V8Ff6dK6tEa0E0awAwatA8r2/AEQQP/wCwC2QQ2AVSL36C0AE0cO/WnkVqNkIpvjF+RY2I5htBbCvf+3hvPX3n2serABWg7irvgCEED/4X9ab7e7k1YM8S/pL8XPeDlsBPCNEm/1lUA/DVqLoAERg+OMDEIHhjw9ABIY/PgARGP6pzf4y6DleqTD40QGIwdALAJKeAUAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACQAAgABAACAAEAAIAAYAAQAAgAGjLJzuHA2/RGO37AAAAAElFTkSuQmCC"
+_PWA_ICON_512 = "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"
+
+
+@wms_bp.get("/pwa-icon-192.png")
+def pwa_icon_192():
+    return Response(base64.b64decode(_PWA_ICON_192), mimetype="image/png")
+
+
+@wms_bp.get("/pwa-icon-512.png")
+def pwa_icon_512():
+    return Response(base64.b64decode(_PWA_ICON_512), mimetype="image/png")
 
 
 @wms_bp.get("/sw.js")
 def pwa_service_worker():
     js = """
-const CACHE = 'onix-pwa-v1';
+const CACHE = 'onix-pwa-v2';
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
@@ -2139,14 +2141,12 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
-  );
+  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });
 """
     response = Response(js, mimetype="application/javascript")
     response.headers["Service-Worker-Allowed"] = "/"
-    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 
