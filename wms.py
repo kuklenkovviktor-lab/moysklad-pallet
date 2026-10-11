@@ -950,6 +950,29 @@ body{overflow:hidden}.wrap{max-width:none;height:100dvh;overflow:hidden;padding:
 #reader{margin-top:4px;max-height:135px}.activities{grid-template-columns:1fr 1fr;gap:3px}.activities button{padding:5px 3px;font-size:10px;min-height:28px}.progress{margin:4px 0;height:7px}.ok,.err{padding:6px;margin-top:4px;font-size:10px}
 }
 @media (orientation:landscape) and (max-width:760px){body{overflow:auto}.wrap{height:auto;overflow:visible}#work{grid-template-columns:1fr 1fr;height:auto}#work>.card{height:auto;overflow:visible}#work>.card:last-child{grid-column:1/-1}.activities{grid-template-columns:repeat(4,1fr)}}
+
+@media (orientation:landscape) and (max-height:600px){
+ .nav{display:flex;gap:5px;margin-bottom:5px}
+ .nav a{flex:1;min-height:30px;padding:5px 6px;font-size:10px;border-radius:8px}
+ .wrap>.nav + .card{height:36px;padding:4px 8px;margin-bottom:4px}
+ .wrap>.nav + .card h1{font-size:15px}
+ .wrap>.nav + .card .small{font-size:9px}
+ #startCard{max-width:600px;margin:4px auto;padding:8px}
+ #startCard h2{font-size:13px}
+ #startCard .muted{font-size:9px}
+ #startCard button{padding:7px;font-size:11px}
+ #work{grid-template-columns:minmax(0,.9fr) minmax(0,1.15fr) minmax(0,.95fr);gap:4px;height:calc(100dvh - 45px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+ #work>.card{padding:7px;border-radius:9px}
+ #work h2{font-size:12px}
+ #work .big{font-size:20px}
+ #work .small{font-size:8px}
+ #work .stat{padding:5px}
+ #work button{padding:5px 4px;font-size:9px;margin-top:3px}
+ #work input{padding:6px;font-size:11px}
+ .activities{gap:2px}.activities button{padding:4px 2px;font-size:9px;min-height:25px}
+ #reader{max-height:110px}
+ .ok,.err{padding:5px;margin-top:3px;font-size:9px}
+}
 </style>
 </head>
 <body>
@@ -1151,6 +1174,21 @@ h1{margin:0 0 8px;font-size:24px}.muted{color:#6b7785;font-size:14px;line-height
 button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750}.secondary{display:block;margin-top:10px;text-align:center;color:#536f83;text-decoration:none}
 .err,.ok{margin-top:10px;padding:10px;border-radius:10px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
 #reader{margin-top:12px;overflow:hidden;border-radius:12px}.scanbox{margin-top:14px;padding:14px;border:1px dashed #9fb0bd;border-radius:12px;background:#eef3f6;text-align:center;font-weight:700}
+
+@media (orientation:landscape) and (max-height:600px){
+ body{overflow:hidden}
+ .wrap{max-width:none;width:100%;height:100dvh;padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:center}
+ .card{width:min(980px,100%);height:100%;padding:9px 11px;border-radius:12px;display:grid;grid-template-columns:1fr minmax(230px,.75fr);grid-template-rows:auto auto 1fr auto;column-gap:10px;row-gap:5px;overflow:hidden}
+ h1{grid-column:1/-1;font-size:18px;margin:0}
+ .muted{grid-column:1;font-size:10px;line-height:1.25}
+ .warning{grid-column:1;margin:0;padding:8px;font-size:10px;border-radius:8px}
+ .scanbox{grid-column:1;margin:0;padding:8px;font-size:11px;border-radius:8px;align-self:start}
+ .card>button{grid-column:2;grid-row:2;width:100%;margin:0;padding:8px;font-size:11px}
+ #reader{grid-column:2;grid-row:3;margin:0;max-height:150px;border-radius:9px;overflow:hidden}
+ #result{grid-column:2;grid-row:4}
+ .secondary{grid-column:1;grid-row:4;margin:0;font-size:10px;align-self:end}
+ .err,.ok{margin:0;padding:7px;font-size:10px}
+}
 </style></head><body><div class="wrap"><div class="card">
 <h1>🚪 Завершение смены</h1>
 <div class="muted">Самостоятельный выход заблокирован. Для завершения смены отсканируй QR старшего в точке сдачи TSD/сканера.</div>
