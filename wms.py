@@ -1103,6 +1103,7 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
 let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
+let nativeStream=null,nativeVideo=null,nativeDetector=null,nativeScanTimer=null;
 
 function beep(ok=true){
  try{
@@ -1215,44 +1216,105 @@ async function activity(type){
  const r=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:type})});
  const d=await r.json();if(!r.ok){showErr(d.error);return}await refresh();
 }
+async function stopNativeScanner(){
+ if(nativeScanTimer){clearTimeout(nativeScanTimer);nativeScanTimer=null}
+ if(nativeStream){try{nativeStream.getTracks().forEach(t=>t.stop())}catch(e){}nativeStream=null}
+ nativeVideo=null;nativeDetector=null;
+ document.getElementById('reader').innerHTML='';
+}
+async function nativeScanLoop(){
+ if(!nativeDetector||!nativeVideo||!nativeStream)return;
+ try{
+  if(nativeVideo.readyState>=2){
+   const codes=await nativeDetector.detect(nativeVideo);
+   if(codes&&codes.length){
+    const raw=String(codes[0].rawValue||'').trim();
+    if(raw){
+     await stopNativeScanner();
+     document.getElementById('reader').classList.add('hidden');
+     cameraScan(raw);
+     return;
+    }
+   }
+  }
+ }catch(e){}
+ nativeScanTimer=setTimeout(nativeScanLoop,90);
+}
+async function startNativeScanner(){
+ if(typeof BarcodeDetector==='undefined'||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return false;
+ try{
+  const supported=BarcodeDetector.getSupportedFormats?await BarcodeDetector.getSupportedFormats():[];
+  const wanted=['ean_13','ean_8','code_128','qr_code'].filter(x=>!supported.length||supported.includes(x));
+  if(!wanted.length)return false;
+  nativeDetector=new BarcodeDetector({formats:wanted});
+  nativeStream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
+   audio:false
+  });
+  const reader=document.getElementById('reader');
+  reader.innerHTML='<video id="nativeBarcodeVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>';
+  nativeVideo=document.getElementById('nativeBarcodeVideo');
+  nativeVideo.srcObject=nativeStream;
+  await nativeVideo.play();
+  nativeScanLoop();
+  return true;
+ }catch(e){
+  await stopNativeScanner();
+  return false;
+ }
+}
+
 async function toggleCamera(){
- if(scanner){
-  try{await scanner.stop()}catch(e){}
-  try{await scanner.clear()}catch(e){}
-  scanner=null;
+ if(scanner||nativeStream){
+  if(scanner){
+   try{await scanner.stop()}catch(e){}
+   try{await scanner.clear()}catch(e){}
+   scanner=null;
+  }
+  await stopNativeScanner();
   document.getElementById('reader').classList.add('hidden');
   return;
  }
- if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
 
  document.getElementById('reader').classList.remove('hidden');
+ document.getElementById('result').innerHTML='<div class="ok">Камера включена · наведи штрихкод в кадр</div>';
+
+ if(await startNativeScanner())return;
+
+ if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
 
  const formats=(typeof Html5QrcodeSupportedFormats!=='undefined')
-  ? [Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.CODE_128]
+  ? [Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.QR_CODE]
   : undefined;
 
- scanner=formats
-  ? new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false})
-  : new Html5Qrcode('reader');
+ scanner=formats?new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false}):new Html5Qrcode('reader');
 
  try{
   await scanner.start(
    {facingMode:'environment'},
    {
-    fps:12,
+    fps:10,
     disableFlip:true,
     qrbox:(w,h)=>{
-      const width=Math.max(240,Math.min(Math.floor(w*0.92),520));
-      const height=Math.max(80,Math.min(Math.floor(h*0.34),120));
+      const width=Math.max(260,Math.min(Math.floor(w*0.96),620));
+      const height=Math.max(100,Math.min(Math.floor(h*0.42),150));
       return {width,height};
     }
    },
-   txt=>cameraScan(txt),
+   async txt=>{
+    if(!txt)return;
+    try{await scanner.stop()}catch(e){}
+    try{await scanner.clear()}catch(e){}
+    scanner=null;
+    document.getElementById('reader').classList.add('hidden');
+    cameraScan(txt);
+   },
    ()=>{}
   );
  }catch(e){
   try{await scanner.clear()}catch(_){}
   scanner=null;
+  document.getElementById('reader').classList.add('hidden');
   showErr('Камера не открылась: '+e);
  }
 }
