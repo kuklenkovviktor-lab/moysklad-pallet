@@ -407,7 +407,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <div class="nav">
   <a class="active" href="/">📦 Приёмка</a>
   <a href="/fbs">🧺 Сборка</a>
-  <a class="disabled-tab" href="#" onclick="return false">↔ Перемещение</a>
+  <a href="/move">↔ Перемещение</a>
 </div>
 <div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 
@@ -568,6 +568,19 @@ const stateSelect=document.getElementById('stateSelect');
 const orgSelect=document.getElementById('orgSelect');
 const storeSelect=document.getElementById('storeSelect');
 const receiptSelect=document.getElementById('receiptSelect');
+
+async function activateReceivingModule(){
+  const shiftId=localStorage.getItem('fbs_shift_id')||'';
+  if(!shiftId)return;
+  try{
+    await fetch('/api/fbs/activity',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({shift_id:shiftId,activity_type:'receiving'})
+    });
+  }catch(e){}
+}
+activateReceivingModule();
 
 function setActiveReceipt(id,name,meta=''){
   activeReceiptId=id||'';
