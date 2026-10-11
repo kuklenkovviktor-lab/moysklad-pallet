@@ -683,7 +683,7 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
 #reader video{width:100%!important;height:100%!important;max-height:130px!important;object-fit:cover!important}
 #reader__dashboard_section_csr button,#reader__dashboard_section_swaplink{display:none!important}
 #result{margin-top:4px}.err,.ok{padding:5px 7px;border-radius:8px;font-size:9px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
-.barcode-zone{border-top:1px solid #d7e0e7;padding-top:5px;min-height:92px}
+.barcode-zone{display:none}
 .barcode-wrap{height:88px;background:#fff;border:1px solid #d7e0e7;border-radius:9px;padding:3px 8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
 #zebraBarcode{width:100%;height:82px}
 @media (orientation:portrait){
@@ -700,13 +700,13 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
 <div class="header">
   <div class="header-left">
     <div class="logo">ONX</div>
-    <div class="header-copy"><h1>ONIX WMS</h1><div class="muted">FBS-терминал сотрудника</div></div>
+    <div class="header-copy"><h1>ONIX WMS</h1><div class="muted">Терминал сотрудника</div></div>
   </div>
-  <div id="scannerStatus" class="status">Ожидание Zebra</div>
+  <div id="scannerStatus" class="status ready">Сканируй бейдж</div>
 </div>
 <div class="main">
   <div class="left">
-    <div class="subtitle">Сначала считай нижний штрихкод Zebra, затем бейдж сотрудника.</div>
+    <div class="subtitle" style="font-size:22px;font-weight:900;color:#25313d">СКАНИРУЙ БЕЙДЖ</div>
     <input id="hidBadge" class="scan-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
   </div>
   <div class="camera-box">
@@ -761,7 +761,9 @@ function focusHid(){
 }
 
 function normalizeHidCode(value){
- return String(value||'').replace(/[\\r\\n\\t]/g,'').trim();
+ let code=String(value||'').replace(/[\\r\\n\\t]/g,'').trim();
+ if(/^\\][A-Za-z]\\d/.test(code))code=code.slice(3);
+ return code.trim();
 }
 
 function submitHidValue(){
@@ -857,6 +859,7 @@ window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
 setTimeout(focusHid,120);
 setTimeout(renderZebraBarcode,40);
+setTimeout(async()=>{try{if(!scanner)await toggleCamera()}catch(e){}},250);
 async function toggleCamera(){
  await enterTerminalFullscreen();
  if(scanner){
@@ -882,12 +885,14 @@ async function toggleCamera(){
      return {width:side,height:side};
     }
    },
-   txt=>{
+   async txt=>{
     const code=normalizeHidCode(txt);
-    if(!code)return;
+    if(!code||busy)return;
     document.getElementById('result').innerHTML='<div class="ok">Код считан</div>';
-    if(code===ZEBRA_SERVICE_CODE)setScannerReady();
-    else login(code);
+    if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
+    try{await scanner.stop()}catch(e){}
+    scanner=null;
+    login(code);
    },
    ()=>{}
   );
@@ -1818,19 +1823,60 @@ def login_page():
     return LOGIN_PAGE
 
 
+def normalize_badge_input(value):
+    code = str(value or "").strip()
+    # HID scanners can prepend AIM symbology identifiers such as ]C0 / ]C1.
+    if len(code) >= 3 and code[0] == "]" and code[1].isalpha() and code[2].isdigit():
+        code = code[3:]
+    return code.replace("\r", "").replace("\n", "").replace("\t", "").strip()
+
+
 @wms_bp.post("/api/auth/login")
 def auth_login():
     ensure_db()
     data = request.get_json(force=True)
-    badge_code = str(data.get("badge_code", "")).strip()
+    badge_code = normalize_badge_input(data.get("badge_code", ""))
     if not badge_code:
         return jsonify(error="Пустой код бейджа"), 400
+
     row = query_one(
         "SELECT id, name, role, badge_number FROM employees WHERE (badge_code = ? OR scanner_code = ?) AND active = 1",
         (badge_code, badge_code),
     )
+
+    # Простые стабильные форматы для TSD. Они не зависят от смены секрета
+    # и спасают вход, если старый распечатанный бейдж пережил деплой/ротацию ключей.
+    if not row:
+        employee_id = ""
+        badge_number = None
+        upper = badge_code.upper()
+        if upper.startswith("ONIX-EMP-"):
+            employee_id = badge_code[len("ONIX-EMP-"):].strip()
+        elif upper.startswith("ONIX-BADGE-"):
+            try:
+                badge_number = int(badge_code[len("ONIX-BADGE-"):].strip())
+            except Exception:
+                badge_number = None
+        elif badge_code.isdigit() and len(badge_code) <= 4:
+            try:
+                badge_number = int(badge_code)
+            except Exception:
+                badge_number = None
+
+        if employee_id:
+            row = query_one(
+                "SELECT id, name, role, badge_number FROM employees WHERE id = ? AND active = 1",
+                (employee_id,),
+            )
+        elif badge_number is not None:
+            row = query_one(
+                "SELECT id, name, role, badge_number FROM employees WHERE badge_number = ? AND active = 1",
+                (badge_number,),
+            )
+
     if not row:
         return jsonify(error="Бейдж не найден"), 404
+
     session.clear()
     session["employee_id"] = row[0]
     shift_id, _ = ensure_active_shift(row[0], "other")
