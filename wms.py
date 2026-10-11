@@ -1023,7 +1023,8 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
 <div class="wrap">
 <div class="nav">
   <a href="/">📦 Приёмка</a>
-  <a class="active" href="/fbs">🚀 FBS</a>
+  <a class="active" href="/fbs">🧺 Сборка</a>
+  <a href="/move">↔ Перемещение</a>
 </div>
 
 <div id="topbar">
@@ -1078,9 +1079,7 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
     <div class="card">
       <div class="ops-title">Операция</div>
       <div class="activities" id="activities">
-        <button data-a="picking" onclick="activity('picking')">Сборка</button>
         <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
-        <button data-a="receiving" onclick="activity('receiving')">Приёмка</button>
         <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
         <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
         <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
@@ -1133,7 +1132,12 @@ async function loadIdentity(){
  document.getElementById('identity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
  document.getElementById('startName').textContent=d.employee.name;
  if(d.employee.role==='manager')document.querySelectorAll('.manager-only').forEach(x=>x.classList.remove('hidden'));
- if(shiftId)await refresh();
+ if(shiftId){
+  try{
+   await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:'picking'})});
+  }catch(e){}
+  await refresh();
+ }
 }
 async function startShift(){
  const r=await fetch('/api/fbs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
@@ -2020,7 +2024,7 @@ def operation_enter():
         return jsonify(error="Требуется вход по бейджу"), 401
     data = request.get_json(silent=True) or {}
     operation = str(data.get("operation", "")).strip()
-    allowed = {"picking", "replenishment", "receiving", "shipping", "pallets", "kgt", "downtime", "other"}
+    allowed = {"picking", "replenishment", "receiving", "movement", "shipping", "pallets", "kgt", "downtime", "other"}
     if operation not in allowed:
         return jsonify(error="Неизвестная операция"), 400
     shift_id, _ = ensure_active_shift(employee["id"], operation)
@@ -2546,6 +2550,94 @@ self.addEventListener('fetch', event => {
     response.headers["Service-Worker-Allowed"] = "/"
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+
+MOVE_PAGE = """<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9eef3">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="screen-orientation" content="landscape">
+<title>ONIX WMS · Перемещение</title>
+<style>
+:root{--bg:#e9eef3;--panel:#f7f9fb;--panel2:#eef3f6;--text:#25313d;--muted:#6b7785;--line:#d7e0e7;--accent:#48647a;--accent2:#dde8ef}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text)}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh}
+.wrap{width:100%;max-width:1100px;margin:auto;padding:10px}
+.nav{display:flex;gap:6px;margin-bottom:6px}
+.nav a{flex:1;display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:9px;background:var(--accent2);color:#314657;border:1px solid #cbd9e2;text-decoration:none;font-size:11px;font-weight:800}
+.nav a.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+#topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;padding:6px 9px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+#topbar .who{font-size:11px;font-weight:800}
+#topbar a{font-size:10px;color:#536f83;text-decoration:none;font-weight:800}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.stage{min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--panel2);border:1px solid #dce5eb;border-radius:11px}
+.kicker{font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.1em}
+h1{font-size:30px;margin:4px 0 6px}
+.muted{font-size:11px;color:var(--muted)}
+@media (orientation:landscape) and (max-height:600px){
+ body{overflow:hidden}
+ .wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(4px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left))}
+ .nav{margin-bottom:4px}.nav a{min-height:28px;padding:4px 6px;font-size:9px}
+ #topbar{margin-bottom:4px;padding:4px 7px;min-height:28px}#topbar .who{font-size:9px}#topbar a{font-size:9px}
+ .card{height:calc(100dvh - 68px);padding:6px;border-radius:9px}
+ .stage{height:100%;min-height:0}
+ h1{font-size:26px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav">
+    <a href="/">📦 Приёмка</a>
+    <a href="/fbs">🧺 Сборка</a>
+    <a class="active" href="/move">↔ Перемещение</a>
+  </div>
+  <div id="topbar">
+    <div class="who"><span id="identity"></span></div>
+    <a href="/exit">🚪 Завершить смену</a>
+  </div>
+  <div class="card">
+    <div class="stage">
+      <div class="kicker">ПЕРЕМЕЩЕНИЕ</div>
+      <h1>Перемещение</h1>
+      <div class="muted">Отдельный рабочий модуль. Логику перемещения разберём следующим шагом.</div>
+    </div>
+  </div>
+</div>
+<script>
+async function loadMove(){
+  const r=await fetch('/api/auth/me'),d=await r.json();
+  if(!r.ok){location.href='/login';return}
+  document.getElementById('identity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
+  const shiftId=localStorage.getItem('fbs_shift_id')||'';
+  if(shiftId){
+    try{
+      await fetch('/api/fbs/activity',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({shift_id:shiftId,activity_type:'movement'})
+      });
+    }catch(e){}
+  }
+}
+loadMove();
+</script>
+</body>
+</html>"""
+
+
+@wms_bp.get("/move")
+def move_page():
+    ensure_db()
+    if not get_session_employee():
+        return redirect("/login")
+    return MOVE_PAGE
 
 
 @wms_bp.get("/fbs")
