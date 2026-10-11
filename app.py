@@ -2,6 +2,7 @@ import os
 import json
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify, session, redirect
 from wms import (
@@ -115,6 +116,9 @@ DETAILED_PRODUCT_IDS = set()
 CACHE_LOCK = threading.RLock()
 WARMUP_STATE = {"running": False, "ready": False, "indexed": 0, "error": ""}
 PRODUCT_LIST_TTL = 3600
+_BOOTSTRAP_CACHE = {"data": None, "expires_at": 0.0}
+_BOOTSTRAP_CACHE_LOCK = threading.Lock()
+BOOTSTRAP_CACHE_SECONDS = max(60, int(os.getenv("BOOTSTRAP_CACHE_SECONDS", "300") or 300))
 
 def _wb_headers():
     return {
@@ -1138,7 +1142,7 @@ async function loadWmsIdentity(){
 }
 loadWmsIdentity();
 loadBootstrap();
-fetch('/api/warmup',{method:'POST'}).catch(()=>{});
+setTimeout(()=>fetch('/api/warmup',{method:'POST'}).catch(()=>{}),2500);
 const savedId=localStorage.getItem('receipt_id')||'';
 const savedName=localStorage.getItem('receipt_name')||'';
 if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
@@ -1184,15 +1188,30 @@ def get_enter_states():
     return r.json().get("states", []) or []
 
 def bootstrap_data():
-    organizations = get_rows("organization", {"limit": 1000, "order": "name"})
-    stores = get_rows("store", {"limit": 1000, "order": "name"})
-    states = get_enter_states()
+    now_ts = time.time()
+    with _BOOTSTRAP_CACHE_LOCK:
+        cached = _BOOTSTRAP_CACHE.get("data")
+        expires_at = float(_BOOTSTRAP_CACHE.get("expires_at", 0) or 0)
+        if cached is not None and expires_at > now_ts:
+            return cached
 
-    return {
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        org_future = pool.submit(get_rows, "organization", {"limit": 1000, "order": "name"})
+        store_future = pool.submit(get_rows, "store", {"limit": 1000, "order": "name"})
+        state_future = pool.submit(get_enter_states)
+        organizations = org_future.result()
+        stores = store_future.result()
+        states = state_future.result()
+
+    data = {
         "organizations": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in organizations if not x.get("archived")],
         "stores": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in stores if not x.get("archived")],
         "states": [{"id": x["id"], "name": x.get("name") or "Без названия"} for x in states],
     }
+    with _BOOTSTRAP_CACHE_LOCK:
+        _BOOTSTRAP_CACHE["data"] = data
+        _BOOTSTRAP_CACHE["expires_at"] = time.time() + BOOTSTRAP_CACHE_SECONDS
+    return data
 
 def list_receipts():
     rows = get_rows("enter", {
