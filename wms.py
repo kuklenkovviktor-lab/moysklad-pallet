@@ -655,56 +655,93 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="screen-orientation" content="landscape">
 <title>ONIX WMS · Вход</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:#e9eef3;color:#25313d}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%;overflow:hidden}
-.wrap{width:100%;height:100dvh;padding:max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:center}
-.card{width:min(980px,100%);height:100%;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:10px 12px;box-shadow:0 2px 10px rgba(52,72,91,.07);display:grid;grid-template-rows:auto 1fr;gap:8px;overflow:hidden}
-.brand{display:flex;align-items:center;gap:9px;min-height:34px}
-.logo{width:32px;height:32px;border-radius:9px;background:#48647a;color:#fff;display:grid;place-items:center;font-weight:900;font-size:13px;letter-spacing:.4px}
-h1{margin:0;font-size:20px;line-height:1}.muted{color:#6b7785;font-size:11px;line-height:1.25}
-.terminal{display:grid;grid-template-columns:1.18fr .82fr;gap:10px;min-height:0}
-.scan-panel{border:2px dashed #9fb0bd;border-radius:13px;background:#eef3f6;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:0}
-.scan-title{font-size:20px;font-weight:850;line-height:1.15}
-.scan-sub{font-size:11px;color:#6b7785;margin-top:5px}
-.controls{display:flex;flex-direction:column;justify-content:center;min-height:0}
-.label{font-size:11px;color:#6b7785;margin:0 0 5px 2px}
-input{width:100%;padding:10px;border:2px solid #9fb0bd;border-radius:10px;background:#fff;font-size:14px;text-align:center;color:#48647a;font-weight:750;outline:none}
-button{width:100%;margin-top:7px;padding:11px;border:0;border-radius:10px;background:#48647a;color:white;font-size:14px;font-weight:850}
-.err,.ok{margin-top:6px;padding:7px;border-radius:9px;font-size:11px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
-#reader{margin-top:7px;border-radius:10px;overflow:hidden;background:#111;min-height:0}
-#reader video{width:100%!important;height:auto!important;max-height:125px!important;object-fit:cover!important}
+.wrap{width:100%;height:100dvh;padding:max(7px,env(safe-area-inset-top)) max(9px,env(safe-area-inset-right)) max(7px,env(safe-area-inset-bottom)) max(9px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:center}
+.card{width:min(980px,100%);height:100%;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:9px 11px;box-shadow:0 2px 10px rgba(52,72,91,.07);display:grid;grid-template-rows:1fr auto;gap:8px;overflow:hidden}
+.top{display:grid;grid-template-columns:1fr minmax(190px,32%);gap:10px;min-height:0}
+.left{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:4px 8px}
+.brand{display:flex;align-items:center;gap:9px}
+.logo{width:34px;height:34px;border-radius:9px;background:#48647a;color:#fff;display:grid;place-items:center;font-weight:900;font-size:13px;letter-spacing:.4px;flex:0 0 auto}
+h1{margin:0;font-size:22px;line-height:1}.muted{color:#6b7785;font-size:11px;line-height:1.3}
+.subtitle{margin-top:6px;font-size:13px;color:#53616d}
+.status{margin-top:12px;padding:9px 11px;border-radius:10px;background:#eef3f6;border:1px solid #d7e0e7;font-size:12px;font-weight:750}
+.status.ready{background:#e1f1e6;color:#2f6b45;border-color:#c7e3d0}
+.scan-input{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.camera-box{display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;min-height:0}
+.camera-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.camera-title span{font-size:11px;color:#6b7785}
+button{border:0;border-radius:9px;background:#48647a;color:white;font-size:12px;font-weight:850;padding:8px 10px;cursor:pointer}
+#reader{border-radius:10px;overflow:hidden;background:#111;min-height:92px;max-height:145px}
+#reader:empty{display:flex;align-items:center;justify-content:center;background:#eef3f6;border:1px dashed #b8c5ce}
+#reader:empty:before{content:"Камера выключена";font-size:11px;color:#7b8791}
+#reader video{width:100%!important;height:100%!important;max-height:145px!important;object-fit:cover!important}
 #reader__dashboard_section_csr button,#reader__dashboard_section_swaplink{display:none!important}
+#result{margin-top:5px}.err,.ok{padding:6px 8px;border-radius:8px;font-size:10px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
+.barcode-zone{border-top:1px solid #d7e0e7;padding-top:6px;display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;min-height:74px}
+.barcode-copy{min-width:145px}.barcode-copy .title{font-size:12px;font-weight:850}.barcode-copy .hint{font-size:9px;color:#6b7785;margin-top:2px}
+.barcode-wrap{height:68px;background:#fff;border:1px solid #d7e0e7;border-radius:9px;padding:3px 8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#zebraBarcode{width:100%;height:62px}
 @media (orientation:portrait){
- body{overflow:auto}.wrap{height:auto;min-height:100dvh}.card{height:auto;min-height:calc(100dvh - 16px)}.terminal{grid-template-columns:1fr}.scan-panel{min-height:180px}
+ body{overflow:auto}.wrap{height:auto;min-height:100dvh}.card{height:auto;min-height:calc(100dvh - 14px)}.top{grid-template-columns:1fr}.camera-box{min-height:150px}.barcode-zone{grid-template-columns:1fr}.barcode-copy{min-width:0}
 }
 @media (orientation:landscape) and (max-height:420px){
- .card{padding:7px 9px;gap:5px}.brand{min-height:28px}.logo{width:28px;height:28px;font-size:11px}h1{font-size:17px}.muted{font-size:9px}
- .terminal{gap:7px}.scan-panel{padding:8px}.scan-title{font-size:17px}.scan-sub,.label{font-size:9px}
- input{padding:8px;font-size:12px}button{padding:9px;font-size:12px;margin-top:5px}
- #reader{margin-top:5px}#reader video{max-height:92px!important}
+ .card{padding:6px 8px;gap:5px}.top{gap:7px}.left{padding:2px 5px}.logo{width:28px;height:28px;font-size:11px}h1{font-size:18px}.muted{font-size:9px}.subtitle{font-size:11px;margin-top:4px}.status{margin-top:7px;padding:6px 8px;font-size:10px}
+ .camera-title{margin-bottom:3px}.camera-title span{font-size:9px}button{padding:6px 8px;font-size:10px}
+ #reader{min-height:72px;max-height:102px}#reader video{max-height:102px!important}
+ .barcode-zone{min-height:60px;padding-top:4px;gap:7px}.barcode-copy{min-width:125px}.barcode-copy .title{font-size:10px}.barcode-copy .hint{font-size:8px}.barcode-wrap{height:55px;padding:2px 6px}#zebraBarcode{height:50px}
 }
 </style></head>
 <body><div class="wrap"><div class="card">
-<div class="brand"><div class="logo">ONX</div><div><h1>ONIX WMS</h1><div class="muted">FBS-терминал сотрудника</div></div></div>
-<div class="terminal">
-  <div class="scan-panel">
-    <div class="scan-title">Поднеси бейдж к сканеру</div>
-    <div class="scan-sub">или используй камеру TSD</div>
+<div class="top">
+  <div class="left">
+    <div class="brand"><div class="logo">ONX</div><div><h1>ONIX WMS</h1><div class="muted">FBS-терминал сотрудника</div></div></div>
+    <div class="subtitle">Сначала считай служебный штрихкод Zebra, затем бейдж сотрудника.</div>
+    <div id="scannerStatus" class="status">Ожидание Zebra</div>
+    <input id="hidBadge" class="scan-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
   </div>
-  <div class="controls">
-    <div class="label">Внешний сканер</div>
-    <input id="hidBadge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Ожидание скана">
-    <button onclick="toggleCamera()">📷 Камера TSD</button>
+  <div class="camera-box">
+    <div class="camera-title"><span>Камера TSD</span><button onclick="toggleCamera()">📷 Камера</button></div>
     <div id="reader"></div>
     <div id="result"></div>
   </div>
+</div>
+<div class="barcode-zone">
+  <div class="barcode-copy"><div class="title">Служебный ШК Zebra</div><div class="hint">Считай его внешним сканером</div></div>
+  <div class="barcode-wrap"><svg id="zebraBarcode"></svg></div>
 </div>
 </div></div>
 <script>
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
+const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
+let zebraReady=false;
+
+function setScannerReady(){
+ zebraReady=true;
+ const el=document.getElementById('scannerStatus');
+ el.textContent='Zebra готова · сканируй бейдж сотрудника';
+ el.classList.add('ready');
+ document.getElementById('result').innerHTML='';
+ setTimeout(focusHid,60);
+}
+
+function renderZebraBarcode(){
+ try{
+  JsBarcode('#zebraBarcode',ZEBRA_SERVICE_CODE,{
+   format:'CODE128',
+   displayValue:false,
+   margin:0,
+   height:46,
+   width:2,
+   background:'#ffffff',
+   lineColor:'#111111'
+  });
+ }catch(e){}
+}
 
 async function enterTerminalFullscreen(){
  try{
@@ -727,6 +764,10 @@ function submitHidValue(){
  hidBadge.value='';
  hidBuffer='';
  clearTimeout(hidTimer);
+ if(code===ZEBRA_SERVICE_CODE){
+  setScannerReady();
+  return;
+ }
  if(code)login(code);
  setTimeout(focusHid,80);
 }
@@ -797,6 +838,7 @@ document.addEventListener('keydown',e=>{
  if(document.activeElement===hidBadge)return;
  if(e.key==='Enter'||e.key==='Tab'){
   const code=normalizeHidCode(hidBuffer); hidBuffer=''; clearTimeout(hidTimer);
+  if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
   if(code)login(code); return;
  }
  if(e.key.length===1){
@@ -809,6 +851,7 @@ document.addEventListener('keydown',e=>{
 window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
 setTimeout(focusHid,120);
+setTimeout(renderZebraBarcode,40);
 async function toggleCamera(){
  await enterTerminalFullscreen();
  if(scanner){
@@ -820,7 +863,7 @@ async function toggleCamera(){
  }
  if(typeof Html5Qrcode==='undefined')return;
  scanner=new Html5Qrcode('reader');
- try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:280,height:180}},txt=>login(txt),()=>{})}
+ try{await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:220,height:120}},txt=>{const code=normalizeHidCode(txt);if(code===ZEBRA_SERVICE_CODE)setScannerReady();else login(code)},()=>{})}
  catch(e){scanner=null;document.getElementById('result').innerHTML='<div class="err">Камера не открылась</div>';setTimeout(focusHid,100)}
 }
 </script><script>
