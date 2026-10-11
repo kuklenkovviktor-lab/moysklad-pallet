@@ -875,43 +875,61 @@ setTimeout(focusHid,120);
 setTimeout(renderZebraBarcode,40);
 async function toggleCamera(){
  await enterTerminalFullscreen();
+ const result=document.getElementById('result');
+
  if(scanner){
   try{await scanner.stop()}catch(e){}
+  try{await scanner.clear()}catch(e){}
   scanner=null;
   document.getElementById('reader').innerHTML='';
+  result.innerHTML='';
   setTimeout(focusHid,100);
-  return
+  return;
  }
- if(typeof Html5Qrcode==='undefined')return;
+
+ if(typeof Html5Qrcode==='undefined'){
+  result.innerHTML='<div class="err">Модуль камеры не загрузился. Обнови страницу.</div>';
+  return;
+ }
+
  const formats=(typeof Html5QrcodeSupportedFormats!=='undefined')
   ? [Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.CODE_128]
   : undefined;
- scanner=formats?new Html5Qrcode('reader',{formatsToSupport:formats}):new Html5Qrcode('reader');
+
+ scanner=formats
+  ? new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false})
+  : new Html5Qrcode('reader');
+
+ result.innerHTML='<div class="ok">Камера включена · наведи на QR бейджа</div>';
+
  try{
+  // Максимально простой режим для старого Android: без qrbox/aspectRatio.
+  // Сканируется весь кадр, поэтому QR ловится стабильнее.
   await scanner.start(
    {facingMode:'environment'},
-   {
-    fps:20,
-    aspectRatio:1.333333,
-    qrbox:(viewW,viewH)=>{
-     const side=Math.max(90,Math.min(180,Math.floor(Math.min(viewW,viewH)*0.78)));
-     return {width:side,height:side};
-    }
-   },
+   {fps:10,disableFlip:false},
    async txt=>{
     const code=normalizeHidCode(txt);
     if(!code||busy)return;
-    document.getElementById('result').innerHTML='<div class="ok">Код считан</div>';
-    if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
+
+    result.innerHTML='<div class="ok">QR считан · проверяю бейдж…</div>';
+
+    if(code===ZEBRA_SERVICE_CODE){
+     setScannerReady();
+     return;
+    }
+
     try{await scanner.stop()}catch(e){}
+    try{await scanner.clear()}catch(e){}
     scanner=null;
-    login(code);
+    await login(code);
    },
    ()=>{}
   );
- } catch(e){
+ }catch(e){
+  try{await scanner.clear()}catch(_){}
   scanner=null;
-  document.getElementById('result').innerHTML='<div class="err">Камера не открылась: '+String((e&&e.message)||e||'ошибка')+'</div>';
+  result.innerHTML='<div class="err">Камера не открылась: '+String((e&&e.message)||e||'ошибка')+'</div>';
   setTimeout(focusHid,100);
  }
 }
