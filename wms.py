@@ -683,7 +683,7 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
 #reader video{width:100%!important;height:100%!important;max-height:130px!important;object-fit:cover!important}
 #reader__dashboard_section_csr button,#reader__dashboard_section_swaplink{display:none!important}
 #result{margin-top:4px}.err,.ok{padding:5px 7px;border-radius:8px;font-size:9px}.err{background:#f6e4e4;color:#8a4343}.ok{background:#e1f1e6;color:#2f6b45}
-.barcode-zone{display:none}
+.barcode-zone{border-top:1px solid #d7e0e7;padding-top:5px;min-height:92px}
 .barcode-wrap{height:88px;background:#fff;border:1px solid #d7e0e7;border-radius:9px;padding:3px 8px;display:flex;align-items:center;justify-content:center;overflow:hidden}
 #zebraBarcode{width:100%;height:82px}
 @media (orientation:portrait){
@@ -702,15 +702,15 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
     <div class="logo">ONX</div>
     <div class="header-copy"><h1>ONIX WMS</h1><div class="muted">Терминал сотрудника</div></div>
   </div>
-  <div id="scannerStatus" class="status ready">Сканируй бейдж</div>
+  <div id="scannerStatus" class="status">Zebra не подключена</div>
 </div>
 <div class="main">
   <div class="left">
-    <div class="subtitle" style="font-size:22px;font-weight:900;color:#25313d">СКАНИРУЙ БЕЙДЖ</div>
+    <div class="subtitle"><b>Вход через Zebra</b><br>1. Сканируй нижний код подключения<br>2. Сканируй бейдж сотрудника</div>
     <input id="hidBadge" class="scan-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
   </div>
   <div class="camera-box">
-    <div class="camera-title"><span>Камера TSD</span><button onclick="toggleCamera()">📷 Камера</button></div>
+    <div class="camera-title"><span><b>Вход через камеру</b> · QR бейджа</span><button onclick="toggleCamera()">📷 Камера</button></div>
     <div id="reader"></div>
     <div id="result"></div>
   </div>
@@ -728,7 +728,7 @@ let zebraReady=false;
 function setScannerReady(){
  zebraReady=true;
  const el=document.getElementById('scannerStatus');
- el.textContent='Zebra готова · сканируй бейдж сотрудника';
+ el.textContent='Zebra готова · сканируй бейдж';
  el.classList.add('ready');
  document.getElementById('result').innerHTML='';
  setTimeout(focusHid,60);
@@ -775,7 +775,14 @@ function submitHidValue(){
   setScannerReady();
   return;
  }
- if(code)login(code);
+ if(code){
+  if(!zebraReady){
+   document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
+   setTimeout(focusHid,80);
+   return;
+  }
+  login(code);
+ }
  setTimeout(focusHid,80);
 }
 
@@ -846,7 +853,14 @@ document.addEventListener('keydown',e=>{
  if(e.key==='Enter'||e.key==='Tab'){
   const code=normalizeHidCode(hidBuffer); hidBuffer=''; clearTimeout(hidTimer);
   if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
-  if(code)login(code); return;
+  if(code){
+   if(!zebraReady){
+    document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
+    return;
+   }
+   login(code);
+  }
+  return;
  }
  if(e.key.length===1){
   hidBuffer+=e.key;
@@ -859,7 +873,6 @@ window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
 setTimeout(focusHid,120);
 setTimeout(renderZebraBarcode,40);
-setTimeout(async()=>{try{if(!scanner)await toggleCamera()}catch(e){}},250);
 async function toggleCamera(){
  await enterTerminalFullscreen();
  if(scanner){
