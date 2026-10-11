@@ -1216,51 +1216,15 @@ async function activity(type){
  const d=await r.json();if(!r.ok){showErr(d.error);return}await refresh();
 }
 async function toggleCamera(){
- if(scanner){
-  try{await scanner.stop()}catch(e){}
-  try{await scanner.clear()}catch(e){}
-  scanner=null;
-  document.getElementById('reader').classList.add('hidden');
-  return;
- }
+ if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').classList.add('hidden');return}
  if(typeof Html5Qrcode==='undefined'){showErr('Модуль камеры не загрузился');return}
-
- document.getElementById('reader').classList.remove('hidden');
-
- const formats=(typeof Html5QrcodeSupportedFormats!=='undefined')
-  ? [Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.CODE_128]
-  : undefined;
-
- scanner=formats
-  ? new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false})
-  : new Html5Qrcode('reader');
-
+ document.getElementById('reader').classList.remove('hidden');scanner=new Html5Qrcode('reader');
  try{
-  await scanner.start(
-   {facingMode:'environment'},
-   {
-    fps:12,
-    disableFlip:true,
-    qrbox:(w,h)=>{
-      const width=Math.max(240,Math.min(Math.floor(w*0.92),520));
-      const height=Math.max(80,Math.min(Math.floor(h*0.34),120));
-      return {width,height};
-    }
-   },
-   txt=>cameraScan(txt),
-   ()=>{}
-  );
- }catch(e){
-  try{await scanner.clear()}catch(_){}
-  scanner=null;
-  showErr('Камера не открылась: '+e);
- }
+  await scanner.start({facingMode:'environment'},{fps:15,qrbox:{width:320,height:160}},txt=>cameraScan(txt),()=>{});
+ }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
 }
 function showErr(m){showTsdError(m)}
-updateScanStage();
-loadIdentity();
-setTimeout(()=>fetch('/api/warmup',{method:'POST'}).catch(()=>{}),12000);
-setInterval(()=>{if(shiftId)refresh()},15000);
+updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
 </script><script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
