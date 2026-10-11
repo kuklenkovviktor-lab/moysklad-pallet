@@ -1000,6 +1000,11 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
 .ops-title{font-size:9px;color:var(--muted);margin:1px 0 3px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
 .activities{display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .activities button{margin:0;padding:7px 4px;font-size:10px;min-height:32px}
+.activity-switch{position:relative}
+#activityMenu{margin-top:5px}
+#activityMenu.hidden{display:none!important}
+#activityToggle{margin:0}
+#backToPicking{grid-column:1/-1;background:#dfeaf1;color:#25313d;border:1px solid #b9cbd8}
 .exit-btn{margin-top:auto}
 @media (orientation:landscape) and (max-height:600px){
  body{overflow:hidden}
@@ -1076,17 +1081,17 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
       </div>
     </div>
 
-    <div class="card">
-      <div class="ops-title">Операция</div>
-      <div class="activities" id="activities">
+    <div class="card activity-switch">
+      <button class="secondary" id="activityToggle" onclick="toggleActivityMenu()">Другая работа</button>
+      <div class="activities hidden" id="activityMenu">
         <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
         <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
         <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
         <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
         <button data-a="downtime" onclick="activity('downtime')">Простой</button>
         <button data-a="other" onclick="activity('other')">Другое</button>
+        <button id="backToPicking" class="hidden" onclick="activity('picking')">Вернуться к сборке</button>
       </div>
-      <button class="secondary exit-btn" onclick="location.href='/exit'">🚪 Выход</button>
     </div>
   </div>
 </div>
@@ -1156,6 +1161,11 @@ async function refresh(){
  document.getElementById('bar').style.width=Math.min(d.percent,100)+'%';
  document.getElementById('remaining').textContent=d.target_done?'✅ Минималка выполнена':'До 1600: '+d.remaining;
  document.querySelectorAll('[data-a]').forEach(b=>b.classList.toggle('active',b.dataset.a===d.activity));
+ const labels={picking:'Другая работа',replenishment:'Сейчас: Пополнение',shipping:'Сейчас: Отгрузка',pallets:'Сейчас: Палеты',kgt:'Сейчас: КГТ',downtime:'Сейчас: Простой',other:'Сейчас: Другое'};
+ const toggle=document.getElementById('activityToggle');
+ if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
+ const back=document.getElementById('backToPicking');
+ if(back)back.classList.toggle('hidden',d.activity==='picking');
 }
 function updateScanStage(){
  const input=document.getElementById('barcode');
@@ -1215,9 +1225,16 @@ function cameraScan(code){
  lastCameraCode=code;lastCameraAt=now;handleScan(code);
 }
 
+function toggleActivityMenu(){
+ const menu=document.getElementById('activityMenu');
+ if(menu)menu.classList.toggle('hidden');
+}
 async function activity(type){
  const r=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:type})});
- const d=await r.json();if(!r.ok){showErr(d.error);return}await refresh();
+ const d=await r.json();if(!r.ok){showErr(d.error);return}
+ const menu=document.getElementById('activityMenu');
+ if(menu)menu.classList.add('hidden');
+ await refresh();
 }
 async function toggleCamera(){
  if(scanner){try{await scanner.stop()}catch(e){}scanner=null;document.getElementById('reader').classList.add('hidden');return}
