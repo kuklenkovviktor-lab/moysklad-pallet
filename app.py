@@ -381,11 +381,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </div>
 <div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 
-<div class="card">
-  <h1>Склад → Оприходование</h1>
-  <div class="muted">Создай Оприходование: выбери склад и поставщика через статус, затем сканируй палеты. После работы проведи документ.</div>
-</div>
-
 <div class="card" id="docCard">
   <h2>Документ Оприходования</h2>
 
