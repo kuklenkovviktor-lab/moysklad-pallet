@@ -3,9 +3,10 @@ import sqlite3
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import boto3
+import requests
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -67,35 +68,37 @@ def _daily_key(day):
     return f"{PREFIX}/daily/{day}/wms.db"
 
 
-def _newest_daily_key():
-    """Return the newest daily SQLite backup key, if one exists."""
-    s3 = _client()
-    prefix = f"{PREFIX}/daily/"
-    token = None
-    newest = None
-    while True:
-        kwargs = {"Bucket": BUCKET, "Prefix": prefix, "MaxKeys": 1000}
-        if token:
-            kwargs["ContinuationToken"] = token
-        page = s3.list_objects_v2(**kwargs)
-        for obj in page.get("Contents", []) or []:
-            key = str(obj.get("Key") or "")
-            if not key.endswith("/wms.db"):
-                continue
-            stamp = obj.get("LastModified")
-            if newest is None or (stamp is not None and stamp > newest[0]):
-                newest = (stamp, key)
-        if not page.get("IsTruncated"):
-            break
-        token = page.get("NextContinuationToken")
-        if not token:
-            break
-    return newest[1] if newest else None
+def _candidate_restore_keys():
+    # latest first, then deterministic daily fallbacks. Avoid list_objects_v2
+    # during startup so one slow S3 listing cannot block the whole WMS.
+    keys = [_latest_key()]
+    today = datetime.now(timezone.utc).date()
+    for offset in range(0, 14):
+        key = _daily_key((today - timedelta(days=offset)).isoformat())
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _download_and_validate(key, tmp):
-    _client().download_file(BUCKET, key, tmp)
-    conn = sqlite3.connect(tmp, timeout=5)
+    # boto3 download_file uses the transfer manager and may keep retrying much
+    # longer than expected. Generate a signed URL locally and use requests with
+    # explicit connect/read timeouts instead.
+    s3 = _client()
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": BUCKET, "Key": key},
+        ExpiresIn=60,
+    )
+    response = requests.get(url, timeout=(3, 10))
+    if response.status_code == 404:
+        raise FileNotFoundError(key)
+    response.raise_for_status()
+
+    with open(tmp, "wb") as fh:
+        fh.write(response.content)
+
+    conn = sqlite3.connect(tmp, timeout=3)
     try:
         check = conn.execute("PRAGMA integrity_check").fetchone()
         if not check or str(check[0]).lower() != "ok":
@@ -237,25 +240,26 @@ def restore_if_needed():
             _STATUS["phase"] = "restoring"
 
         restored_key = None
-        latest_error = None
-        try:
-            restored_key = _download_and_validate(_latest_key(), tmp)
-        except Exception as exc:
-            latest_error = exc
+        last_error = None
+        for candidate in _candidate_restore_keys():
             try:
                 if os.path.exists(tmp):
                     os.remove(tmp)
-            except OSError:
-                pass
+                restored_key = _download_and_validate(candidate, tmp)
+                break
+            except FileNotFoundError as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                # Connection/auth/integrity errors are meaningful. Do not burn
+                # minutes trying 14 more keys through the same broken path.
+                last_error = exc
+                break
 
         if not restored_key:
-            daily_key = _newest_daily_key()
-            if daily_key:
-                restored_key = _download_and_validate(daily_key, tmp)
-            else:
-                raise FileNotFoundError(
-                    "No remote SQLite backup found at latest or daily prefixes"
-                ) from latest_error
+            raise RuntimeError(
+                "No usable remote SQLite backup: " + str(last_error or "unknown error")
+            ) from last_error
 
         os.replace(tmp, DB_PATH)
         now = datetime.now(timezone.utc).isoformat()
