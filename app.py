@@ -49,6 +49,21 @@ def _startup_snapshot():
     with _WMS_STARTUP_LOCK:
         return dict(_WMS_STARTUP_STATE)
 
+def _startup_public_message():
+    state = _startup_snapshot()
+    raw = str(state.get("last_error") or "").lower()
+    if not raw:
+        return "Подключаю рабочую базу данных."
+    if "accessdenied" in raw or "403" in raw or "forbidden" in raw:
+        return "Нет доступа к резервной копии в Yandex Object Storage."
+    if "nosuchkey" in raw or "not found" in raw or "404" in raw or "no remote sqlite backup" in raw:
+        return "Резервная копия базы не найдена в Yandex Object Storage."
+    if "integrity_check" in raw or "malformed" in raw or "corrupt" in raw:
+        return "Резервная копия базы повреждена и не была подключена."
+    if "timeout" in raw or "timed out" in raw or "connection" in raw or "endpoint" in raw:
+        return "Нет стабильной связи с Yandex Object Storage. Повторяю подключение."
+    return "Не удалось подключить рабочую базу. ONIX автоматически повторяет попытку."
+
 def _wms_initializer():
     while not _WMS_READY.is_set():
         with _WMS_STARTUP_LOCK:
@@ -98,7 +113,8 @@ def require_employee_login():
             <div style="max-width:520px;background:#fff;padding:24px;border-radius:16px;border:1px solid #d7e0e7">
             <h2 style="margin-top:0">ONIX WMS запускается</h2>
             <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
-            <p style="color:#6b7785">Обычно это занимает несколько секунд.</p>
+            <p style="color:#6b7785">""" + _startup_public_message() + """</p>
+            <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """</p>
             <script>setTimeout(()=>location.reload(),5000)</script>
             </div></body></html>""",
             status=503,
