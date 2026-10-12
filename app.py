@@ -49,7 +49,7 @@ def require_employee_login():
         "/manager-login",
         "/api/manager/login",
     }
-    if path in public_paths or path.startswith("/static/") or path.startswith("/vendor/"):
+    if path in public_paths or path.startswith("/static/"):
         return None
 
     # Отдельная браузерная сессия руководителя для ПК.
