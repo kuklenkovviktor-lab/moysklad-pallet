@@ -14,6 +14,7 @@ from wms import (
     log_event,
     query_one,
     query_all,
+    db_connect,
     execute,
     now_iso,
     manager_access,
