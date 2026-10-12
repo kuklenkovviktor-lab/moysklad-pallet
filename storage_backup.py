@@ -67,6 +67,44 @@ def _daily_key(day):
     return f"{PREFIX}/daily/{day}/wms.db"
 
 
+def _newest_daily_key():
+    """Return the newest daily SQLite backup key, if one exists."""
+    s3 = _client()
+    prefix = f"{PREFIX}/daily/"
+    token = None
+    newest = None
+    while True:
+        kwargs = {"Bucket": BUCKET, "Prefix": prefix, "MaxKeys": 1000}
+        if token:
+            kwargs["ContinuationToken"] = token
+        page = s3.list_objects_v2(**kwargs)
+        for obj in page.get("Contents", []) or []:
+            key = str(obj.get("Key") or "")
+            if not key.endswith("/wms.db"):
+                continue
+            stamp = obj.get("LastModified")
+            if newest is None or (stamp is not None and stamp > newest[0]):
+                newest = (stamp, key)
+        if not page.get("IsTruncated"):
+            break
+        token = page.get("NextContinuationToken")
+        if not token:
+            break
+    return newest[1] if newest else None
+
+
+def _download_and_validate(key, tmp):
+    _client().download_file(BUCKET, key, tmp)
+    conn = sqlite3.connect(tmp, timeout=5)
+    try:
+        check = conn.execute("PRAGMA integrity_check").fetchone()
+        if not check or str(check[0]).lower() != "ok":
+            raise RuntimeError(f"Backup SQLite integrity_check failed for {key}")
+    finally:
+        conn.close()
+    return key
+
+
 def _source_stamp():
     values = []
     for path in (DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"):
@@ -198,16 +236,26 @@ def restore_if_needed():
         with _STATUS_LOCK:
             _STATUS["phase"] = "restoring"
 
-        _client().download_file(BUCKET, _latest_key(), tmp)
-
-        # Refuse to replace the working DB path with an unreadable/corrupt SQLite file.
-        conn = sqlite3.connect(tmp, timeout=10)
+        restored_key = None
+        latest_error = None
         try:
-            check = conn.execute("PRAGMA integrity_check").fetchone()
-            if not check or str(check[0]).lower() != "ok":
-                raise RuntimeError("Backup SQLite integrity_check failed")
-        finally:
-            conn.close()
+            restored_key = _download_and_validate(_latest_key(), tmp)
+        except Exception as exc:
+            latest_error = exc
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+
+        if not restored_key:
+            daily_key = _newest_daily_key()
+            if daily_key:
+                restored_key = _download_and_validate(daily_key, tmp)
+            else:
+                raise FileNotFoundError(
+                    "No remote SQLite backup found at latest or daily prefixes"
+                ) from latest_error
 
         os.replace(tmp, DB_PATH)
         now = datetime.now(timezone.utc).isoformat()
@@ -216,7 +264,7 @@ def restore_if_needed():
                 "configured": True,
                 "last_restore_at": now,
                 "last_error": "",
-                "latest_key": _latest_key(),
+                "latest_key": restored_key,
                 "phase": "idle",
             })
         return True
