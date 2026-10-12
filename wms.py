@@ -1321,8 +1321,7 @@ async function toggleCamera(){
 SUPERVISOR_QR_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>ONIX WMS · QR старшего</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
@@ -1807,25 +1806,53 @@ BADGES_PAGE = """<!doctype html>
 @media print{body{background:#fff}.top,.print-one{display:none!important}.badge{break-inside:avoid;box-shadow:none}body.print-single .badge{display:none!important}body.print-single .badge.print-target{display:block!important;margin:0 auto;max-width:420px;border:0}}
 </style></head><body><div class="wrap"><div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div><div id="grid" class="grid"></div></div>
 <script>
+function loadScript(src,timeoutMs=3500){
+ return new Promise((resolve,reject)=>{
+  const existing=[...document.scripts].find(s=>s.src===src);
+  if(existing){if(existing.dataset.ready==='1')resolve();else existing.addEventListener('load',resolve,{once:true});return}
+  const s=document.createElement('script');s.src=src;s.async=true;
+  const timer=setTimeout(()=>{s.remove();reject(new Error('timeout'))},timeoutMs);
+  s.onload=()=>{clearTimeout(timer);s.dataset.ready='1';resolve()};
+  s.onerror=()=>{clearTimeout(timer);s.remove();reject(new Error('load failed'))};
+  document.head.appendChild(s);
+ });
+}
+async function fetchJson(url,timeoutMs=5000){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{
+  const r=await fetch(url,{signal:controller.signal,cache:'no-store'});
+  if(r.status===403){location.href='/manager-login';return null}
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return await r.json();
+ }finally{clearTimeout(timer)}
+}
 async function load(){
- const r=await fetch('/api/admin/badges');if(r.status===403){location.href='/fbs';return}const d=await r.json();
  const g=document.getElementById('grid');
- g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" data-employee-id="'+x.id+'" onclick="printBadge(this.dataset.employeeId)">Печать этого бейджа</button></div>').join('');
+ g.innerHTML='<div class="badge"><b>Загружаю бейджи…</b><div class="small" style="margin-top:6px">Навигация уже доступна.</div></div>';
+ let d;
+ try{
+  d=await fetchJson('/api/admin/badges',5000);
+  if(!d)return;
+ }catch(e){
+  g.innerHTML='<div class="badge"><b>Не удалось загрузить бейджи</b><div class="small" style="margin-top:6px">Сервер не ответил за 5 секунд. Можно спокойно вернуться в статистику и повторить позже.</div></div>';
+  return;
+ }
+ g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"><div class="small">QR загружается…</div></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" data-employee-id="'+x.id+'" onclick="printBadge(this.dataset.employeeId)">Печать этого бейджа</button></div>').join('');
+ const libs=await Promise.allSettled([
+  loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'),
+  loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js')
+ ]);
  d.employees.forEach(x=>{
+  const qr=document.getElementById('q_'+x.id);
+  if(qr)qr.innerHTML='';
   try{
-   new QRCode(document.getElementById('q_'+x.id),{text:x.badge_code,width:150,height:150});
-  }catch(e){
-   console.error('QR badge render failed',x.id,e);
-  }
+   if(typeof QRCode==='function')new QRCode(qr,{text:x.badge_code,width:150,height:150});
+   else if(qr)qr.innerHTML='<div class="small">QR временно недоступен</div>';
+  }catch(e){if(qr)qr.innerHTML='<div class="small">QR временно недоступен</div>'}
   try{
-   if(typeof JsBarcode==='function'){
-    JsBarcode('#b_'+x.id,x.scanner_code,{format:'CODE128',displayValue:true,fontSize:11,height:58,margin:2,width:1});
-   }else{
-    console.error('JsBarcode library is not loaded');
-   }
-  }catch(e){
-   console.error('Code128 badge render failed',x.id,e);
-  }
+   if(typeof JsBarcode==='function')JsBarcode('#b_'+x.id,x.scanner_code,{format:'CODE128',displayValue:true,fontSize:11,height:58,margin:2,width:1});
+  }catch(e){}
  });
 }
 function clearPrintSelection(){
