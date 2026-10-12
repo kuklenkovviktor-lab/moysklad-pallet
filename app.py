@@ -45,6 +45,7 @@ _WMS_STARTUP_STATE = {
     "attempts": 0,
     "last_attempt_at": None,
     "last_error": "",
+    "stage": "boot",
 }
 
 def _build_id():
@@ -57,6 +58,11 @@ def _build_id():
 def _startup_snapshot():
     with _WMS_STARTUP_LOCK:
         return dict(_WMS_STARTUP_STATE)
+
+def _set_startup_stage(stage):
+    with _WMS_STARTUP_LOCK:
+        _WMS_STARTUP_STATE["stage"] = str(stage)
+    print(f"WMS startup stage: {stage}", flush=True)
 
 def _startup_public_message():
     state = _startup_snapshot()
@@ -107,15 +113,19 @@ def _migrate_sqlite_backup_to_postgres_if_needed():
     fd, source_path = tempfile.mkstemp(prefix="onix-migrate-", suffix=".db")
     os.close(fd)
     try:
+        _set_startup_stage("download_backup")
         key = download_backup_for_migration(source_path)
+        _set_startup_stage("open_sqlite")
         src = sqlite3.connect(source_path)
         try:
+            _set_startup_stage("integrity_check")
             check = src.execute("PRAGMA integrity_check").fetchone()
             if not check or str(check[0]).lower() != "ok":
                 raise RuntimeError("Migration source SQLite integrity_check failed")
 
             total_inserted = 0
             for table in business_tables:
+                _set_startup_stage(f"import:{table}")
                 src_cols = [row[1] for row in src.execute(f"PRAGMA table_info({table})").fetchall()]
                 if not src_cols:
                     continue
@@ -137,6 +147,7 @@ def _migrate_sqlite_backup_to_postgres_if_needed():
                 total_inserted += len(rows)
 
             # Verify source row counts are present in Postgres.
+            _set_startup_stage("verify")
             for table in business_tables:
                 src_count = int(src.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
                 dst_row = query_one(f'SELECT COUNT(*) FROM "{table}"')
@@ -145,7 +156,8 @@ def _migrate_sqlite_backup_to_postgres_if_needed():
                     raise RuntimeError(
                         f"Migration verification failed for {table}: source={src_count}, target={dst_count}"
                     )
-            print(f"SQLite->Postgres migration complete from {key}: {total_inserted} source rows processed")
+            print(f"SQLite->Postgres migration complete from {key}: {total_inserted} source rows processed", flush=True)
+            _set_startup_stage("migration_complete")
         finally:
             src.close()
     finally:
@@ -161,19 +173,24 @@ def _wms_initializer():
             _WMS_STARTUP_STATE["attempts"] += 1
             _WMS_STARTUP_STATE["last_attempt_at"] = now_iso()
         try:
-            # Never create an empty SQLite DB before restore has had a chance.
+            _set_startup_stage("restore_check")
             restore_if_needed()
+            _set_startup_stage("init_db")
             init_wms_db()
+            _set_startup_stage("migration")
             _migrate_sqlite_backup_to_postgres_if_needed()
+            _set_startup_stage("backup_worker")
             start_backup_worker()
             with _WMS_STARTUP_LOCK:
                 _WMS_STARTUP_STATE["last_error"] = ""
+                _WMS_STARTUP_STATE["stage"] = "ready"
             _WMS_READY.set()
+            print("WMS startup stage: ready", flush=True)
             return
         except Exception as exc:
             with _WMS_STARTUP_LOCK:
                 _WMS_STARTUP_STATE["last_error"] = str(exc)
-            print(f"WMS startup retry: {exc}")
+            print(f"WMS startup retry: {exc}", flush=True)
             time.sleep(10)
 
 def _start_wms_initializer():
@@ -206,7 +223,7 @@ def require_employee_login():
             <h2 style="margin-top:0">ONIX WMS запускается</h2>
             <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
             <p style="color:#6b7785">""" + _startup_public_message() + """</p>
-            <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """</p>
+            <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """ · этап: """ + str(_startup_snapshot().get("stage", "unknown")) + """</p>
             <p style="color:#8b96a3;font-size:12px">Сборка: """ + _build_id()[:12] + """</p>
             <script>setTimeout(()=>location.reload(),5000)</script>
             </div></body></html>""",
