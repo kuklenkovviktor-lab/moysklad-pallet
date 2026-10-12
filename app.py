@@ -4,7 +4,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import requests
-from flask import Flask, request, jsonify, session, redirect
+from flask import Flask, request, jsonify, session, redirect, Response
 from wms import (
     wms_bp,
     init_wms_db,
@@ -37,9 +37,74 @@ app.config.update(
 )
 app.register_blueprint(wms_bp)
 
+_WMS_READY = threading.Event()
+_WMS_STARTUP_LOCK = threading.Lock()
+_WMS_STARTUP_STATE = {
+    "attempts": 0,
+    "last_attempt_at": None,
+    "last_error": "",
+}
+
+def _startup_snapshot():
+    with _WMS_STARTUP_LOCK:
+        return dict(_WMS_STARTUP_STATE)
+
+def _wms_initializer():
+    while not _WMS_READY.is_set():
+        with _WMS_STARTUP_LOCK:
+            _WMS_STARTUP_STATE["attempts"] += 1
+            _WMS_STARTUP_STATE["last_attempt_at"] = now_iso()
+        try:
+            # Never create an empty SQLite DB before restore has had a chance.
+            restore_if_needed()
+            init_wms_db()
+            start_backup_worker()
+            with _WMS_STARTUP_LOCK:
+                _WMS_STARTUP_STATE["last_error"] = ""
+            _WMS_READY.set()
+            return
+        except Exception as exc:
+            with _WMS_STARTUP_LOCK:
+                _WMS_STARTUP_STATE["last_error"] = str(exc)
+            print(f"WMS startup retry: {exc}")
+            time.sleep(10)
+
+def _start_wms_initializer():
+    thread = threading.Thread(target=_wms_initializer, name="wms-startup", daemon=True)
+    thread.start()
+
 @app.before_request
 def require_employee_login():
     path = request.path
+
+    # Liveness must stay reachable so Render keeps the process alive while
+    # Object Storage restore retries in the background.
+    if path == "/api/health":
+        return None
+
+    # Do not let any route touch SQLite until restore has completed. This
+    # prevents Flask/health/login code from accidentally creating an empty DB.
+    if not _WMS_READY.is_set():
+        if path.startswith("/api/"):
+            return jsonify(
+                error="ONIX WMS восстанавливает базу данных",
+                startup=_startup_snapshot(),
+            ), 503
+        return Response(
+            """<!doctype html><html lang="ru"><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>ONIX WMS · запуск</title>
+            <body style="font-family:system-ui;background:#e9eef3;color:#25313d;display:grid;place-items:center;min-height:100vh;margin:0">
+            <div style="max-width:520px;background:#fff;padding:24px;border-radius:16px;border:1px solid #d7e0e7">
+            <h2 style="margin-top:0">ONIX WMS запускается</h2>
+            <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
+            <p style="color:#6b7785">Обычно это занимает несколько секунд.</p>
+            <script>setTimeout(()=>location.reload(),5000)</script>
+            </div></body></html>""",
+            status=503,
+            mimetype="text/html",
+        )
+
     public_paths = {
         "/login",
         "/api/auth/login",
@@ -1626,6 +1691,21 @@ def index():
 
 def _system_status_payload():
     db_backend = "postgres" if os.getenv("DATABASE_URL", "").strip() else "sqlite"
+    backup = backup_status()
+    startup = _startup_snapshot()
+
+    if not _WMS_READY.is_set():
+        return {
+            "ok": False,
+            "startup_ready": False,
+            "startup": startup,
+            "token_configured": bool(TOKEN),
+            "database_backend": db_backend,
+            "database_ok": False,
+            "database_error": startup.get("last_error") or "database restore/init in progress",
+            "backup": backup,
+        }
+
     db_ok = False
     db_error = ""
     try:
@@ -1634,9 +1714,10 @@ def _system_status_payload():
     except Exception as e:
         db_error = str(e)
 
-    backup = backup_status()
     return {
         "ok": bool(db_ok and TOKEN),
+        "startup_ready": True,
+        "startup": startup,
         "token_configured": bool(TOKEN),
         "database_backend": db_backend,
         "database_ok": db_ok,
@@ -1644,12 +1725,14 @@ def _system_status_payload():
         "backup": backup,
     }
 
-
 @app.get("/api/health")
 def health():
-    # Public endpoint for Render/liveness checks. Do not expose infrastructure details.
+    # Keep HTTP 200 while restore is retrying so Render does not kill/restart
+    # the service. "ready" tells us whether WMS itself can serve work yet.
     payload = _system_status_payload()
-    return jsonify(ok=bool(payload["ok"])), (200 if payload["ok"] else 503)
+    if not payload.get("startup_ready"):
+        return jsonify(ok=True, ready=False), 200
+    return jsonify(ok=bool(payload["ok"]), ready=True), (200 if payload["ok"] else 503)
 
 
 @app.get("/api/system/status")
@@ -2058,20 +2141,9 @@ def scan():
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-try:
-    # На бесплатном Render локальный диск временный.
-    # Если контейнер новый, сначала возвращаем последнюю SQLite-копию из Yandex Object Storage.
-    restore_if_needed()
-    init_wms_db()
-    start_backup_worker()
-except RestoreRequiredError as e:
-    # Fail closed: если настроенный backup не восстановился, не создаём пустую БД.
-    print(f"WMS restore blocked startup: {e}")
-    raise
-except Exception as e:
-    print(f"WMS DB init warning: {e}")
-    if os.getenv("WMS_REQUIRE_POSTGRES", "0").strip().lower() in ("1", "true", "yes", "on"):
-        raise
+# Start immediately; restore/init retries in the background without letting
+# any request create an empty SQLite DB.
+_start_wms_initializer()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
