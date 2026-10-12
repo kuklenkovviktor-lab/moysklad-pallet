@@ -1,3 +1,4 @@
+import io
 import os
 import sqlite3
 import uuid
@@ -1861,26 +1862,34 @@ document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')l
 BADGES_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Бейджи</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <style>
-*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:900px;margin:auto;padding:16px}
-.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.top a,.top button,.print-one{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750}.print-one{margin-top:12px;cursor:pointer;width:100%}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.badge{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:16px;text-align:center}.qr{display:flex;justify-content:center;margin:12px 0}.code128{margin:10px auto 4px;max-width:100%;overflow:hidden}.code128 svg{width:100%;height:auto;max-height:90px}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}
-@media print{body{background:#fff}.top,.print-one{display:none!important}.badge{break-inside:avoid;box-shadow:none}body.print-single .badge{display:none!important}body.print-single .badge.print-target{display:block!important;margin:0 auto;max-width:420px;border:0}}
-</style></head><body><div class="wrap"><div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div><div id="grid" class="grid"></div></div>
-<script>
-function loadScript(src,timeoutMs=3500){
- return new Promise((resolve,reject)=>{
-  const existing=[...document.scripts].find(s=>s.src===src);
-  if(existing){if(existing.dataset.ready==='1')resolve();else existing.addEventListener('load',resolve,{once:true});return}
-  const s=document.createElement('script');s.src=src;s.async=true;
-  const timer=setTimeout(()=>{s.remove();reject(new Error('timeout'))},timeoutMs);
-  s.onload=()=>{clearTimeout(timer);s.dataset.ready='1';resolve()};
-  s.onerror=()=>{clearTimeout(timer);s.remove();reject(new Error('load failed'))};
-  document.head.appendChild(s);
- });
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}
+.wrap{max-width:900px;margin:auto;padding:16px}
+.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.top a,.top button,.print-one{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.badge{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center}
+.brand{font-size:11px;color:#6b7785;letter-spacing:.04em}
+.name{font-size:22px;font-weight:850;margin-top:8px}
+.qr{width:220px;height:220px;max-width:100%;margin:16px auto 12px;display:block;image-rendering:pixelated}
+.num{font-size:18px;font-weight:850}
+.print-one{margin-top:16px;width:100%}
+.status{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:18px}
+@media print{
+ body{background:#fff}
+ .top,.print-one{display:none!important}
+ .badge{break-inside:avoid;box-shadow:none}
+ body.print-single .badge{display:none!important}
+ body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0}
 }
+</style></head><body>
+<div class="wrap">
+ <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div>
+ <div id="grid" class="grid"></div>
+</div>
+<script>
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 async function fetchJson(url,timeoutMs=5000){
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -1893,40 +1902,28 @@ async function fetchJson(url,timeoutMs=5000){
 }
 async function load(){
  const g=document.getElementById('grid');
- g.innerHTML='<div class="badge"><b>Загружаю бейджи…</b><div class="small" style="margin-top:6px">Навигация уже доступна.</div></div>';
- let d;
+ g.innerHTML='<div class="status"><b>Загружаю бейджи…</b></div>';
  try{
-  d=await fetchJson('/api/admin/badges',5000);
+  const d=await fetchJson('/api/admin/badges',5000);
   if(!d)return;
+  g.innerHTML=d.employees.map(x=>
+   '<div class="badge" id="badge_'+esc(x.id)+'">'+
+    '<div class="brand">ONIX WMS</div>'+
+    '<div class="name">'+esc(x.name)+'</div>'+
+    '<img class="qr" src="'+x.qr_png+'" alt="QR '+esc(x.name)+'">'+
+    '<div class="num">№'+esc(x.badge_number)+'</div>'+
+    '<button type="button" class="print-one" data-employee-id="'+esc(x.id)+'" onclick="printBadge(this.dataset.employeeId)">Печать</button>'+
+   '</div>'
+  ).join('');
  }catch(e){
-  g.innerHTML='<div class="badge"><b>Не удалось загрузить бейджи</b><div class="small" style="margin-top:6px">Сервер не ответил за 5 секунд. Можно спокойно вернуться в статистику и повторить позже.</div></div>';
-  return;
+  g.innerHTML='<div class="status"><b>Не удалось загрузить бейджи</b><div style="margin-top:6px;font-size:12px;color:#6b7785">Обнови страницу. Если ошибка повторится, проверь журнал ONIX.</div></div>';
  }
- g.innerHTML=d.employees.map(x=>'<div class="badge" id="badge_'+x.id+'"><div class="small">ONIX WMS</div><div class="num">№'+x.badge_number+'</div><b>'+x.name+'</b><div class="small">'+(x.role==='manager'?'Руководитель':'Сотрудник')+'</div><div class="qr" id="q_'+x.id+'"><div class="small">QR загружается…</div></div><div class="small">QR для камеры</div><div class="code128"><svg id="b_'+x.id+'"></svg></div><div class="small">Code 128 для Bluetooth / кольцевого сканера</div><div class="small" style="margin-top:8px">Личный ID · не передавать другому сотруднику</div><button type="button" class="print-one" data-employee-id="'+x.id+'" onclick="printBadge(this.dataset.employeeId)">Печать этого бейджа</button></div>').join('');
- const libs=await Promise.allSettled([
-  loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'),
-  loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js')
- ]);
- d.employees.forEach(x=>{
-  const qr=document.getElementById('q_'+x.id);
-  if(qr)qr.innerHTML='';
-  try{
-   if(typeof QRCode==='function')new QRCode(qr,{text:x.badge_code,width:150,height:150});
-   else if(qr)qr.innerHTML='<div class="small">QR временно недоступен</div>';
-  }catch(e){if(qr)qr.innerHTML='<div class="small">QR временно недоступен</div>'}
-  try{
-   if(typeof JsBarcode==='function')JsBarcode('#b_'+x.id,x.scanner_code,{format:'CODE128',displayValue:true,fontSize:11,height:58,margin:2,width:1});
-  }catch(e){}
- });
 }
 function clearPrintSelection(){
  document.body.classList.remove('print-single');
  document.querySelectorAll('.badge.print-target').forEach(el=>el.classList.remove('print-target'));
 }
-function printAllBadges(){
- clearPrintSelection();
- window.print();
-}
+function printAllBadges(){clearPrintSelection();window.print()}
 function printBadge(id){
  clearPrintSelection();
  const badge=document.getElementById('badge_'+id);
@@ -2332,11 +2329,40 @@ def admin_badges():
     ensure_db()
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
-    rows = query_all("SELECT id, name, role, badge_number, badge_code, scanner_code FROM employees WHERE active = 1 ORDER BY badge_number, name")
-    return jsonify(employees=[
-        {"id": r[0], "name": r[1], "role": r[2], "badge_number": r[3], "badge_code": r[4], "scanner_code": r[5]}
-        for r in rows
-    ])
+
+    import qrcode
+
+    rows = query_all(
+        "SELECT id, name, badge_number, badge_code FROM employees WHERE active = 1 ORDER BY badge_number, name"
+    )
+    employees = []
+    for employee_id, name, badge_number, badge_code in rows:
+        code = str(badge_code or "").strip()
+        if not code:
+            code = make_badge_code(employee_id)
+            execute("UPDATE employees SET badge_code = ? WHERE id = ?", (code, employee_id))
+
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=4,
+        )
+        qr.add_data(code)
+        qr.make(fit=True)
+        image = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        qr_png = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+        employees.append({
+            "id": employee_id,
+            "name": name,
+            "badge_number": badge_number,
+            "qr_png": qr_png,
+        })
+
+    return jsonify(employees=employees)
 
 
 @wms_bp.get("/api/stats/employees")
