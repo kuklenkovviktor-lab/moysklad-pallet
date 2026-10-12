@@ -679,8 +679,8 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="screen-orientation" content="landscape">
 <title>ONIX WMS · Вход</title>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="/static/jsQR.js"></script>
+<script src="/static/JsBarcode.all.min.js"></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:#e9eef3;color:#25313d}
@@ -905,66 +905,114 @@ window.addEventListener('pageshow',()=>setTimeout(focusHid,120));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!scanner)setTimeout(focusHid,120)});
 setTimeout(focusHid,120);
 setTimeout(renderZebraBarcode,40);
+async function stopBadgeCamera(){
+ const active=scanner;
+ scanner=null;
+ if(!active)return;
+ active.stopped=true;
+ try{clearTimeout(active.timer)}catch(e){}
+ try{active.stream.getTracks().forEach(t=>t.stop())}catch(e){}
+ document.getElementById('reader').innerHTML='';
+}
+
 async function toggleCamera(){
  await enterTerminalFullscreen();
  const result=document.getElementById('result');
+ const reader=document.getElementById('reader');
 
  if(scanner){
-  try{await scanner.stop()}catch(e){}
-  try{await scanner.clear()}catch(e){}
-  scanner=null;
-  document.getElementById('reader').innerHTML='';
+  await stopBadgeCamera();
   result.innerHTML='';
   setTimeout(focusHid,100);
   return;
  }
 
- if(typeof Html5Qrcode==='undefined'){
-  result.innerHTML='<div class="err">Модуль камеры не загрузился. Обнови страницу.</div>';
+ if(typeof jsQR!=='function'){
+  result.innerHTML='<div class="err">QR-модуль ONIX не загрузился. Обнови страницу.</div>';
+  return;
+ }
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+  result.innerHTML='<div class="err">Браузер не даёт доступ к камере.</div>';
   return;
  }
 
- const formats=(typeof Html5QrcodeSupportedFormats!=='undefined')
-  ? [Html5QrcodeSupportedFormats.QR_CODE,Html5QrcodeSupportedFormats.CODE_128]
-  : undefined;
-
- scanner=formats
-  ? new Html5Qrcode('reader',{formatsToSupport:formats,verbose:false})
-  : new Html5Qrcode('reader');
-
- result.innerHTML='<div class="ok">Камера включена · наведи на QR бейджа</div>';
+ result.innerHTML='<div class="ok">Камера включается…</div>';
 
  try{
-  // Максимально простой режим для старого Android: без qrbox/aspectRatio.
-  // Сканируется весь кадр, поэтому QR ловится стабильнее.
-  await scanner.start(
-   {facingMode:'environment'},
-   {fps:10,disableFlip:false},
-   async txt=>{
-    const code=normalizeHidCode(txt);
-    if(!code||busy)return;
+  const stream=await navigator.mediaDevices.getUserMedia({
+   audio:false,
+   video:{
+    facingMode:{ideal:'environment'},
+    width:{ideal:1280},
+    height:{ideal:720}
+   }
+  });
 
-    result.innerHTML='<div class="ok">QR считан · проверяю бейдж…</div>';
+  const track=stream.getVideoTracks()[0];
+  try{
+   const caps=track.getCapabilities?track.getCapabilities():{};
+   if(Array.isArray(caps.focusMode)&&caps.focusMode.includes('continuous')){
+    await track.applyConstraints({advanced:[{focusMode:'continuous'}]});
+   }
+  }catch(e){}
 
-    if(code===ZEBRA_SERVICE_CODE){
-     setScannerReady();
-     return;
+  reader.innerHTML='';
+  const video=document.createElement('video');
+  video.setAttribute('playsinline','');
+  video.setAttribute('autoplay','');
+  video.muted=true;
+  video.srcObject=stream;
+  reader.appendChild(video);
+
+  const canvas=document.createElement('canvas');
+  canvas.style.display='none';
+  reader.appendChild(canvas);
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+
+  await video.play();
+
+  const state={stream,video,canvas,ctx,timer:null,stopped:false};
+  scanner=state;
+  result.innerHTML='<div class="ok">Камера включена · наведи на QR бейджа</div>';
+
+  const scanFrame=async()=>{
+   if(scanner!==state||state.stopped)return;
+   try{
+    if(!busy&&video.readyState>=2&&video.videoWidth>0&&video.videoHeight>0){
+     const maxWidth=900;
+     const scale=Math.min(1,maxWidth/video.videoWidth);
+     const w=Math.max(1,Math.round(video.videoWidth*scale));
+     const h=Math.max(1,Math.round(video.videoHeight*scale));
+     if(canvas.width!==w)canvas.width=w;
+     if(canvas.height!==h)canvas.height=h;
+     ctx.drawImage(video,0,0,w,h);
+     const frame=ctx.getImageData(0,0,w,h);
+     const found=jsQR(frame.data,w,h,{inversionAttempts:'dontInvert'});
+     const code=normalizeHidCode(found&&found.data);
+     if(code){
+      result.innerHTML='<div class="ok">QR считан · проверяю бейдж…</div>';
+      await stopBadgeCamera();
+      await login(code);
+      return;
+     }
     }
-
-    try{await scanner.stop()}catch(e){}
-    try{await scanner.clear()}catch(e){}
-    scanner=null;
-    await login(code);
-   },
-   ()=>{}
-  );
+   }catch(e){}
+   if(scanner===state&&!state.stopped){
+    state.timer=setTimeout(scanFrame,120);
+   }
+  };
+  state.timer=setTimeout(scanFrame,80);
  }catch(e){
-  try{await scanner.clear()}catch(_){}
-  scanner=null;
-  result.innerHTML='<div class="err">Камера не открылась: '+String((e&&e.message)||e||'ошибка')+'</div>';
+  await stopBadgeCamera();
+  const msg=(e&&e.name==='NotAllowedError')
+   ? 'Нет доступа к камере. Разреши камеру для ONIX в Safari.'
+   : 'Камера не открылась: '+String((e&&e.message)||e||'ошибка');
+  result.innerHTML='<div class="err">'+msg+'</div>';
   setTimeout(focusHid,100);
  }
 }
+
+window.addEventListener('pagehide',()=>{stopBadgeCamera()});
 </script><script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
