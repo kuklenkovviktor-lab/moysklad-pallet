@@ -155,8 +155,9 @@ def db_connect():
     if REQUIRE_POSTGRES:
         raise RuntimeError("WMS_REQUIRE_POSTGRES включён, но DATABASE_URL не задан.")
 
-    conn = sqlite3.connect(DB_PATH, timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=3)
     try:
+        conn.execute("PRAGMA busy_timeout=3000")
         yield conn
     finally:
         conn.close()
@@ -295,6 +296,12 @@ def init_wms_db():
     ]
     with db_connect() as conn:
         cur = conn.cursor()
+        if not DATABASE_URL:
+            # WAL lets dashboard reads continue while scanners write events.
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.fetchone()
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.execute("PRAGMA busy_timeout=3000")
         for stmt in statements:
             cur.execute(stmt)
 
@@ -433,7 +440,9 @@ def is_manager():
 
 
 def manager_access():
-    return bool(is_manager() or session.get("manager_web") is True)
+    # Desktop manager session is already authenticated; avoid an unnecessary
+    # SQLite lookup on every dashboard API request.
+    return bool(session.get("manager_web") is True or is_manager())
 
 
 def _manager_client_ip():
@@ -788,14 +797,21 @@ function submitHidValue(){
 
 async function login(code){
  code=normalizeHidCode(code); if(!code||busy)return; busy=true;
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),8000);
  try{
-  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code})});
+  document.getElementById('result').innerHTML='<div class="ok">Бейдж считан · выполняю вход…</div>';
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code}),signal:controller.signal});
   const d=await r.json();
   if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Бейдж не принят')+'</div>';return}
   localStorage.setItem('fbs_shift_id',d.shift_id||'');
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
   setTimeout(()=>location.href='/fbs',250);
+ }catch(e){
+  const msg=(e&&e.name==='AbortError')?'Сервер не ответил за 8 секунд. Повтори скан.':'Ошибка входа: '+String((e&&e.message)||e||'сеть');
+  document.getElementById('result').innerHTML='<div class="err">'+msg+'</div>';
  }finally{
+  clearTimeout(timer);
   busy=false;
   if(!scanner)setTimeout(focusHid,80);
  }
@@ -1245,7 +1261,11 @@ async function toggleCamera(){
  }catch(e){scanner=null;showErr('Камера не открылась: '+e)}
 }
 function showErr(m){showTsdError(m)}
-updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();setInterval(()=>{if(shiftId)refresh()},15000);
+async function fbsRefreshLoop(){
+ if(shiftId&&!document.hidden){try{await refresh()}catch(e){}}
+ setTimeout(fbsRefreshLoop,15000);
+}
+updateScanStage();fetch('/api/warmup',{method:'POST'}).catch(()=>{});loadIdentity();fbsRefreshLoop();
 </script><script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -1582,15 +1602,21 @@ function renderProgress(done){
  }
 }
 
+async async function fetchWithTimeout(url,options={},timeoutMs=5000){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{return await fetch(url,{...options,signal:controller.signal})}
+ finally{clearTimeout(timer)}
+}
 async function load(){
  const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
  const [dashR,fbsR,recR,planR,devR,hourR]=await Promise.all([
-  fetch('/api/fbs/dashboard'),
-  fetch('/api/fbs/overview?'+p.toString()),
-  fetch('/api/receiving/overview?'+p.toString()),
-  fetch('/api/manager/daily-plan?date='+encodeURIComponent(date)),
-  fetch('/api/operations/deviations?'+p.toString()),
-  fetch('/api/fbs/hourly?'+p.toString())
+  fetchWithTimeout('/api/fbs/dashboard'),
+  fetchWithTimeout('/api/fbs/overview?'+p.toString()),
+  fetchWithTimeout('/api/receiving/overview?'+p.toString()),
+  fetchWithTimeout('/api/manager/daily-plan?date='+encodeURIComponent(date)),
+  fetchWithTimeout('/api/operations/deviations?'+p.toString()),
+  fetchWithTimeout('/api/fbs/hourly?'+p.toString())
  ]);
  if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
  const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
@@ -1618,7 +1644,7 @@ async function savePlan(){
  const input=document.getElementById('planInput'),v=Math.max(0,parseInt(input.value||'0',10)||0);
  const r=await fetch('/api/manager/daily-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:dayKey(),wb_fbs_plan:v})});
  const d=await r.json();if(!r.ok){alert(d.error||'Не удалось сохранить план');return}
- currentPlan=v;load();
+ currentPlan=v;runDashboardLoad();
 }
 
 async function refreshExitQr(){
@@ -1635,7 +1661,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExitQr()});
 
 async function loadWbStatus(){
  try{
-  const r=await fetch('/api/wb/status',{cache:'no-store'}),d=await r.json(),bar=document.getElementById('wbBar');
+  const r=await fetchWithTimeout('/api/wb/status',{cache:'no-store'},5000),d=await r.json(),bar=document.getElementById('wbBar');
   if(!d.configured){bar.style.display='none';return}
   bar.style.display='flex';
   const dot=document.getElementById('wbDot'),title=document.getElementById('wbTitle'),txt=document.getElementById('wbText'),btn=document.getElementById('wbSyncBtn');
@@ -1648,7 +1674,21 @@ async function loadWbStatus(){
 async function syncWb(){const btn=document.getElementById('wbSyncBtn');btn.disabled=true;btn.textContent='Запускаю…';const r=await fetch('/api/wb/sync',{method:'POST'}),d=await r.json();if(!r.ok){btn.disabled=false;btn.textContent='Обновить WB';document.getElementById('wbText').textContent=d.error||'Ошибка запуска WB';return}loadWbStatus()}
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
 
-load();loadWbStatus();setInterval(load,10000);setInterval(loadWbStatus,10000);
+let dashboardBusy=false,wbStatusBusy=false;
+async function runDashboardLoad(){
+ if(dashboardBusy||document.hidden)return;
+ dashboardBusy=true;
+ try{await load()}catch(e){}finally{dashboardBusy=false}
+}
+async function runWbStatus(){
+ if(wbStatusBusy||document.hidden)return;
+ wbStatusBusy=true;
+ try{await loadWbStatus()}catch(e){}finally{wbStatusBusy=false}
+}
+async function dashboardLoop(){await runDashboardLoad();setTimeout(dashboardLoop,10000)}
+async function wbStatusLoop(){await runWbStatus();setTimeout(wbStatusLoop,15000)}
+dashboardLoop();wbStatusLoop();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
 </script></body></html>"""
 
@@ -1706,7 +1746,16 @@ async function load(){
  document.getElementById('rows').innerHTML=d.recent.length?d.recent.map(x=>'<tr><td>'+esc(fmt(x.created_at))+'</td><td><b>'+esc(x.employee)+'</b></td><td class="article">'+esc(x.article||'—')+'</td><td>'+esc(x.product_name||'—')+'</td><td class="muted">'+esc(x.object_code||'—')+'</td><td class="qty">'+esc(x.quantity??'—')+'</td><td>'+esc(x.document_name||x.document_id||'—')+'</td><td>'+esc(typeLabel(x.event_type))+'</td></tr>').join(''):'<tr><td colspan="8">Сегодня приёмок ещё нет</td></tr>';
 }
 async function managerLogout(){await fetch('/api/manager/logout',{method:'POST'});location.href='/manager-login'}
-load();setInterval(load,10000);
+let monitorBusy=false;
+async function monitorLoop(){
+ if(!document.hidden&&!monitorBusy){
+  monitorBusy=true;
+  try{await load()}catch(e){}finally{monitorBusy=false}
+ }
+ setTimeout(monitorLoop,10000);
+}
+monitorLoop();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!monitorBusy)monitorLoop()});
 </script></body></html>"""
 
 
