@@ -25,6 +25,7 @@ from storage_backup import (
     backup_now,
     status as backup_status,
     RestoreRequiredError,
+    download_backup_for_migration,
 )
 
 app = Flask(__name__)
