@@ -84,15 +84,24 @@ def _migrate_sqlite_backup_to_postgres_if_needed():
         "employees", "shifts", "scans", "activities",
         "operation_events", "external_pallets", "wb_orders", "daily_targets",
     )
-    existing = 0
+    counts = {}
     for table in business_tables:
         try:
             row = query_one(f"SELECT COUNT(*) FROM {table}")
-            existing += int(row[0] if row else 0)
+            counts[table] = int(row[0] if row else 0)
         except Exception:
-            pass
-    if existing:
-        print(f"SQLite->Postgres migration skipped: target already has {existing} rows")
+            counts[table] = 0
+
+    non_employee_rows = sum(v for k, v in counts.items() if k != "employees")
+    fresh_seed_only = False
+    if non_employee_rows == 0 and counts.get("employees", 0) <= 4:
+        rows = query_all("SELECT id FROM employees ORDER BY id")
+        actual_ids = {str(row[0]) for row in rows}
+        seed_ids = {"viktor", "anton", "ilya", "loader"}
+        fresh_seed_only = actual_ids.issubset(seed_ids)
+
+    if not fresh_seed_only and sum(counts.values()):
+        print(f"SQLite->Postgres migration skipped: target already has business data {counts}")
         return
 
     fd, source_path = tempfile.mkstemp(prefix="onix-migrate-", suffix=".db")
