@@ -85,10 +85,19 @@ def _snapshot_file():
     fd, snapshot_path = tempfile.mkstemp(prefix="mini-wms-", suffix=".db")
     os.close(fd)
     try:
-        src = sqlite3.connect(DB_PATH, timeout=20)
-        dst = sqlite3.connect(snapshot_path, timeout=20)
+        src = sqlite3.connect(DB_PATH, timeout=3)
+        dst = sqlite3.connect(snapshot_path, timeout=3)
         try:
-            src.backup(dst)
+            src.execute("PRAGMA busy_timeout=2000")
+            deadline = time.monotonic() + 10.0
+
+            def progress(status, remaining, total):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("SQLite backup snapshot exceeded 10 seconds")
+
+            # Small chunks release the source database between steps. If the DB
+            # is busy, fail this backup attempt instead of stalling live WMS.
+            src.backup(dst, pages=256, progress=progress, sleep=0.05)
             dst.commit()
         finally:
             dst.close()
