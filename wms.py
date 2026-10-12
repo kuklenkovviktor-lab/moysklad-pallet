@@ -1602,7 +1602,7 @@ function renderProgress(done){
  }
 }
 
-async async function fetchWithTimeout(url,options={},timeoutMs=5000){
+async function fetchWithTimeout(url,options={},timeoutMs=5000){
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),timeoutMs);
  try{return await fetch(url,{...options,signal:controller.signal})}
