@@ -42,6 +42,7 @@ app.config.update(
 app.register_blueprint(wms_bp)
 
 _WMS_READY = threading.Event()
+_WMS_INITIALIZER_STARTED = False
 _WMS_STARTUP_LOCK = threading.Lock()
 _WMS_STARTUP_STATE = {
     "attempts": 0,
@@ -196,11 +197,19 @@ def _wms_initializer():
             time.sleep(10)
 
 def _start_wms_initializer():
+    global _WMS_INITIALIZER_STARTED
+    with _WMS_STARTUP_LOCK:
+        if _WMS_INITIALIZER_STARTED:
+            return
+        _WMS_INITIALIZER_STARTED = True
     thread = threading.Thread(target=_wms_initializer, name="wms-startup", daemon=True)
     thread.start()
 
 @app.before_request
 def require_employee_login():
+    # Gunicorn workers are forked processes. Start the initializer inside the
+    # serving worker so its in-memory readiness flag belongs to this process.
+    _start_wms_initializer()
     path = request.path
 
     # Liveness must stay reachable so Render keeps the process alive while
@@ -2282,9 +2291,6 @@ def scan():
     except Exception as e:
         return jsonify(error=str(e)), 500
 
-# Start immediately; restore/init retries in the background without letting
-# any request create an empty SQLite DB.
-_start_wms_initializer()
-
 if __name__ == "__main__":
+    _start_wms_initializer()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
