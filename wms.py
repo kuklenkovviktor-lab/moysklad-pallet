@@ -399,6 +399,21 @@ def init_wms_db():
     except Exception:
         pass
 
+    # Dashboard/read indexes. These keep live monitoring fast as scan/event
+    # history grows instead of forcing full-table scans every refresh.
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_scans_scanned_at ON scans(scanned_at)",
+        "CREATE INDEX IF NOT EXISTS idx_scans_employee_scanned_at ON scans(employee_id, scanned_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shifts_active_started ON shifts(ended_at, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_activities_shift_type_started ON activities(shift_id, activity_type, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_operation_events_op_created ON operation_events(operation_type, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_operation_events_event_created ON operation_events(event_type, created_at)",
+    ):
+        try:
+            execute(index_sql)
+        except Exception:
+            pass
+
     _DB_READY = True
 
 
