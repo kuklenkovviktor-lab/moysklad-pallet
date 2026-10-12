@@ -2,6 +2,8 @@ import os
 import json
 import time
 import threading
+import tempfile
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify, session, redirect, Response
@@ -71,6 +73,79 @@ def _startup_public_message():
         return "Нет стабильной связи с Yandex Object Storage. Повторяю подключение."
     return "Не удалось подключить рабочую базу. ONIX автоматически повторяет попытку."
 
+def _migrate_sqlite_backup_to_postgres_if_needed():
+    if not os.getenv("DATABASE_URL", "").strip():
+        return
+    if os.getenv("WMS_MIGRATE_SQLITE_FROM_S3", "0").strip().lower() not in ("1", "true", "yes", "on"):
+        return
+
+    # Only migrate into a fresh Postgres. Never merge blindly into live data.
+    business_tables = (
+        "employees", "shifts", "scans", "activities",
+        "operation_events", "external_pallets", "wb_orders", "daily_targets",
+    )
+    existing = 0
+    for table in business_tables:
+        try:
+            row = query_one(f"SELECT COUNT(*) FROM {table}")
+            existing += int(row[0] if row else 0)
+        except Exception:
+            pass
+    if existing:
+        print(f"SQLite->Postgres migration skipped: target already has {existing} rows")
+        return
+
+    fd, source_path = tempfile.mkstemp(prefix="onix-migrate-", suffix=".db")
+    os.close(fd)
+    try:
+        key = download_backup_for_migration(source_path)
+        src = sqlite3.connect(source_path)
+        try:
+            check = src.execute("PRAGMA integrity_check").fetchone()
+            if not check or str(check[0]).lower() != "ok":
+                raise RuntimeError("Migration source SQLite integrity_check failed")
+
+            total_inserted = 0
+            for table in business_tables:
+                src_cols = [row[1] for row in src.execute(f"PRAGMA table_info({table})").fetchall()]
+                if not src_cols:
+                    continue
+                rows = src.execute(
+                    "SELECT " + ",".join('"' + col.replace('"','""') + '"' for col in src_cols) +
+                    f' FROM "{table}"'
+                ).fetchall()
+                if not rows:
+                    continue
+
+                placeholders = ",".join(["%s"] * len(src_cols))
+                cols_sql = ",".join('"' + col.replace('"','""') + '"' for col in src_cols)
+                stmt = f'INSERT INTO "{table}" ({cols_sql}) VALUES ({placeholders}) ON CONFLICT DO NOTHING'
+                with db_connect() as conn:
+                    cur = conn.cursor()
+                    cur.executemany(stmt, rows)
+                    conn.commit()
+                    cur.close()
+                total_inserted += len(rows)
+
+            # Verify source row counts are present in Postgres.
+            for table in business_tables:
+                src_count = int(src.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
+                dst_row = query_one(f'SELECT COUNT(*) FROM "{table}"')
+                dst_count = int(dst_row[0] if dst_row else 0)
+                if dst_count < src_count:
+                    raise RuntimeError(
+                        f"Migration verification failed for {table}: source={src_count}, target={dst_count}"
+                    )
+            print(f"SQLite->Postgres migration complete from {key}: {total_inserted} source rows processed")
+        finally:
+            src.close()
+    finally:
+        try:
+            os.remove(source_path)
+        except OSError:
+            pass
+
+
 def _wms_initializer():
     while not _WMS_READY.is_set():
         with _WMS_STARTUP_LOCK:
@@ -80,6 +155,7 @@ def _wms_initializer():
             # Never create an empty SQLite DB before restore has had a chance.
             restore_if_needed()
             init_wms_db()
+            _migrate_sqlite_backup_to_postgres_if_needed()
             start_backup_worker()
             with _WMS_STARTUP_LOCK:
                 _WMS_STARTUP_STATE["last_error"] = ""
