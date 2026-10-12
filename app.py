@@ -214,7 +214,7 @@ def require_employee_login():
 
     # Liveness must stay reachable so Render keeps the process alive while
     # Object Storage restore retries in the background.
-    if path in ("/api/health", "/api/startup"):
+    if path in ("/api/health", "/api/startup", "/favicon.svg", "/favicon.ico"):
         return None
 
     # Do not let any route touch SQLite until restore has completed. This
@@ -603,7 +603,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
  #reader{max-height:115px}
 }
 </style>
-</head>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
 <body>
 <div class="wrap">
 <div class="nav">
