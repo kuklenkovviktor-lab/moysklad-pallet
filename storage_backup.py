@@ -108,6 +108,30 @@ def _download_and_validate(key, tmp):
     return key
 
 
+def download_backup_for_migration(destination_path):
+    """Download and validate the newest usable SQLite backup without touching DB_PATH."""
+    if not (BUCKET and ACCESS_KEY_ID and SECRET_ACCESS_KEY):
+        raise RuntimeError("Yandex Object Storage credentials are not configured")
+
+    last_error = None
+    for candidate in _candidate_restore_keys():
+        try:
+            if os.path.exists(destination_path):
+                os.remove(destination_path)
+            _download_and_validate(candidate, destination_path)
+            return candidate
+        except FileNotFoundError as exc:
+            last_error = exc
+            continue
+        except Exception as exc:
+            last_error = exc
+            break
+
+    raise RuntimeError(
+        "No usable remote SQLite backup for migration: " + str(last_error or "unknown error")
+    ) from last_error
+
+
 def _source_stamp():
     values = []
     for path in (DB_PATH, DB_PATH + "-wal", DB_PATH + "-shm"):
