@@ -45,6 +45,13 @@ _WMS_STARTUP_STATE = {
     "last_error": "",
 }
 
+def _build_id():
+    return (
+        os.getenv("RENDER_GIT_COMMIT", "").strip()
+        or os.getenv("GIT_COMMIT", "").strip()
+        or "unknown"
+    )
+
 def _startup_snapshot():
     with _WMS_STARTUP_LOCK:
         return dict(_WMS_STARTUP_STATE)
@@ -94,7 +101,7 @@ def require_employee_login():
 
     # Liveness must stay reachable so Render keeps the process alive while
     # Object Storage restore retries in the background.
-    if path == "/api/health":
+    if path in ("/api/health", "/api/startup"):
         return None
 
     # Do not let any route touch SQLite until restore has completed. This
@@ -115,6 +122,7 @@ def require_employee_login():
             <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
             <p style="color:#6b7785">""" + _startup_public_message() + """</p>
             <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """</p>
+            <p style="color:#8b96a3;font-size:12px">Сборка: """ + _build_id()[:12] + """</p>
             <script>setTimeout(()=>location.reload(),5000)</script>
             </div></body></html>""",
             status=503,
@@ -1740,6 +1748,19 @@ def _system_status_payload():
         "database_error": db_error,
         "backup": backup,
     }
+
+@app.get("/api/startup")
+def startup_status():
+    state = _startup_snapshot()
+    return jsonify(
+        ok=True,
+        ready=_WMS_READY.is_set(),
+        build=_build_id(),
+        attempts=int(state.get("attempts", 0) or 0),
+        last_attempt_at=state.get("last_attempt_at"),
+        message=_startup_public_message(),
+    )
+
 
 @app.get("/api/health")
 def health():
