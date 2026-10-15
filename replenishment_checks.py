@@ -35,7 +35,7 @@ def replenishment_catalog():
     try:
         # Uses the same product catalog/cache as existing MoySklad lookup,
         # without modifying the receiving/FBS scanners.
-        from app import _get_product_list
+        from app import _get_product_list, _barcode_values, find_product_by_any_barcode
         matches = []
         for p in _get_product_list():
             article = str(p.get("article") or "").strip()
@@ -43,10 +43,23 @@ def replenishment_catalog():
             code = str(p.get("code") or "").strip()
             if not p.get("id") or not article:
                 continue
-            if q in article.casefold() or q in name.casefold() or q in code.casefold():
+            barcodes = _barcode_values(p.get("barcodes"))
+            for pack in p.get("packs") or []:
+                barcodes.extend(_barcode_values(pack.get("barcodes")))
+                barcodes.extend(_barcode_values(pack.get("barcode")))
+            searched = [article, name, code] + barcodes
+            if any(q in str(value).casefold() for value in searched):
                 matches.append({"id": p["id"], "article": article, "name": name, "code": code})
             if len(matches) >= 35:
                 break
+        # Some MoySklad list entries omit pack barcodes until detailed product load.
+        if not matches and len(q) >= 7:
+            product, _pack = find_product_by_any_barcode(q)
+            if product and product.get("id") and product.get("article"):
+                matches.append({
+                    "id": product["id"], "article": product["article"],
+                    "name": product.get("name") or "", "code": product.get("code") or "",
+                })
         return jsonify(products=matches)
     except Exception:
         return jsonify(error="Не удалось получить номенклатуру МойСклад; попробуй позже"), 502
