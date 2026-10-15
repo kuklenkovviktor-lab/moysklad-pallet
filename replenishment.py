@@ -1,0 +1,365 @@
+"""ONIX WMS: independent replenishment task queue. No inventory or scanning mutations."""
+import uuid
+from flask import Blueprint, jsonify, redirect, request
+from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, sql
+
+replenishment_bp = Blueprint("replenishment", __name__)
+
+TASK_SELECT = """
+SELECT t.id, t.article, t.line_code, t.planned_qty, t.completed_qty,
+       t.priority, t.note, t.status, t.created_at, t.started_at, t.completed_at,
+       t.created_by, t.assigned_employee_id, COALESCE(e.name, '')
+FROM replenishment_tasks t
+LEFT JOIN employees e ON e.id = t.assigned_employee_id
+"""
+
+
+def _item(row):
+    fields = ("id", "article", "line", "planned_qty", "completed_qty",
+              "priority", "note", "status", "created_at", "started_at",
+              "completed_at", "created_by", "assigned_employee_id", "assignee")
+    return dict(zip(fields, row))
+
+
+def _json_required():
+    if not request.is_json:
+        return None
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else None
+
+
+def _event(cur, task_id, actor_id, actor, kind, note="", qty=None):
+    cur.execute(sql("""
+        INSERT INTO replenishment_task_events
+        (id, task_id, actor_id, actor, kind, note, quantity, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """), (str(uuid.uuid4()), task_id, actor_id, actor, kind, note, qty, now_iso()))
+
+
+MANAGER_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ONIX · Пополнение: руководитель</title><style>
+*{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
+main{max-width:1100px;margin:auto;padding:16px}h1{margin:12px 0}h2{font-size:18px;margin:0 0 12px}
+a{color:#49667b}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:16px;margin:12px 0}
+form{display:grid;grid-template-columns:1.1fr .75fr .6fr .6fr;gap:9px;align-items:end}
+label{font-size:12px;color:#657683;display:grid;gap:4px}input,select,textarea{width:100%;padding:10px;border:1px solid #cbd8e1;border-radius:8px;background:#fff;font:inherit;color:#25313d}
+button{padding:10px 13px;border:0;border-radius:9px;background:#48647a;color:#fff;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
+.wide{grid-column:1/-1}.small{font-size:12px;color:#667989}.item{padding:12px 0;border-top:1px solid #dce4e9;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.item:first-child{border-top:0}.detail{min-width:0}.detail>div{margin-top:5px}.urgent{color:#a14c28}.bad{color:#a33b3b}.ok{color:#26764b}
+#msg{min-height:18px;margin-top:8px}@media(max-width:730px){form{grid-template-columns:1fr 1fr}.item{align-items:flex-start;flex-direction:column}}
+</style></head><body><main>
+<a href="/manager">← Панель руководителя</a><h1>📦 Пополнение ячеек</h1>
+<p class="small">Очередь задач для сотрудника пополнения. Пока задачи создаются вручную. ONIX не изменяет остатки МойСклад и не вмешивается в FBS.</p>
+<section class="card"><h2>Создать задачу</h2><form id="newTask">
+<label>Артикул<input name="article" maxlength="100" required placeholder="2347_OTVODKA"></label>
+<label>Линия / ячейка<input name="line" maxlength="80" required placeholder="Ж"></label>
+<label>Количество, шт.<input name="planned_qty" type="number" min="1" step="1" placeholder="Если известно"></label>
+<label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="urgent">Срочно</option></select></label>
+<label class="wide">Примечание<input name="note" maxlength="500" placeholder="Откуда взять резерв, детали задачи"></label>
+<div><button type="submit" id="createBtn">Добавить в очередь</button></div>
+</form><div id="msg" role="status"></div></section>
+<section class="card"><h2>Открытые задачи <span id="openCount" class="small"></span></h2><div id="queue">Загрузка…</div></section>
+<section class="card"><h2>Последние завершённые и проблемные</h2><div id="history">Загрузка…</div></section>
+</main><script>
+function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function fmt(s){return s?new Date(s).toLocaleString('ru-RU'):'—'}
+function desc(t){
+ return '<b>'+esc(t.article)+'</b> · линия '+esc(t.line)+(t.priority==='urgent'?' · <b class="urgent">СРОЧНО</b>':'')+
+ '<div class="small">'+(t.planned_qty?'План: '+t.planned_qty+' шт. · ':'')+'Статус: '+esc(t.status)+
+ (t.assignee?' · '+esc(t.assignee):' · свободна')+' · '+fmt(t.created_at)+'</div>'+
+ (t.note?'<div class="small">'+esc(t.note)+'</div>':'')+
+ (t.completed_qty!=null?'<div class="small">Фактически: '+esc(t.completed_qty)+' шт.</div>':'');
+}
+let tasks=[];
+async function getTasks(){
+ const r=await fetch('/api/manager/replenishment/tasks',{cache:'no-store'});
+ if(r.status===403){location.href='/manager-login';return}
+ const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка загрузки');
+ tasks=d.tasks||[];
+ const open=tasks.filter(function(t){return t.status==='new'||t.status==='started'});
+ const old=tasks.filter(function(t){return t.status!=='new'&&t.status!=='started'});
+ document.getElementById('openCount').textContent='('+open.length+')';
+ document.getElementById('queue').innerHTML=open.length?open.map(function(t){
+  return '<div class="item"><div class="detail">'+desc(t)+'</div><button class="secondary" data-id="'+esc(t.id)+'" data-action="cancel">Отменить</button></div>'
+ }).join(''):'<p class="small">Открытых задач нет.</p>';
+ document.getElementById('history').innerHTML=old.length?old.slice(0,35).map(function(t){
+  return '<div class="item"><div class="detail">'+desc(t)+'</div>'+
+  (t.status==='blocked'?'<button class="secondary" data-id="'+esc(t.id)+'" data-action="reopen">Вернуть в очередь</button>':'')+'</div>'
+ }).join(''):'<p class="small">История пока пуста.</p>';
+}
+document.getElementById('newTask').addEventListener('submit',async function(e){
+ e.preventDefault();const b=document.getElementById('createBtn'),m=document.getElementById('msg');
+ b.disabled=true;m.textContent='';
+ try{
+  const f=new FormData(this);
+  const qty=f.get('planned_qty');
+  const r=await fetch('/api/manager/replenishment/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+   article:f.get('article'),line:f.get('line'),planned_qty:qty?Number(qty):null,priority:f.get('priority'),note:f.get('note')})});
+  const d=await r.json();
+  if(!r.ok)throw Error(d.error||'Ошибка создания');
+  this.reset();m.className='ok';m.textContent='Задача добавлена';await getTasks();
+ }catch(e){m.className='bad';m.textContent=e.message}finally{b.disabled=false}
+});
+async function change(e){
+ const b=e.target.closest('button[data-action]');if(!b)return;
+ const action=b.dataset.action,task=tasks.find(function(t){return t.id===b.dataset.id});if(!task)return;
+ const note=prompt(action==='cancel'?'Причина отмены':'Причина повторного открытия');
+ if(note===null)return;
+ if(note.trim().length<5){alert('Укажи причину хотя бы из 5 символов');return}
+ if(!confirm((action==='cancel'?'Отменить':'Вернуть в очередь')+' задачу '+task.article+'?'))return;
+ b.disabled=true;
+ try{
+  const r=await fetch('/api/manager/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id,action:action,note:note})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  await getTasks();
+ }catch(e){alert(e.message);b.disabled=false}
+}
+document.getElementById('queue').addEventListener('click',change);
+document.getElementById('history').addEventListener('click',change);
+getTasks().catch(function(e){document.getElementById('queue').textContent=e.message});
+</script></body></html>"""
+
+
+WORKER_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ONIX · Пополнение</title><style>
+*{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
+main{max-width:760px;margin:auto;padding:13px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin:10px 0}
+h1{margin:12px 0}a{color:#49667b}.small{color:#667989;font-size:12px}.task{padding:14px 0;border-top:1px solid #d7e0e7}.task:first-child{border-top:0}
+.task b{font-size:18px}.urgent{color:#a14c28}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+input{width:125px;padding:11px;border:1px solid #b8cbd5;border-radius:8px;font-size:16px}
+button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9px;font-weight:700;cursor:pointer;min-height:42px}
+.secondary{background:#dce7ed;color:#25313d}button:disabled{opacity:.5}.bad{color:#a33b3b}
+</style></head><body><main>
+<a href="/move">← Склад</a><h1>📦 Пополнение</h1>
+<div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
+<div id="who" class="small" style="margin-top:8px"></div>
+<div class="card"><h2>Мои задачи</h2><div id="mine">Загрузка…</div></div>
+<div class="card"><h2>Очередь задач</h2><div id="available">Загрузка…</div></div>
+<div id="msg" role="status"></div>
+</main><script>
+function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+let tasks=[],sending=false;
+function block(t,mine){
+ const note=t.note?'<p class="small">'+esc(t.note)+'</p>':'';
+ const plan=t.planned_qty?' · требуется '+esc(t.planned_qty)+' шт.':'';
+ return '<div class="task"><b>'+esc(t.article)+'</b> · линия '+esc(t.line)+
+ (t.priority==='urgent'?' <span class="urgent">СРОЧНО</span>':'')+
+ '<div class="small">'+esc(t.status)+plan+'</div>'+note+
+ (mine?'<div class="actions"><input type="number" id="qty-'+esc(t.id)+'" placeholder="Шт." min="1" step="1" inputmode="numeric">'+
+ '<button data-id="'+esc(t.id)+'" data-action="complete">Завершить</button>'+
+ '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div>':
+ '<div class="actions"><button data-id="'+esc(t.id)+'" data-action="start">Начать задачу</button></div>')+'</div>';
+}
+async function load(){
+ const [me,resp]=await Promise.all([fetch('/api/auth/me'),fetch('/api/replenishment/tasks',{cache:'no-store'})]);
+ if(me.status===401||resp.status===401){location.href='/login';return}
+ const a=await me.json(),d=await resp.json();
+ if(!resp.ok)throw Error(d.error||'Не удалось загрузить задачи');
+ document.getElementById('who').textContent='Сотрудник: '+a.employee.name;
+ tasks=d.tasks||[];
+ const mine=tasks.filter(function(t){return t.status==='started'});
+ const available=tasks.filter(function(t){return t.status==='new'});
+ document.getElementById('mine').innerHTML=mine.length?mine.map(function(t){return block(t,true)}).join(''):'<p class="small">Нет задач в работе.</p>';
+ document.getElementById('available').innerHTML=available.length?available.map(function(t){return block(t,false)}).join(''):'<p class="small">Очередь пуста.</p>';
+}
+async function action(e){
+ const btn=e.target.closest('button[data-action]');if(!btn||sending)return;
+ const type=btn.dataset.action,id=btn.dataset.id;let quantity=null,note='';
+ if(type==='complete'){
+  const input=document.getElementById('qty-'+id);quantity=Number(input&&input.value);
+  if(!Number.isSafeInteger(quantity)||quantity<1){alert('Укажи фактически пополненное количество в штуках');return}
+ }
+ if(type==='block'){note=prompt('Что помешало пополнению?');if(note===null)return;if(note.trim().length<5){alert('Укажи причину хотя бы из 5 символов');return}}
+ sending=true;btn.disabled=true;
+ try{
+  const r=await fetch('/api/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:id,action:type,quantity:quantity,note:note})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  document.getElementById('msg').textContent='Задача обновлена';
+  await load();
+ }catch(e){document.getElementById('msg').textContent=e.message;btn.disabled=false}
+ finally{sending=false}
+}
+document.getElementById('available').addEventListener('click',action);
+document.getElementById('mine').addEventListener('click',action);
+load().catch(function(e){document.getElementById('mine').textContent=e.message});
+</script></body></html>"""
+
+
+@replenishment_bp.get("/manager/replenishment")
+def manager_replenishment_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    return MANAGER_PAGE
+
+
+@replenishment_bp.get("/replenishment")
+def replenishment_worker_page():
+    ensure_db()
+    if not get_session_employee():
+        return redirect("/login")
+    return WORKER_PAGE
+
+
+@replenishment_bp.get("/api/manager/replenishment/tasks")
+def manager_replenishment_tasks():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ руководителю"), 403
+    rows = query_all(TASK_SELECT + " ORDER BY CASE t.status WHEN 'new' THEN 0 WHEN 'started' THEN 1 ELSE 2 END, CASE t.priority WHEN 'urgent' THEN 0 ELSE 1 END, t.created_at DESC LIMIT 150")
+    return jsonify(tasks=[_item(r) for r in rows])
+
+
+@replenishment_bp.post("/api/manager/replenishment/create")
+def manager_replenishment_create():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ руководителю"), 403
+    data = _json_required()
+    if data is None:
+        return jsonify(error="Ожидается JSON"), 400
+    article = str(data.get("article") or "").strip().upper()
+    line = str(data.get("line") or "").strip().upper()
+    note = str(data.get("note") or "").strip()
+    priority = str(data.get("priority") or "normal").strip()
+    quantity = data.get("planned_qty")
+    if not 1 <= len(article) <= 100 or not 1 <= len(line) <= 80 or len(note) > 500 or priority not in ("normal", "urgent"):
+        return jsonify(error="Проверь артикул, ячейку, приоритет и примечание"), 400
+    if quantity not in (None, ""):
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 10000000:
+            return jsonify(error="Количество должно быть целым положительным числом"), 400
+    else:
+        quantity = None
+    actor = get_session_employee()
+    admin_name = actor["name"] if actor and actor["role"] == "manager" else "Руководитель (ПК)"
+    task_id = str(uuid.uuid4())
+    created = now_iso()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql("SELECT id FROM replenishment_tasks WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1"), (article, line))
+            if cur.fetchone():
+                return jsonify(error="По этому артикулу и ячейке уже есть открытая задача"), 409
+            cur.execute(sql("""
+                INSERT INTO replenishment_tasks
+                (id, article, line_code, planned_qty, priority, note, status, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)
+            """), (task_id, article, line, quantity, priority, note, created, admin_name))
+            _event(cur, task_id, actor["id"] if actor else None, admin_name, "created", note, quantity)
+            conn.commit()
+        finally:
+            cur.close()
+    return jsonify(ok=True, task_id=task_id), 201
+
+
+@replenishment_bp.post("/api/manager/replenishment/action")
+def manager_replenishment_action():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ руководителю"), 403
+    data = _json_required()
+    if data is None:
+        return jsonify(error="Ожидается JSON"), 400
+    task_id = str(data.get("task_id") or "").strip()
+    action = str(data.get("action") or "").strip()
+    note = str(data.get("note") or "").strip()
+    if not task_id or action not in ("cancel", "reopen") or not 5 <= len(note) <= 500:
+        return jsonify(error="Укажи действие и причину от 5 до 500 символов"), 400
+    employee = get_session_employee()
+    actor = employee["name"] if employee and employee["role"] == "manager" else "Руководитель (ПК)"
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql("SELECT status, article, line_code FROM replenishment_tasks WHERE id = ?"), (task_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify(error="Задача не найдена"), 404
+            if action == "cancel":
+                from_status = ("new", "started", "blocked")
+                new_status = "cancelled"
+            else:
+                from_status = ("blocked",)
+                new_status = "new"
+                cur.execute(sql("SELECT id FROM replenishment_tasks WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1"), (row[1], row[2]))
+                if cur.fetchone():
+                    return jsonify(error="Уже есть другая открытая задача по этому артикулу и ячейке"), 409
+            if row[0] not in from_status:
+                return jsonify(error="Задача уже изменила статус; обнови список"), 409
+            # Conditional update protects against another worker modifying the task.
+            placeholders = ",".join(["?"] * len(from_status))
+            extra = ", assigned_employee_id = NULL, started_at = NULL" if action == "reopen" else ""
+            cur.execute(sql("UPDATE replenishment_tasks SET status = ?" + extra + " WHERE id = ? AND status IN (" + placeholders + ")"),
+                        (new_status, task_id) + from_status)
+            if cur.rowcount != 1:
+                return jsonify(error="Статус задачи изменился; обнови список"), 409
+            _event(cur, task_id, employee["id"] if employee else None, actor, action, note)
+            conn.commit()
+        finally:
+            cur.close()
+    return jsonify(ok=True)
+
+
+@replenishment_bp.get("/api/replenishment/tasks")
+def worker_replenishment_tasks():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Войди по бейджу"), 401
+    rows = query_all(TASK_SELECT +
+        """ WHERE t.status = 'new' OR (t.status = 'started' AND t.assigned_employee_id = ?)
+            ORDER BY CASE t.status WHEN 'started' THEN 0 ELSE 1 END,
+                     CASE t.priority WHEN 'urgent' THEN 0 ELSE 1 END, t.created_at
+            LIMIT 100 """, (emp["id"],))
+    return jsonify(tasks=[_item(r) for r in rows])
+
+
+@replenishment_bp.post("/api/replenishment/action")
+def worker_replenishment_action():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Войди по бейджу"), 401
+    data = _json_required()
+    if data is None:
+        return jsonify(error="Ожидается JSON"), 400
+    task_id = str(data.get("task_id") or "").strip()
+    action = str(data.get("action") or "").strip()
+    note = str(data.get("note") or "").strip()
+    qty = data.get("quantity")
+    if not task_id or action not in ("start", "complete", "block"):
+        return jsonify(error="Некорректное действие"), 400
+    if action == "complete" and (isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 10000000):
+        return jsonify(error="Фактическое количество должно быть целым положительным числом"), 400
+    if action == "block" and not 5 <= len(note) <= 500:
+        return jsonify(error="Укажи причину проблемы от 5 до 500 символов"), 400
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            if action == "start":
+                cur.execute(sql("""
+                    UPDATE replenishment_tasks
+                    SET status = 'started', assigned_employee_id = ?, started_at = ?
+                    WHERE id = ? AND status = 'new'
+                """), (emp["id"], now_iso(), task_id))
+            elif action == "complete":
+                cur.execute(sql("""
+                    UPDATE replenishment_tasks
+                    SET status = 'completed', completed_at = ?, completed_qty = ?
+                    WHERE id = ? AND status = 'started' AND assigned_employee_id = ?
+                """), (now_iso(), qty, task_id, emp["id"]))
+            else:
+                cur.execute(sql("""
+                    UPDATE replenishment_tasks
+                    SET status = 'blocked', completed_at = ?
+                    WHERE id = ? AND status = 'started' AND assigned_employee_id = ?
+                """), (now_iso(), task_id, emp["id"]))
+            if cur.rowcount != 1:
+                return jsonify(error="Задача недоступна или уже изменена другим сотрудником"), 409
+            _event(cur, task_id, emp["id"], emp["name"], action, note, qty if action == "complete" else None)
+            conn.commit()
+        finally:
+            cur.close()
+    return jsonify(ok=True)
