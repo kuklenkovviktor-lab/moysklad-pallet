@@ -3050,6 +3050,7 @@ h1{font-size:30px;margin:4px 0 6px}
     <a href="/">📦 Приёмка</a>
     <a href="/fbs">🧺 Сборка</a>
     <a class="active" href="/move">↔ Перемещение</a>
+    <a href="/replenishment">📦 Пополнение</a>
   </div>
   <div id="topbar">
     <div class="who"><span id="identity"></span></div>
