@@ -258,6 +258,9 @@ def require_employee_login():
     # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
     manager_paths = {
         "/manager",
+        "/manager/shifts",
+        "/api/manager/shifts/actions",
+        "/api/manager/shifts/force-close",
         "/stats",
         "/fbs-journal",
         "/history",
