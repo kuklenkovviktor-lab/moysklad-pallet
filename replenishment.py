@@ -9,6 +9,8 @@ TASK_SELECT = """
 SELECT t.id, t.article, t.line_code, t.planned_qty, t.completed_qty,
        t.priority, t.note, t.status, t.created_at, t.started_at, t.completed_at,
        t.created_by, t.assigned_employee_id, COALESCE(e.name, ''),
+       t.product_id, t.product_name, t.verify_required,
+       t.verified_product_at, t.verified_location_at,
        (SELECT ev.note FROM replenishment_task_events ev
         WHERE ev.task_id = t.id AND ev.kind = 'block'
         ORDER BY ev.created_at DESC LIMIT 1)
@@ -20,7 +22,9 @@ LEFT JOIN employees e ON e.id = t.assigned_employee_id
 def _item(row):
     fields = ("id", "article", "line", "planned_qty", "completed_qty",
               "priority", "note", "status", "created_at", "started_at",
-              "completed_at", "created_by", "assigned_employee_id", "assignee", "last_issue")
+              "completed_at", "created_by", "assigned_employee_id", "assignee",
+              "product_id", "product_name", "verify_required",
+              "verified_product_at", "verified_location_at", "last_issue")
     return dict(zip(fields, row))
 
 
@@ -250,6 +254,7 @@ def manager_replenishment_create():
     article = str(data.get("article") or "").strip().upper()
     line = str(data.get("line") or "").strip().upper()
     note = str(data.get("note") or "").strip()
+    product_id = str(data.get("product_id") or "").strip()
     priority = str(data.get("priority") or "normal").strip()
     quantity = data.get("planned_qty")
     if not 1 <= len(article) <= 100 or not 1 <= len(line) <= 80 or len(note) > 500 or priority not in ("normal", "urgent"):
@@ -259,6 +264,17 @@ def manager_replenishment_create():
             return jsonify(error="Количество должно быть целым положительным числом"), 400
     else:
         quantity = None
+    if not product_id:
+        return jsonify(error="Выбери товар из каталога МойСклад"), 400
+    from app import _get_product_list
+    try:
+        product = next((p for p in _get_product_list() if str(p.get("id")) == product_id), None)
+    except Exception:
+        return jsonify(error="МойСклад временно недоступен; непроверенная задача не создана"), 502
+    if not product or str(product.get("article") or "").strip().casefold() != article.casefold():
+        return jsonify(error="Товар и артикул не соответствуют МойСклад"), 409
+    if not query_one("SELECT id FROM replenishment_locations WHERE label = ? AND active = 1", (line,)):
+        return jsonify(error="Зарегистрируй ячейку назначения и распечатай этикетку"), 409
     actor = get_session_employee()
     admin_name = actor["name"] if actor and actor["role"] == "manager" else "Руководитель (ПК)"
     task_id = str(uuid.uuid4())
@@ -271,9 +287,11 @@ def manager_replenishment_create():
                 return jsonify(error="По этому артикулу и ячейке уже есть открытая задача"), 409
             cur.execute(sql("""
                 INSERT INTO replenishment_tasks
-                (id, article, line_code, planned_qty, priority, note, status, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)
-            """), (task_id, article, line, quantity, priority, note, created, admin_name))
+                (id, article, line_code, planned_qty, priority, note, status, created_at, created_by,
+                 product_id, product_name, verify_required)
+                VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, 1)
+            """), (task_id, article, line, quantity, priority, note, created, admin_name,
+                    product_id, str(product.get("name") or "")))
             _event(cur, task_id, actor["id"] if actor else None, admin_name, "created", note, quantity)
             conn.commit()
         finally:
@@ -292,7 +310,7 @@ def manager_replenishment_action():
     task_id = str(data.get("task_id") or "").strip()
     action = str(data.get("action") or "").strip()
     note = str(data.get("note") or "").strip()
-    if not task_id or action not in ("cancel", "reopen") or not 5 <= len(note) <= 500:
+    if not task_id or action not in ("cancel", "reopen", "enable_checks") or not 5 <= len(note) <= 500:
         return jsonify(error="Укажи действие и причину от 5 до 500 символов"), 400
     employee = get_session_employee()
     actor = employee["name"] if employee and employee["role"] == "manager" else "Руководитель (ПК)"
@@ -306,18 +324,30 @@ def manager_replenishment_action():
             if action == "cancel":
                 from_status = ("new", "started", "blocked")
                 new_status = "cancelled"
-            else:
+            elif action == "reopen":
                 from_status = ("blocked",)
                 new_status = "new"
                 cur.execute(sql("SELECT id FROM replenishment_tasks WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1"), (row[1], row[2]))
                 if cur.fetchone():
                     return jsonify(error="Уже есть другая открытая задача по этому артикулу и ячейке"), 409
+            else:
+                from_status = ("new",)
+                new_status = "new"
+                cur.execute(sql("SELECT id FROM replenishment_locations WHERE label = ? AND active = 1"), (row[2],))
+                if not cur.fetchone():
+                    return jsonify(error="Зарегистрируй ячейку перед включением проверки"), 409
             if row[0] not in from_status:
                 return jsonify(error="Задача уже изменила статус; обнови список"), 409
             # Conditional update protects against another worker modifying the task.
             placeholders = ",".join(["?"] * len(from_status))
-            extra = ", assigned_employee_id = NULL, started_at = NULL" if action == "reopen" else ""
-            cur.execute(sql("UPDATE replenishment_tasks SET status = ?" + extra + " WHERE id = ? AND status IN (" + placeholders + ")"),
+            if action == "reopen":
+                extra = ", assigned_employee_id = NULL, started_at = NULL, completed_at = NULL, completed_qty = NULL, verified_product_barcode = NULL, verified_product_at = NULL, verified_location_barcode = NULL, verified_location_at = NULL"
+            elif action == "enable_checks":
+                extra = ", verify_required = 1"
+            else:
+                extra = ""
+            condition = " AND verify_required = 0" if action == "enable_checks" else ""
+            cur.execute(sql("UPDATE replenishment_tasks SET status = ?" + extra + " WHERE id = ? AND status IN (" + placeholders + ")" + condition),
                         (new_status, task_id) + from_status)
             if cur.rowcount != 1:
                 return jsonify(error="Статус задачи изменился; обнови список"), 409
@@ -375,6 +405,8 @@ def worker_replenishment_action():
                     UPDATE replenishment_tasks
                     SET status = 'completed', completed_at = ?, completed_qty = ?
                     WHERE id = ? AND status = 'started' AND assigned_employee_id = ?
+                      AND (verify_required = 0 OR
+                           (verified_product_at IS NOT NULL AND verified_location_at IS NOT NULL))
                 """), (now_iso(), qty, task_id, emp["id"]))
             else:
                 cur.execute(sql("""
