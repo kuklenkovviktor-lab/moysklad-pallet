@@ -305,6 +305,15 @@ def init_wms_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS replenishment_locations (
+            id TEXT PRIMARY KEY,
+            label TEXT NOT NULL UNIQUE,
+            barcode TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS replenishment_task_events (
             id TEXT PRIMARY KEY,
             task_id TEXT NOT NULL,
@@ -402,6 +411,25 @@ def init_wms_db():
             if name not in event_cols:
                 cur.execute(f"ALTER TABLE operation_events ADD COLUMN {name} {ddl}")
 
+        # Additional verification metadata does not alter earlier replenishment tasks.
+        if DATABASE_URL:
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'replenishment_tasks'")
+            task_cols = {r[0] for r in cur.fetchall()}
+        else:
+            cur.execute("PRAGMA table_info(replenishment_tasks)")
+            task_cols = {r[1] for r in cur.fetchall()}
+        for name, ddl in (
+            ("product_id", "TEXT"),
+            ("product_name", "TEXT"),
+            ("verify_required", "INTEGER NOT NULL DEFAULT 0"),
+            ("verified_product_barcode", "TEXT"),
+            ("verified_product_at", "TEXT"),
+            ("verified_location_barcode", "TEXT"),
+            ("verified_location_at", "TEXT"),
+        ):
+            if name not in task_cols:
+                cur.execute(f"ALTER TABLE replenishment_tasks ADD COLUMN {name} {ddl}")
+
         conn.commit()
         cur.close()
 
@@ -454,6 +482,7 @@ def init_wms_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_replenishment_one_active_per_cell ON replenishment_tasks(article, line_code) WHERE status IN ('new','started')",
         "CREATE INDEX IF NOT EXISTS idx_replenishment_status_priority ON replenishment_tasks(status, priority, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_replenishment_events_task_time ON replenishment_task_events(task_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_replenishment_locations_active ON replenishment_locations(active, label)",
     ):
         try:
             execute(index_sql)
