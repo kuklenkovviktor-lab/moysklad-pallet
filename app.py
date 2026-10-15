@@ -552,7 +552,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .qtypad button.action{font-size:16px}
 .small{font-size:12px;color:#777}
 .activeDoc{padding:13px;background:#f0f2f5;border-radius:12px;margin-top:10px}
-.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.nav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:44px;padding:9px 8px;border-radius:12px;text-decoration:none;font-weight:700;font-size:14px;background:#e7edf2;color:#314657;border:1px solid #d2dde5}
 .nav a.active{background:#48647a;color:#fff;border-color:#48647a}
 
@@ -619,7 +619,24 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <a class="active" href="/">📦 Приёмка</a>
   <a href="/fbs">🧺 Сборка</a>
   <a href="/move">↔ Перемещение</a>
+  <a href="/replenishment">📦 Пополнение <span id="repCountReceiving"></span></a>
 </div>
+<script>
+(function(){
+ const n=document.getElementById('repCountReceiving');
+ async function update(){
+  if(document.hidden)return;
+  try{
+   const r=await fetch('/api/replenishment/tasks',{cache:'no-store'});
+   if(!r.ok)return;
+   const d=await r.json();
+   const count=(d.tasks||[]).filter(t=>t.status==='new'||t.status==='started').length;
+   n.textContent=count?'('+count+')':'';
+  }catch(e){}
+ }
+ update();setInterval(update,30000);
+})();
+</script>
 <div class="small" style="margin:0 2px 10px"><span id="navIdentity"></span> · <a href="/exit">🚪 Завершить смену</a></div>
 
 <div class="card" id="docCard">
