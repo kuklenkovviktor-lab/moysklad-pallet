@@ -21,6 +21,7 @@ from wms import (
     WB_STRICT_MATCHING,
 )
 from replenishment import replenishment_bp
+from replenishment_checks import replenishment_checks_bp
 from storage_backup import (
     restore_if_needed,
     start_worker as start_backup_worker,
@@ -42,6 +43,7 @@ app.config.update(
 )
 app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
+app.register_blueprint(replenishment_checks_bp)
 
 _WMS_READY = threading.Event()
 _WMS_INITIALIZER_STARTED = False
@@ -267,6 +269,9 @@ def require_employee_login():
         "/api/manager/replenishment/tasks",
         "/api/manager/replenishment/create",
         "/api/manager/replenishment/action",
+        "/api/manager/replenishment/catalog",
+        "/api/manager/replenishment/locations",
+        "/manager/replenishment/label",
         "/stats",
         "/fbs-journal",
         "/history",
