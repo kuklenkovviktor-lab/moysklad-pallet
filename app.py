@@ -20,6 +20,7 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
+from replenishment import replenishment_bp
 from storage_backup import (
     restore_if_needed,
     start_worker as start_backup_worker,
@@ -40,6 +41,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
 )
 app.register_blueprint(wms_bp)
+app.register_blueprint(replenishment_bp)
 
 _WMS_READY = threading.Event()
 _WMS_INITIALIZER_STARTED = False
@@ -261,6 +263,10 @@ def require_employee_login():
         "/manager/shifts",
         "/api/manager/shifts/actions",
         "/api/manager/shifts/force-close",
+        "/manager/replenishment",
+        "/api/manager/replenishment/tasks",
+        "/api/manager/replenishment/create",
+        "/api/manager/replenishment/action",
         "/stats",
         "/fbs-journal",
         "/history",
