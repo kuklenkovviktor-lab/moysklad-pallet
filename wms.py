@@ -1155,7 +1155,25 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
   <a href="/">📦 Приёмка</a>
   <a class="active" href="/fbs">🧺 Сборка</a>
   <a href="/move">↔ Перемещение</a>
+  <a href="/replenishment" id="repLinkFbs">📦 Пополнение <span id="repCountFbs"></span></a>
 </div>
+<script>
+(function(){
+ const n=document.getElementById('repCountFbs');
+ async function update(){
+  if(document.hidden)return;
+  try{
+   const r=await fetch('/api/replenishment/tasks',{cache:'no-store'});
+   if(!r.ok)return;
+   const d=await r.json();
+   const tasks=d.tasks||[];
+   const count=tasks.filter(t=>t.status==='new'||t.status==='started').length;
+   n.textContent=count?'('+count+')':'';
+  }catch(e){}
+ }
+ update();setInterval(update,30000);
+})();
+</script>
 
 <div id="topbar">
   <div class="who"><span id="identity"></span></div>
@@ -3050,8 +3068,24 @@ h1{font-size:30px;margin:4px 0 6px}
     <a href="/">📦 Приёмка</a>
     <a href="/fbs">🧺 Сборка</a>
     <a class="active" href="/move">↔ Перемещение</a>
-    <a href="/replenishment">📦 Пополнение</a>
+    <a href="/replenishment">📦 Пополнение <span id="repCountMove"></span></a>
   </div>
+  <script>
+  (function(){
+   const n=document.getElementById('repCountMove');
+   async function update(){
+    if(document.hidden)return;
+    try{
+     const r=await fetch('/api/replenishment/tasks',{cache:'no-store'});
+     if(!r.ok)return;
+     const d=await r.json();
+     const count=(d.tasks||[]).filter(t=>t.status==='new'||t.status==='started').length;
+     n.textContent=count?'('+count+')':'';
+    }catch(e){}
+   }
+   update();setInterval(update,30000);
+  })();
+  </script>
   <div id="topbar">
     <div class="who"><span id="identity"></span></div>
     <a href="/exit">🚪 Завершить смену</a>
