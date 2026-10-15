@@ -8,7 +8,10 @@ replenishment_bp = Blueprint("replenishment", __name__)
 TASK_SELECT = """
 SELECT t.id, t.article, t.line_code, t.planned_qty, t.completed_qty,
        t.priority, t.note, t.status, t.created_at, t.started_at, t.completed_at,
-       t.created_by, t.assigned_employee_id, COALESCE(e.name, '')
+       t.created_by, t.assigned_employee_id, COALESCE(e.name, ''),
+       (SELECT ev.note FROM replenishment_task_events ev
+        WHERE ev.task_id = t.id AND ev.kind = 'block'
+        ORDER BY ev.created_at DESC LIMIT 1)
 FROM replenishment_tasks t
 LEFT JOIN employees e ON e.id = t.assigned_employee_id
 """
@@ -17,7 +20,7 @@ LEFT JOIN employees e ON e.id = t.assigned_employee_id
 def _item(row):
     fields = ("id", "article", "line", "planned_qty", "completed_qty",
               "priority", "note", "status", "created_at", "started_at",
-              "completed_at", "created_by", "assigned_employee_id", "assignee")
+              "completed_at", "created_by", "assigned_employee_id", "assignee", "last_issue")
     return dict(zip(fields, row))
 
 
@@ -62,6 +65,7 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 </form><div id="msg" role="status"></div></section>
 <section class="card"><h2>Открытые задачи <span id="openCount" class="small"></span></h2><div id="queue">Загрузка…</div></section>
 <section class="card"><h2>Последние завершённые и проблемные</h2><div id="history">Загрузка…</div></section>
+<section class="card"><h2>Журнал действий</h2><div id="events">Загрузка…</div></section>
 </main><script>
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function fmt(s){return s?new Date(s).toLocaleString('ru-RU'):'—'}
@@ -70,7 +74,9 @@ function desc(t){
  '<div class="small">'+(t.planned_qty?'План: '+t.planned_qty+' шт. · ':'')+'Статус: '+esc(t.status)+
  (t.assignee?' · '+esc(t.assignee):' · свободна')+' · '+fmt(t.created_at)+'</div>'+
  (t.note?'<div class="small">'+esc(t.note)+'</div>':'')+
- (t.completed_qty!=null?'<div class="small">Фактически: '+esc(t.completed_qty)+' шт.</div>':'');
+ (t.completed_qty!=null?'<div class="small">Фактически: '+esc(t.completed_qty)+' шт.</div>':'')+
+ (t.started_at&&t.completed_at?'<div class="small">Время выполнения: '+Math.max(0,Math.round((new Date(t.completed_at)-new Date(t.started_at))/60000))+' мин</div>':'')+
+ (t.status==='blocked'&&t.last_issue?'<div class="bad">Причина: '+esc(t.last_issue)+'</div>':'');
 }
 let tasks=[];
 async function getTasks(){
@@ -88,6 +94,13 @@ async function getTasks(){
   return '<div class="item"><div class="detail">'+desc(t)+'</div>'+
   (t.status==='blocked'?'<button class="secondary" data-id="'+esc(t.id)+'" data-action="reopen">Вернуть в очередь</button>':'')+'</div>'
  }).join(''):'<p class="small">История пока пуста.</p>';
+ const events=d.events||[];
+ document.getElementById('events').innerHTML=events.length?events.map(function(v){
+  return '<div class="item"><div class="detail"><b>'+esc(v.article)+'</b> · '+esc(v.line)+
+   ' · '+esc(v.kind)+'<div class="small">'+fmt(v.created_at)+' · '+esc(v.actor)+
+   (v.quantity!=null?' · '+esc(v.quantity)+' шт.':'')+'</div>'+
+   (v.note?'<div class="small">'+esc(v.note)+'</div>':'')+'</div></div>'
+ }).join(''):'<p class="small">Событий пока нет.</p>';
 }
 document.getElementById('newTask').addEventListener('submit',async function(e){
  e.preventDefault();const b=document.getElementById('createBtn'),m=document.getElementById('msg');
@@ -140,7 +153,7 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 <div class="card"><h2>Очередь задач</h2><div id="available">Загрузка…</div></div>
 <div id="msg" role="status"></div>
 </main><script>
-function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 let tasks=[],sending=false;
 function block(t,mine){
  const note=t.note?'<p class="small">'+esc(t.note)+'</p>':'';
@@ -210,7 +223,19 @@ def manager_replenishment_tasks():
     if not manager_access():
         return jsonify(error="Доступ руководителю"), 403
     rows = query_all(TASK_SELECT + " ORDER BY CASE t.status WHEN 'new' THEN 0 WHEN 'started' THEN 1 ELSE 2 END, CASE t.priority WHEN 'urgent' THEN 0 ELSE 1 END, t.created_at DESC LIMIT 150")
-    return jsonify(tasks=[_item(r) for r in rows])
+    events = query_all("""
+        SELECT ev.kind, ev.actor, ev.note, ev.quantity, ev.created_at,
+               t.article, t.line_code
+        FROM replenishment_task_events ev
+        JOIN replenishment_tasks t ON t.id = ev.task_id
+        ORDER BY ev.created_at DESC
+        LIMIT 70
+    """)
+    return jsonify(tasks=[_item(r) for r in rows], events=[
+        {"kind": r[0], "actor": r[1], "note": r[2], "quantity": r[3],
+         "created_at": r[4], "article": r[5], "line": r[6]}
+        for r in events
+    ])
 
 
 @replenishment_bp.post("/api/manager/replenishment/create")
