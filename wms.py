@@ -287,6 +287,37 @@ def init_wms_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS replenishment_tasks (
+            id TEXT PRIMARY KEY,
+            article TEXT NOT NULL,
+            line_code TEXT NOT NULL,
+            planned_qty INTEGER,
+            completed_qty INTEGER,
+            priority TEXT NOT NULL DEFAULT 'normal',
+            note TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'new',
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            created_by TEXT NOT NULL,
+            assigned_employee_id TEXT,
+            FOREIGN KEY(assigned_employee_id) REFERENCES employees(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS replenishment_task_events (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            actor_id TEXT,
+            actor TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            note TEXT,
+            quantity INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(task_id) REFERENCES replenishment_tasks(id)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS daily_targets (
             date_key TEXT PRIMARY KEY,
             wb_fbs_plan INTEGER NOT NULL DEFAULT 0,
@@ -420,6 +451,9 @@ def init_wms_db():
         "CREATE INDEX IF NOT EXISTS idx_activities_shift_type_started ON activities(shift_id, activity_type, started_at)",
         "CREATE INDEX IF NOT EXISTS idx_operation_events_op_created ON operation_events(operation_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_operation_events_event_created ON operation_events(event_type, created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_replenishment_one_active_per_cell ON replenishment_tasks(article, line_code) WHERE status IN ('new','started')",
+        "CREATE INDEX IF NOT EXISTS idx_replenishment_status_priority ON replenishment_tasks(status, priority, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_replenishment_events_task_time ON replenishment_task_events(task_id, created_at)",
     ):
         try:
             execute(index_sql)
@@ -1566,6 +1600,7 @@ STATS_PAGE = """<!doctype html>
   <a href="/fbs-journal">📋 Журнал FBS</a>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
+   <a href="/manager/replenishment">📦 Пополнение</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
