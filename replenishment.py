@@ -215,7 +215,7 @@ getTasks().catch(function(e){document.getElementById('queue').textContent=e.mess
 
 WORKER_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Пополнение</title><style>
+<title>ONIX · Пополнение</title><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
 main{max-width:760px;margin:auto;padding:13px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin:10px 0}
 h1{margin:12px 0}a{color:#49667b}.small{color:#667989;font-size:12px}.task{padding:14px 0;border-top:1px solid #d7e0e7}.task:first-child{border-top:0}
@@ -223,6 +223,10 @@ h1{margin:12px 0}a{color:#49667b}.small{color:#667989;font-size:12px}.task{paddi
 input{width:125px;padding:11px;border:1px solid #b8cbd5;border-radius:8px;font-size:16px}
 button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9px;font-weight:700;cursor:pointer;min-height:42px}
 .secondary{background:#dce7ed;color:#25313d}button:disabled{opacity:.5}.bad{color:#a33b3b}
+.ok{color:#26764b;font-weight:700}.scanbox{background:#e8f0f5;padding:12px;border-radius:10px;margin-top:10px}
+.scaninput{flex:1 1 160px;min-width:150px;width:auto}
+#cameraOverlay{display:none;position:fixed;inset:0;z-index:1000;background:#e9eef3;overflow:auto;padding:12px}
+#repReader{max-width:650px;margin:16px auto}#cameraOverlay button{display:block;margin:15px auto}
 </style></head><body><main>
 <a href="/fbs">← Главный экран сотрудника</a><h1>📦 Пополнение</h1>
 <div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
@@ -230,19 +234,43 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 <div class="card"><h2>Мои задачи</h2><div id="mine">Загрузка…</div></div>
 <div class="card"><h2>Свободные задачи <button id="refreshList" class="secondary" type="button" style="float:right">Обновить</button></h2><div id="available">Загрузка…</div></div>
 <div id="msg" role="status"></div>
-</main><script>
+</main>
+<div id="cameraOverlay"><button type="button" id="closeCamera" class="secondary">✕ Закрыть камеру</button>
+<h2 style="text-align:center" id="cameraTitle">Сканируй</h2><div id="repReader"></div></div>
+<script>
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 let tasks=[],sending=false;
 function block(t,mine){
  const note=t.note?'<p class="small">'+esc(t.note)+'</p>':'';
  const plan=t.planned_qty?' · требуется '+esc(t.planned_qty)+' шт.':'';
+ let buttons='';
+ if(mine){
+  if(t.verify_required){
+   const stage=!t.verified_product_at?'product':!t.verified_location_at?'location':'completed';
+   if(stage==='completed'){
+    buttons='<div class="ok">✓ Товар и место назначения подтверждены</div>'+
+    '<div class="actions"><input type="number" id="qty-'+esc(t.id)+'" placeholder="Шт." min="1" step="1" inputmode="numeric">'+
+    '<button data-id="'+esc(t.id)+'" data-action="complete">Завершить размещение</button>'+
+    '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div>';
+   }else{
+    const title=stage==='product'?'Шаг 1. Отсканируй ШК товара':'Шаг 2. Отсканируй ШК ячейки '+esc(t.line);
+    buttons='<div class="scanbox"><b>'+title+'</b><div class="small">'+
+      (stage==='product'?'Сверим товар с артикулом из задания':'При постановке товара сверим код с адресом назначения')+
+      '</div><div class="actions"><input class="scaninput" autocomplete="off" autocorrect="off" autocapitalize="none" data-scan-task="'+esc(t.id)+'" id="scan-'+esc(t.id)+'" placeholder="Штрихкод">'+
+      '<button data-id="'+esc(t.id)+'" data-stage="'+stage+'" data-action="verify">Проверить ШК</button>'+
+      '<button class="secondary" data-id="'+esc(t.id)+'" data-stage="'+stage+'" data-action="camera">📷 Камера</button>'+
+      '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div></div>';
+   }
+  }else{
+   buttons='<p class="small">Старая задача: двойная проверка не включена</p>'+
+   '<div class="actions"><input type="number" id="qty-'+esc(t.id)+'" placeholder="Шт." min="1" step="1" inputmode="numeric">'+
+   '<button data-id="'+esc(t.id)+'" data-action="complete">Завершить</button>'+
+   '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div>';
+  }
+ }else buttons='<div class="actions"><button data-id="'+esc(t.id)+'" data-action="start">Принять задачу</button></div>';
  return '<div class="task"><b>'+esc(t.article)+'</b> · линия '+esc(t.line)+
  (t.priority==='urgent'?' <span class="urgent">СРОЧНО</span>':'')+
- '<div class="small">'+esc(t.status)+plan+'</div>'+note+
- (mine?'<div class="actions"><input type="number" id="qty-'+esc(t.id)+'" placeholder="Шт." min="1" step="1" inputmode="numeric">'+
- '<button data-id="'+esc(t.id)+'" data-action="complete">Завершить</button>'+
- '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div>':
- '<div class="actions"><button data-id="'+esc(t.id)+'" data-action="start">Принять задачу</button></div>')+'</div>';
+ '<div class="small">'+(t.product_name?esc(t.product_name)+' · ':'')+esc(t.status)+plan+'</div>'+note+buttons+'</div>';
 }
 async function load(){
  const [me,resp]=await Promise.all([fetch('/api/auth/me'),fetch('/api/replenishment/tasks',{cache:'no-store'})]);
@@ -256,9 +284,69 @@ async function load(){
  document.getElementById('mine').innerHTML=mine.length?mine.map(function(t){return block(t,true)}).join(''):'<p class="small">Нет задач в работе.</p>';
  document.getElementById('available').innerHTML=available.length?available.map(function(t){return block(t,false)}).join(''):'<p class="small">Очередь пуста.</p>';
 }
+
+let scanner=null,cameraActive=false;
+async function stopRepCamera(){
+ document.getElementById('cameraOverlay').style.display='none';
+ if(scanner){const old=scanner;scanner=null;
+  try{await old.stop()}catch(e){}
+  try{old.clear()}catch(e){}
+ }
+ cameraActive=false;
+}
+document.getElementById('closeCamera').addEventListener('click',stopRepCamera);
+async function openRepCamera(id,stage){
+ if(cameraActive)return;
+ if(typeof Html5Qrcode==='undefined'){document.getElementById('msg').textContent='Камера недоступна. Используй HID-сканер или поле ШК.';return}
+ cameraActive=true;
+ document.getElementById('cameraOverlay').style.display='block';
+ document.getElementById('cameraTitle').textContent=stage==='product'?'ШК товара':'ШК ячейки';
+ scanner=new Html5Qrcode('repReader');
+ let captured=false;
+ try{
+  await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:270,height:220}},
+    async function(code){
+      if(captured)return;captured=true;
+      await stopRepCamera();
+      await verifyScan(id,stage,code);
+    },()=>{});
+ }catch(e){
+  await stopRepCamera();
+  document.getElementById('msg').textContent='Не получилось открыть камеру. Разреши доступ или используй сканер.';
+ }
+}
+async function verifyScan(id,stage,barcode){
+ if(sending)return;
+ barcode=String(barcode||'').trim();
+ if(!barcode){document.getElementById('msg').textContent='Сначала отсканируй ШК';return}
+ sending=true;
+ const msg=document.getElementById('msg');msg.className='';msg.textContent='Проверяю штрихкод…';
+ try{
+  const r=await fetch('/api/replenishment/verify',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({task_id:id,stage:stage,barcode:barcode})}),d=await r.json();
+  if(!r.ok)throw Error(d.error||'ШК не прошёл проверку');
+  msg.className='ok';msg.textContent=stage==='product'?'✓ Товар проверен. Теперь доставь его к ячейке и отсканируй её ШК.':'✓ Ячейка подтверждена. Укажи фактическое количество.';
+  await load();
+ }catch(e){msg.className='bad';msg.textContent=e.message}
+ finally{sending=false}
+}
+document.addEventListener('keydown',function(e){
+ if(e.key!=='Enter')return;
+ const input=e.target.closest('input[data-scan-task]');if(!input)return;
+ e.preventDefault();
+ const task=tasks.find(t=>t.id===input.dataset.scanTask);
+ if(!task)return;
+ verifyScan(task.id,!task.verified_product_at?'product':'location',input.value);
+});
+
 async function action(e){
  const btn=e.target.closest('button[data-action]');if(!btn||sending)return;
  const type=btn.dataset.action,id=btn.dataset.id;let quantity=null,note='';
+ if(type==='camera'){await openRepCamera(id,btn.dataset.stage);return}
+ if(type==='verify'){
+  const input=document.getElementById('scan-'+id);
+  await verifyScan(id,btn.dataset.stage,input&&input.value);return
+ }
  if(type==='complete'){
   const input=document.getElementById('qty-'+id);quantity=Number(input&&input.value);
   if(!Number.isSafeInteger(quantity)||quantity<1){alert('Укажи фактически пополненное количество в штуках');return}
