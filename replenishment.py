@@ -146,11 +146,11 @@ input{width:125px;padding:11px;border:1px solid #b8cbd5;border-radius:8px;font-s
 button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9px;font-weight:700;cursor:pointer;min-height:42px}
 .secondary{background:#dce7ed;color:#25313d}button:disabled{opacity:.5}.bad{color:#a33b3b}
 </style></head><body><main>
-<a href="/move">← Склад</a><h1>📦 Пополнение</h1>
+<a href="/fbs">← Главный экран сотрудника</a><h1>📦 Пополнение</h1>
 <div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
 <div id="who" class="small" style="margin-top:8px"></div>
 <div class="card"><h2>Мои задачи</h2><div id="mine">Загрузка…</div></div>
-<div class="card"><h2>Очередь задач</h2><div id="available">Загрузка…</div></div>
+<div class="card"><h2>Свободные задачи <button id="refreshList" class="secondary" type="button" style="float:right">Обновить</button></h2><div id="available">Загрузка…</div></div>
 <div id="msg" role="status"></div>
 </main><script>
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -164,7 +164,7 @@ function block(t,mine){
  (mine?'<div class="actions"><input type="number" id="qty-'+esc(t.id)+'" placeholder="Шт." min="1" step="1" inputmode="numeric">'+
  '<button data-id="'+esc(t.id)+'" data-action="complete">Завершить</button>'+
  '<button class="secondary" data-id="'+esc(t.id)+'" data-action="block">Проблема</button></div>':
- '<div class="actions"><button data-id="'+esc(t.id)+'" data-action="start">Начать задачу</button></div>')+'</div>';
+ '<div class="actions"><button data-id="'+esc(t.id)+'" data-action="start">Принять задачу</button></div>')+'</div>';
 }
 async function load(){
  const [me,resp]=await Promise.all([fetch('/api/auth/me'),fetch('/api/replenishment/tasks',{cache:'no-store'})]);
@@ -197,6 +197,7 @@ async function action(e){
 }
 document.getElementById('available').addEventListener('click',action);
 document.getElementById('mine').addEventListener('click',action);
+document.getElementById('refreshList').addEventListener('click',function(){if(!sending)load().catch(function(e){document.getElementById('msg').textContent=e.message})});
 load().catch(function(e){document.getElementById('mine').textContent=e.message});
 </script></body></html>"""
 
