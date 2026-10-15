@@ -294,6 +294,17 @@ def init_wms_db():
             updated_by TEXT
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS shift_admin_actions (
+            id TEXT PRIMARY KEY,
+            shift_id TEXT NOT NULL,
+            employee_id TEXT NOT NULL,
+            admin_name TEXT NOT NULL,
+            actual_ended_at TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
+        )
+        """,
     ]
     with db_connect() as conn:
         cur = conn.cursor()
@@ -1598,7 +1609,7 @@ STATS_PAGE = """<!doctype html>
 
  <div class="grid2">
   <div class="card">
-   <div class="section-title"><b>Сейчас работают</b><span class="small"><span id="active">0</span> активных</span></div>
+   <div class="section-title"><b>Сейчас работают</b><span class="small"><span id="active">0</span> активных · <a class="section-link" href="/manager/shifts">Управление сменами →</a></span></div>
    <div id="workers">Загрузка…</div>
   </div>
 
@@ -1754,6 +1765,84 @@ async function wbStatusLoop(){await runWbStatus();setTimeout(wbStatusLoop,15000)
 dashboardLoop();wbStatusLoop();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
+</script></body></html>"""
+
+
+SHIFT_ADMIN_PAGE = """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ONIX WMS · Управление сменами</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;color:#25313d;margin:0}
+.wrap{max-width:1040px;margin:auto;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:15px;padding:18px;margin:14px 0}
+a{color:#456981}h1{margin:6px 0 14px}h2{font-size:18px;margin:0 0 12px}.small{color:#667989;font-size:13px}
+.note{background:#fff3da;border:1px solid #e6cea5;padding:12px;border-radius:10px;margin:12px 0}
+.shift{display:flex;justify-content:space-between;align-items:center;gap:16px;border-top:1px solid #dbe4eb;padding:12px 0}.shift:first-child{border-top:0}
+.shift p{margin:4px 0}.history{border-top:1px solid #dbe4eb;padding:10px 0;overflow-wrap:anywhere}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.entry{display:grid;gap:6px;margin-bottom:12px}
+input,textarea{width:100%;padding:10px;border:1px solid #cbd9e2;background:white;border-radius:9px;font:inherit}
+button{border:0;border-radius:9px;background:#48647a;color:white;padding:10px 14px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}.secondary{background:#dae5ec;color:#314657}
+.error{color:#a33b3b}.ok{color:#287347}.details{font-size:13px;color:#667989}
+#editor{display:none;border-top:1px solid #dbe4eb;margin-top:12px;padding-top:16px}
+@media(max-width:680px){.row{grid-template-columns:1fr}.shift{align-items:flex-start;flex-direction:column}}
+</style></head><body><main class="wrap">
+<a href="/manager">← Панель управления</a><h1>Управление сменами</h1>
+<div class="note">Только для исправления зависших смен. Указывайте фактическое время окончания. Сканирования и количество собранных заказов не изменяются.</div>
+<section class="card"><h2>Незакрытые смены</h2><div id="shiftRows">Загружаю…</div>
+<div id="editor"><h2>Принудительно завершить смену</h2><div id="selected" class="details"></div>
+<div class="row">
+<label class="entry">Фактическая дата и время окончания<input id="actualEnd" type="datetime-local" step="60" required></label>
+<label class="entry">Причина<textarea id="reason" rows="3" maxlength="500" placeholder="Например: QR не закрыл смену" required></textarea></label>
+</div><p class="small">Время не должно быть раньше уже записанной операции или позже текущего времени.</p>
+<button id="confirm" type="button">Подтвердить закрытие</button> <button class="secondary" id="cancel" type="button">Отмена</button>
+<div role="status" id="feedback"></div></div></section>
+<section class="card"><h2>Журнал исправлений</h2><div id="historyRows">Загружаю…</div></section>
+</main><script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]})}
+function fmt(s){return s?new Date(s).toLocaleString('ru-RU'):'—'}
+let shifts=[],selected=null,saving=false;
+async function load(){
+ const pair=await Promise.all([fetch('/api/fbs/dashboard'),fetch('/api/manager/shifts/actions')]);
+ if(pair.some(function(r){return r.status===403})){location.href='/manager-login';return}
+ if(pair.some(function(r){return !r.ok}))throw Error('Не удалось загрузить смены');
+ const d=await Promise.all(pair.map(function(r){return r.json()}));
+ shifts=d[0].workers||[];
+ document.getElementById('shiftRows').innerHTML=shifts.length?shifts.map(function(w){
+  return '<div class="shift"><div><b>'+esc(w.employee)+'</b><p class="details">Начало: '+esc(fmt(w.started_at))+' · '+esc(w.activity||'—')+'</p><p class="details">Смена: '+esc(w.shift_id)+'</p></div><button type="button" data-shift="'+esc(w.shift_id)+'">Завершить смену</button></div>'
+ }).join(''):'<p class="small">Открытых смен нет.</p>';
+ const rows=d[1].actions||[];
+ document.getElementById('historyRows').innerHTML=rows.length?rows.map(function(a){
+  return '<div class="history"><b>'+esc(a.employee)+'</b> · завершена '+esc(fmt(a.actual_ended_at))+
+  '<div class="details">Изменено '+esc(fmt(a.recorded_at))+' · '+esc(a.admin_name)+'</div><div>'+esc(a.reason)+'</div></div>'
+ }).join(''):'<p class="small">Исправлений ещё нет.</p>';
+}
+document.getElementById('shiftRows').addEventListener('click',function(e){
+ const b=e.target.closest('button[data-shift]');if(!b)return;
+ selected=shifts.find(function(w){return w.shift_id===b.dataset.shift});if(!selected)return;
+ document.getElementById('selected').textContent=selected.employee+' · начало: '+fmt(selected.started_at);
+ document.getElementById('actualEnd').value='';document.getElementById('reason').value='';
+ document.getElementById('feedback').textContent='';document.getElementById('editor').style.display='block';
+});
+document.getElementById('cancel').addEventListener('click',function(){selected=null;document.getElementById('editor').style.display='none'});
+document.getElementById('confirm').addEventListener('click',async function(){
+ if(!selected||saving)return;
+ const value=document.getElementById('actualEnd').value,reason=document.getElementById('reason').value.trim();
+ const feedback=document.getElementById('feedback');
+ if(!value||reason.length<8){feedback.className='error';feedback.textContent='Укажи дату, время и причину (не менее 8 символов).';return}
+ const end=new Date(value);if(isNaN(end.getTime())){feedback.className='error';feedback.textContent='Неверная дата.';return}
+ if(!confirm('Закрыть смену '+selected.employee+' в '+fmt(end.toISOString())+'? Исправление попадёт в журнал.'))return;
+ saving=true;this.disabled=true;feedback.textContent='Сохраняю…';feedback.className='';
+ try{
+  const r=await fetch('/api/manager/shifts/force-close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:selected.shift_id,actual_ended_at:end.toISOString(),reason:reason})});
+  const d=await r.json();
+  if(!r.ok){feedback.className='error';feedback.textContent=d.error||'Не удалось завершить смену';return}
+  feedback.className='ok';feedback.textContent='Смена завершена, действие записано в журнал.';
+  selected=null;await load();
+  setTimeout(function(){document.getElementById('editor').style.display='none'},1200);
+ }catch(e){feedback.className='error';feedback.textContent='Ошибка запроса. Обнови список перед повтором.'}
+ finally{saving=false;document.getElementById('confirm').disabled=false}
+});
+load().catch(function(e){document.getElementById('shiftRows').textContent=e.message});
 </script></body></html>"""
 
 
@@ -2291,6 +2380,104 @@ def manager_page():
 @wms_bp.get("/stats")
 def stats_page():
     return redirect("/manager")
+
+
+@wms_bp.get("/manager/shifts")
+def manager_shift_admin_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    return SHIFT_ADMIN_PAGE
+
+
+@wms_bp.get("/api/manager/shifts/actions")
+def manager_shift_actions_api():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    rows = query_all(
+        """
+        SELECT a.shift_id, e.name, a.admin_name, a.reason, a.actual_ended_at, a.recorded_at
+        FROM shift_admin_actions a JOIN employees e ON e.id = a.employee_id
+        ORDER BY a.recorded_at DESC LIMIT 50
+        """
+    )
+    return jsonify(actions=[
+        {"shift_id": r[0], "employee": r[1], "admin_name": r[2],
+         "reason": r[3], "actual_ended_at": r[4], "recorded_at": r[5]}
+        for r in rows
+    ])
+
+
+@wms_bp.post("/api/manager/shifts/force-close")
+def manager_force_close_shift():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if not request.is_json:
+        return jsonify(error="Ожидается JSON"), 415
+    data = request.get_json(silent=True) or {}
+    shift_id = str(data.get("shift_id") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+    raw_end = str(data.get("actual_ended_at") or "").strip()
+    if not shift_id or not 8 <= len(reason) <= 500:
+        return jsonify(error="Укажи смену и причину от 8 до 500 символов"), 400
+    try:
+        actual = parse_iso(raw_end)
+        if actual is None or actual.utcoffset() is None:
+            raise ValueError("Missing timezone")
+        actual = actual.astimezone(timezone.utc)
+    except (ValueError, TypeError, OverflowError):
+        return jsonify(error="Неверное время окончания"), 400
+    if actual > datetime.now(timezone.utc):
+        return jsonify(error="Время окончания не может быть в будущем"), 400
+    end_iso = actual.isoformat()
+    actor = get_session_employee()
+    admin_name = actor["name"] if actor and actor["role"] == "manager" else "Руководитель (ПК)"
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql("SELECT employee_id, started_at, ended_at FROM shifts WHERE id = ?"), (shift_id,))
+            shift = cur.fetchone()
+            if shift is None:
+                return jsonify(error="Смена не найдена"), 404
+            if shift[2] is not None:
+                return jsonify(error="Смена уже завершена"), 409
+            started = parse_iso(shift[1])
+            if started is None or started.utcoffset() is None or actual < started.astimezone(timezone.utc):
+                return jsonify(error="Дата окончания раньше начала смены"), 400
+
+            cur.execute(sql("SELECT MAX(started_at), MAX(ended_at) FROM activities WHERE shift_id = ?"), (shift_id,))
+            times = list(cur.fetchone())
+            cur.execute(sql("SELECT MAX(scanned_at) FROM scans WHERE shift_id = ?"), (shift_id,))
+            times.append(cur.fetchone()[0])
+            cur.execute(sql("SELECT MAX(created_at) FROM operation_events WHERE shift_id = ?"), (shift_id,))
+            times.append(cur.fetchone()[0])
+            for item in times:
+                if item is None:
+                    continue
+                checked = parse_iso(item)
+                if checked is None or checked.utcoffset() is None or checked.astimezone(timezone.utc) > actual:
+                    return jsonify(error="После выбранного времени есть зарегистрированные операции. Проверь историю и укажи более позднее время."), 409
+
+            cur.execute(sql("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL"), (end_iso, shift_id))
+            cur.execute(sql("UPDATE shifts SET ended_at = ? WHERE id = ? AND ended_at IS NULL"), (end_iso, shift_id))
+            if cur.rowcount != 1:
+                conn.rollback()
+                return jsonify(error="Смена уже закрыта другим запросом"), 409
+            recorded = now_iso()
+            cur.execute(sql("""
+                INSERT INTO shift_admin_actions
+                (id, shift_id, employee_id, admin_name, actual_ended_at, reason, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """), (str(uuid.uuid4()), shift_id, shift[0], admin_name, end_iso, reason, recorded))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+    return jsonify(ok=True, shift_id=shift_id, actual_ended_at=end_iso, recorded_at=recorded)
 
 
 @wms_bp.get("/receiving-monitor")
