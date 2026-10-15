@@ -55,18 +55,29 @@ button{padding:10px 13px;border:0;border-radius:9px;background:#48647a;color:#ff
 button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 .wide{grid-column:1/-1}.small{font-size:12px;color:#667989}.item{padding:12px 0;border-top:1px solid #dce4e9;display:flex;align-items:center;justify-content:space-between;gap:12px}
 .item:first-child{border-top:0}.detail{min-width:0}.detail>div{margin-top:5px}.urgent{color:#a14c28}.bad{color:#a33b3b}.ok{color:#26764b}
+.matches{display:grid;gap:3px;max-height:240px;overflow:auto;margin:8px 0}.matches button{background:#e3ebf2;color:#233c4c;text-align:left}
 #msg{min-height:18px;margin-top:8px}@media(max-width:730px){form{grid-template-columns:1fr 1fr}.item{align-items:flex-start;flex-direction:column}}
 </style></head><body><main>
 <a href="/manager">← Панель руководителя</a><h1>📦 Пополнение ячеек</h1>
 <p class="small">Очередь задач для сотрудника пополнения. Пока задачи создаются вручную. ONIX не изменяет остатки МойСклад и не вмешивается в FBS.</p>
-<section class="card"><h2>Создать задачу</h2><form id="newTask">
-<label>Артикул<input name="article" maxlength="100" required placeholder="2347_OTVODKA"></label>
-<label>Линия / ячейка<input name="line" maxlength="80" required placeholder="Ж"></label>
+<section class="card"><h2>Создать задачу</h2>
+<label>Найти товар в МойСклад по названию, артикулу или ШК
+<input id="productSearch" type="search" placeholder="Поиск номенклатуры" autocomplete="off"></label>
+<div id="productMatches" class="matches"></div>
+<form id="newTask">
+<label>Выбранный артикул<input name="article" id="chosenArticle" readonly required placeholder="Выбери товар">
+<input type="hidden" name="product_id" id="chosenProductId"></label>
+<label>Ячейка назначения<select name="line" id="targetLocation" required><option value="">Зарегистрируй адрес ниже</option></select></label>
 <label>Количество, шт.<input name="planned_qty" type="number" min="1" step="1" placeholder="Если известно"></label>
 <label>Приоритет<select name="priority"><option value="normal">Обычный</option><option value="urgent">Срочно</option></select></label>
 <label class="wide">Примечание<input name="note" maxlength="500" placeholder="Откуда взять резерв, детали задачи"></label>
 <div><button type="submit" id="createBtn">Добавить в очередь</button></div>
 </form><div id="msg" role="status"></div></section>
+<section class="card"><h2>Этикетки ячеек</h2>
+<p class="small">Добавь линию или адрес (например И или И4) и распечатай штрихкод для сканирования при размещении.</p>
+<div style="display:flex;gap:8px;margin:10px 0"><input id="newLocation" maxlength="80" placeholder="Название, например И4" style="flex:1">
+<button id="addLocation" type="button">Создать ячейку</button></div>
+<div id="locationMsg" class="small" role="status"></div><div id="locations">Загрузка…</div></section>
 <section class="card"><h2>Открытые задачи <span id="openCount" class="small"></span></h2><div id="queue">Загрузка…</div></section>
 <section class="card"><h2>Последние завершённые и проблемные</h2><div id="history">Загрузка…</div></section>
 <section class="card"><h2>Журнал действий</h2><div id="events">Загрузка…</div></section>
@@ -74,7 +85,11 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function fmt(s){return s?new Date(s).toLocaleString('ru-RU'):'—'}
 function desc(t){
- return '<b>'+esc(t.article)+'</b> · линия '+esc(t.line)+(t.priority==='urgent'?' · <b class="urgent">СРОЧНО</b>':'')+
+ return '<b>'+esc(t.article)+'</b> · линия '+esc(t.line)+
+ (t.product_name?' · '+esc(t.product_name):'')+
+ (t.verify_required?'<div class="small">ШК товара: '+(t.verified_product_at?'✅':'ожидается')+
+ ' · ШК ячейки: '+(t.verified_location_at?'✅':'ожидается')+'</div>':'<div class="small">Задача без двойной проверки</div>')+
+ (t.priority==='urgent'?' · <b class="urgent">СРОЧНО</b>':'')+
  '<div class="small">'+(t.planned_qty?'План: '+t.planned_qty+' шт. · ':'')+'Статус: '+esc(t.status)+
  (t.assignee?' · '+esc(t.assignee):' · свободна')+' · '+fmt(t.created_at)+'</div>'+
  (t.note?'<div class="small">'+esc(t.note)+'</div>':'')+
@@ -82,6 +97,60 @@ function desc(t){
  (t.started_at&&t.completed_at?'<div class="small">Время выполнения: '+Math.max(0,Math.round((new Date(t.completed_at)-new Date(t.started_at))/60000))+' мин</div>':'')+
  (t.status==='blocked'&&t.last_issue?'<div class="bad">Причина: '+esc(t.last_issue)+'</div>':'');
 }
+
+let selectedCatalog=[],searchDebounce=0,locations=[];
+function escLoc(x){return esc(x)}
+function paintLocations(){
+ const sel=document.getElementById('targetLocation'),old=sel.value;
+ sel.innerHTML='<option value="">Выбери зарегистрированную ячейку</option>'+locations.map(l=>
+ '<option value="'+esc(l.label)+'">'+esc(l.label)+'</option>').join('');
+ if(locations.some(l=>l.label===old))sel.value=old;
+ document.getElementById('locations').innerHTML=locations.length?locations.map(l=>
+ '<div class="item"><div><b>'+esc(l.label)+'</b><div class="small">'+esc(l.barcode)+'</div></div>'+
+ '<a href="/manager/replenishment/label?id='+encodeURIComponent(l.id)+'" target="_blank" rel="noopener">🖨 Этикетка</a></div>').join(''):'<p class="small">Ячеек пока нет</p>';
+}
+async function reloadLocations(){
+ const r=await fetch('/api/manager/replenishment/locations',{cache:'no-store'}),d=await r.json();
+ if(!r.ok)throw Error(d.error||'Ошибка загрузки адресов');
+ locations=d.locations||[];paintLocations();
+}
+document.getElementById('addLocation').addEventListener('click',async function(){
+ const input=document.getElementById('newLocation'),msg=document.getElementById('locationMsg');
+ if(!input.value.trim())return;this.disabled=true;
+ try{
+  const r=await fetch('/api/manager/replenishment/locations',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({label:input.value.trim()})}),d=await r.json();
+  if(!r.ok)throw Error(d.error||'Ошибка регистрации');
+  await reloadLocations();document.getElementById('targetLocation').value=d.location.label;
+  msg.textContent='Адрес зарегистрирован. Распечатай его ШК.';
+  input.value='';
+ }catch(e){msg.textContent=e.message}finally{this.disabled=false}
+});
+document.getElementById('productSearch').addEventListener('input',function(){
+ clearTimeout(searchDebounce);const text=this.value.trim(),box=document.getElementById('productMatches');
+ document.getElementById('chosenArticle').value='';document.getElementById('chosenProductId').value='';
+ if(text.length<2){box.innerHTML='';return}
+ searchDebounce=setTimeout(async function(){
+  try{
+   const r=await fetch('/api/manager/replenishment/catalog?q='+encodeURIComponent(text)),d=await r.json();
+   if(!r.ok)throw Error(d.error||'Ошибка поиска');
+   if(document.getElementById('productSearch').value.trim()!==text)return;
+   selectedCatalog=d.products||[];
+   box.innerHTML=selectedCatalog.length?selectedCatalog.map((p,i)=>
+    '<button type="button" data-index="'+i+'"><b>'+esc(p.article)+'</b> · '+esc(p.name)+'</button>').join(''):
+    '<p class="small">Не найдено</p>';
+  }catch(e){box.textContent=e.message}
+ },350);
+});
+document.getElementById('productMatches').addEventListener('click',function(e){
+ const b=e.target.closest('button[data-index]');if(!b)return;
+ const p=selectedCatalog[Number(b.dataset.index)];if(!p)return;
+ document.getElementById('chosenArticle').value=p.article;
+ document.getElementById('chosenProductId').value=p.id;
+ document.getElementById('productSearch').value=p.article+' · '+p.name;
+ this.textContent='Выбрано: '+p.article+' · '+p.name;
+});
+reloadLocations().catch(e=>{document.getElementById('locationMsg').textContent=e.message});
 let tasks=[];
 async function getTasks(){
  const r=await fetch('/api/manager/replenishment/tasks',{cache:'no-store'});
@@ -92,7 +161,9 @@ async function getTasks(){
  const old=tasks.filter(function(t){return t.status!=='new'&&t.status!=='started'});
  document.getElementById('openCount').textContent='('+open.length+')';
  document.getElementById('queue').innerHTML=open.length?open.map(function(t){
-  return '<div class="item"><div class="detail">'+desc(t)+'</div><button class="secondary" data-id="'+esc(t.id)+'" data-action="cancel">Отменить</button></div>'
+  return '<div class="item"><div class="detail">'+desc(t)+'</div><div style="display:flex;gap:6px">'+
+ (!t.verify_required&&t.status==='new'?'<button class="secondary" data-id="'+esc(t.id)+'" data-action="enable_checks">Включить сканирование</button>':'')+
+ '<button class="secondary" data-id="'+esc(t.id)+'" data-action="cancel">Отменить</button></div></div>'
  }).join(''):'<p class="small">Открытых задач нет.</p>';
  document.getElementById('history').innerHTML=old.length?old.slice(0,35).map(function(t){
   return '<div class="item"><div class="detail">'+desc(t)+'</div>'+
@@ -111,21 +182,24 @@ document.getElementById('newTask').addEventListener('submit',async function(e){
  b.disabled=true;m.textContent='';
  try{
   const f=new FormData(this);
+  if(!f.get('product_id'))throw Error('Сначала выбери товар из поиска');
+  if(!f.get('line'))throw Error('Сначала выбери ячейку');
   const qty=f.get('planned_qty');
   const r=await fetch('/api/manager/replenishment/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-   article:f.get('article'),line:f.get('line'),planned_qty:qty?Number(qty):null,priority:f.get('priority'),note:f.get('note')})});
+   article:f.get('article'),product_id:f.get('product_id'),line:f.get('line'),planned_qty:qty?Number(qty):null,priority:f.get('priority'),note:f.get('note')})});
   const d=await r.json();
   if(!r.ok)throw Error(d.error||'Ошибка создания');
-  this.reset();m.className='ok';m.textContent='Задача добавлена';await getTasks();
+  this.reset();document.getElementById('productSearch').value='';document.getElementById('productMatches').innerHTML='';
+  m.className='ok';m.textContent='Задача добавлена';await getTasks();
  }catch(e){m.className='bad';m.textContent=e.message}finally{b.disabled=false}
 });
 async function change(e){
  const b=e.target.closest('button[data-action]');if(!b)return;
  const action=b.dataset.action,task=tasks.find(function(t){return t.id===b.dataset.id});if(!task)return;
- const note=prompt(action==='cancel'?'Причина отмены':'Причина повторного открытия');
+ const note=prompt(action==='cancel'?'Причина отмены':action==='reopen'?'Причина повторного открытия':'Причина включения двойного сканирования');
  if(note===null)return;
  if(note.trim().length<5){alert('Укажи причину хотя бы из 5 символов');return}
- if(!confirm((action==='cancel'?'Отменить':'Вернуть в очередь')+' задачу '+task.article+'?'))return;
+ if(!confirm((action==='cancel'?'Отменить':action==='reopen'?'Вернуть в очередь':'Включить сканирование для')+' задачу '+task.article+'?'))return;
  b.disabled=true;
  try{
   const r=await fetch('/api/manager/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id,action:action,note:note})});
