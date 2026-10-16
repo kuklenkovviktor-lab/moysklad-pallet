@@ -2244,8 +2244,21 @@ def bootstrap_viktor_badge():
 @wms_bp.get("/login")
 def login_page():
     ensure_db()
-    if get_session_employee():
-        return redirect("/fbs")
+    employee = get_session_employee()
+    if employee:
+        # On browser restart return to the operation this employee was actually
+        # doing, rather than always redirecting a receiver to FBS picking.
+        shift = query_one(
+            "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+            (employee["id"],),
+        )
+        active = current_activity(shift[0]) if shift else None
+        target = {
+            "receiving": "/",
+            "replenishment": "/replenishment",
+            "movement": "/move",
+        }.get(active["type"] if active else "", "/fbs")
+        return redirect(target)
     return LOGIN_PAGE
 
 
