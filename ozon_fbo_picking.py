@@ -68,8 +68,21 @@ def _ensure_picking_db():
                     actor TEXT NOT NULL,
                     action TEXT NOT NULL,
                     reason TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    request_id TEXT
                 )""")
+                # Backwards-compatible migration in case a previous deployment created the audit table.
+                if DATABASE_URL:
+                    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                                ("ozon_fbo_pick_audit",))
+                    audit_cols = {r[0] for r in cur.fetchall()}
+                else:
+                    cur.execute("PRAGMA table_info(ozon_fbo_pick_audit)")
+                    audit_cols = {r[1] for r in cur.fetchall()}
+                if "request_id" not in audit_cols:
+                    cur.execute("ALTER TABLE ozon_fbo_pick_audit ADD COLUMN request_id TEXT")
+                cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_fbo_audit_request
+                    ON ozon_fbo_pick_audit(request_id) WHERE request_id IS NOT NULL""")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_fbo_pick_events_cargo ON ozon_fbo_pick_events(cargo_id,created_at)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_fbo_pick_audit_cargo ON ozon_fbo_pick_audit(cargo_id,created_at)")
                 # One ongoing cargo per employee, across all Ozon FBO supplies.
@@ -138,11 +151,11 @@ def _serialize(cargo_id):
     }
 
 
-def _audit(cur, cargo_id, employee_id, actor, action, reason=""):
+def _audit(cur, cargo_id, employee_id, actor, action, reason="", request_id=None):
     cur.execute(sql("""INSERT INTO ozon_fbo_pick_audit
-        (id,cargo_id,employee_id,actor,action,reason,created_at)
-        VALUES (?,?,?,?,?,?,?)"""),
-        (str(uuid.uuid4()), cargo_id, employee_id, actor, action, reason, now_iso()))
+        (id,cargo_id,employee_id,actor,action,reason,created_at,request_id)
+        VALUES (?,?,?,?,?,?,?,?)"""),
+        (str(uuid.uuid4()), cargo_id, employee_id, actor, action, reason, now_iso(), request_id))
 
 
 @fbo_picking_bp.get("/ozon-fbo/pick")
@@ -292,12 +305,27 @@ def undo_pick(cargo_id):
     if not employee:
         return jsonify(error="Войди по бейджу"), 401
     _ensure_picking_db()
+    request_id = str((request.get_json(silent=True) or {}).get("request_id") or "").strip()
+    try:
+        uuid.UUID(request_id)
+    except (ValueError, AttributeError):
+        return jsonify(error="Некорректный номер отмены"), 400
     with db_connect() as conn:
         cur = conn.cursor()
         try:
             _begin(cur)
             cargo = _locked(cur, cargo_id)
-            if not cargo or cargo[3] != "started" or cargo[4] != employee["id"]:
+            if not cargo:
+                return jsonify(error="Грузоместо не найдено"), 404
+            cur.execute(sql("""SELECT cargo_id,employee_id,action FROM ozon_fbo_pick_audit
+                WHERE request_id=?"""), (request_id,))
+            previous = cur.fetchone()
+            if previous:
+                if previous != (cargo_id, employee["id"], "undo"):
+                    return jsonify(error="Номер отмены уже использован"), 409
+                conn.commit()
+                return jsonify(ok=True, replayed=True, cargo=_serialize(cargo_id))
+            if cargo[3] != "started" or cargo[4] != employee["id"]:
                 return jsonify(error="Только исполнитель может исправить незавершённое грузоместо"), 409
             cur.execute(sql("""SELECT id,item_id,quantity FROM ozon_fbo_pick_events
                 WHERE cargo_id=? AND voided_at IS NULL ORDER BY created_at DESC,id DESC LIMIT 1"""), (cargo_id,))
@@ -315,7 +343,7 @@ def undo_pick(cargo_id):
                 conn.rollback()
                 return jsonify(error="Ошибка количества. Изменения не применены."), 409
             _audit(cur, cargo_id, employee["id"], employee["name"], "undo",
-                   f"Отмена последнего подтверждения: {last[2]} шт.")
+                   f"Отмена последнего подтверждения: {last[2]} шт.", request_id=request_id)
             conn.commit()
         except Exception:
             conn.rollback()
