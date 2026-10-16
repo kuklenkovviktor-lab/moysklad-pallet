@@ -65,8 +65,13 @@ function resetPreview(){
 }
 function checkButton(){importBtn.disabled=!current||current.errors.length>0||(current.warnings.length>0&&!document.getElementById('agree').checked)||busy}
 document.getElementById('agree').addEventListener('change',checkButton);
-fileEl.addEventListener('change',resetPreview);
-document.getElementById('title').addEventListener('input',resetPreview);
+fileEl.addEventListener('change',function(){
+ resetPreview();
+ const titleInput=document.getElementById('title');
+ if(this.files[0] && !titleInput.value.trim()){
+  titleInput.value=this.files[0].name.replace(/\.xlsx$/i,'').slice(0,140);
+ }
+});
 async function sendUpload(url,extra){
  const file=fileEl.files[0];if(!file)throw Error('Выбери Excel .xlsx');
  const form=new FormData();form.append('file',file);
@@ -75,7 +80,7 @@ async function sendUpload(url,extra){
  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка импорта');return d;
 }
 document.getElementById('previewBtn').addEventListener('click',async function(){
- if(busy)return;busy=true;resetPreview();this.disabled=true;notice.textContent='Читаю Excel…';
+ if(busy)return;busy=true;resetPreview();this.disabled=true;notice.className='small';notice.textContent='Читаю Excel…';
  try{
   const d=await sendUpload('/api/manager/ozon-fbo/preview',{});
   current=d;previewEl.innerHTML=kpis(d)+'<div style="margin-top:12px">'+d.cargo.map(cargoBlock).join('')+'</div>';
