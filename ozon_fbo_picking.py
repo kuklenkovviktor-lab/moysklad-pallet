@@ -406,7 +406,7 @@ def manager_progress():
         LEFT JOIN ozon_fbo_items i ON c.id=i.cargo_id
         LEFT JOIN employees e ON c.claimed_employee_id=e.id
         GROUP BY c.id,c.barcode,c.destination,c.label,c.planned_qty,c.status,
-                 c.claimed_employee_id,e.name,c.completed_at,s.title,s.id
+                 c.claimed_employee_id,e.name,c.completed_at,s.title,s.id,s.created_at
         ORDER BY s.created_at DESC,c.destination,c.label LIMIT 1000""")
     result = [{"id":r[0],"barcode":r[1],"destination":r[2],"label":r[3],
                "qty":r[4],"status":r[5],"employee_id":r[6],"employee":r[7],
