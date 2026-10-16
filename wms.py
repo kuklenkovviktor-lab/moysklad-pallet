@@ -1319,12 +1319,31 @@ async function loadIdentity(){
  document.getElementById('identity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
  document.getElementById('startName').textContent=d.employee.name;
  if(d.employee.role==='manager')document.querySelectorAll('.manager-only').forEach(x=>x.classList.remove('hidden'));
- if(shiftId){
-  try{
-   await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:'picking'})});
-  }catch(e){}
-  await refresh();
- }
+ // The server owns the shift. Browser localStorage is only a convenience;
+ // recover the correct shift even after Safari loses its local identifier.
+ try{
+  const stateResponse=await fetch('/api/shift/current',{cache:'no-store'});
+  if(stateResponse.ok){
+   const state=await stateResponse.json();
+   if(state.active && state.stats && state.stats.employee_id===d.employee.id){
+    shiftId=state.stats.shift_id;
+    localStorage.setItem('fbs_shift_id',shiftId);
+    // A new badge login starts with 'other'. Enter picking only in that case;
+    // reopening /fbs must not silently overwrite receiving/replenishment time.
+    if(state.stats.activity==='other'){
+     const switched=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:'picking'})});
+     if(!switched.ok){const err=await switched.json();showErr(err.error||'Не удалось включить сборку');}
+    }
+    await refresh();
+    return;
+   }
+   // Closed shift or no active shift: never reuse a stale browser shift ID.
+   shiftId='';
+   localStorage.removeItem('fbs_shift_id');
+   return;
+  }
+ }catch(e){}
+ if(shiftId)await refresh();
 }
 async function startShift(){
  const r=await fetch('/api/fbs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
