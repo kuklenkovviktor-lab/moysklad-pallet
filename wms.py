@@ -1568,13 +1568,16 @@ SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <h1>📟 Терминал выхода</h1>
 <div class="muted">Авторизуй это устройство один раз. После этого твоя учётка Виктора будет удалена из этой браузерной сессии, а устройство сможет показывать только динамический QR выхода.</div>
 <div class="note"><b>Важно:</b> это не завершает твою рабочую смену в WMS. Оно только убирает твою авторизацию с этого конкретного устройства.</div>
+<input id="supervisorCode" autocomplete="off" placeholder="Сканируй QR старшего" style="width:100%;padding:13px;font-size:16px;border:1px solid #cbd9e2;border-radius:10px;margin-top:12px">
 <button class="btn" onclick="activate()">Авторизовать это устройство</button>
 <div id="result"></div>
 <a class="back" href="/stats">← Назад в статистику</a>
 </div></div>
 <script>
 async function activate(){
- const r=await fetch('/api/supervisor-terminal/activate',{method:'POST'});
+ const supervisorCode=document.getElementById('supervisorCode').value.trim();
+ if(!supervisorCode){document.getElementById('result').innerHTML='<div class="err">Сначала сканируй QR старшего</div>';return}
+ const r=await fetch('/api/supervisor-terminal/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supervisor_code:supervisorCode})});
  const d=await r.json();
  if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Ошибка')+'</div>';return}
  localStorage.setItem('supervisor_terminal_token',d.terminal_token);
@@ -2355,6 +2358,10 @@ def supervisor_terminal_activate():
     emp = get_session_employee()
     if not emp or emp["role"] != "manager":
         return jsonify(error="Доступ только руководителю"), 403
+    data = request.get_json(silent=True) or {}
+    supervisor_code = str(data.get("supervisor_code") or "").strip()
+    if not valid_supervisor_exit_code(supervisor_code):
+        return jsonify(error="Для переназначения терминала также нужен действующий QR старшего"), 403
     token = issue_supervisor_terminal_token()
     log_event(emp["id"], "supervisor_terminal", "activate", result="ok")
     session.clear()
