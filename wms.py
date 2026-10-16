@@ -898,6 +898,12 @@ async function login(code){
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code}),signal:controller.signal});
   const d=await r.json();
   if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Бейдж не принят')+'</div>';return}
+  const previousEmployee=localStorage.getItem('onix_employee_id');
+  if(previousEmployee && previousEmployee!==d.employee.id){
+    localStorage.removeItem('receipt_id');
+    localStorage.removeItem('receipt_name');
+  }
+  localStorage.setItem('onix_employee_id',d.employee.id);
   localStorage.setItem('fbs_shift_id',d.shift_id||'');
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
   setTimeout(()=>location.href='/fbs',250);
@@ -1479,7 +1485,12 @@ async function finish(code){
   const r=await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supervisor_code:code})});
   const d=await r.json();
   if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'QR старшего не принят')+'</div>';return}
+  // Clear only employee-specific local state after approved QR logout.
+  // Normal browser close or network loss must never remove it.
   localStorage.removeItem('fbs_shift_id');
+  localStorage.removeItem('receipt_id');
+  localStorage.removeItem('receipt_name');
+  localStorage.removeItem('onix_employee_id');
   document.getElementById('result').innerHTML='<div class="ok">Смена завершена. TSD свободен.</div>';
   setTimeout(()=>location.href='/login',500);
  }finally{busy=false}
@@ -2420,6 +2431,8 @@ def current_shift_api():
 
 @wms_bp.get("/manager-login")
 def manager_login_page():
+    if get_session_employee() and not session.get("manager_web"):
+        return redirect("/fbs")
     if manager_access():
         return redirect("/manager")
     return MANAGER_LOGIN_PAGE
@@ -2427,6 +2440,14 @@ def manager_login_page():
 
 @wms_bp.post("/api/manager/login")
 def manager_login_api():
+    # The manager password must not silently replace an employee on the
+    # shared phone. Manager PC sessions without a badge are unaffected.
+    current = get_session_employee()
+    if current:
+        return jsonify(
+            error="Терминал занят: " + current["name"] + ". Выйди по QR старшего перед сменой учётной записи.",
+            occupied=True,
+        ), 409
     ip = _manager_client_ip()
     state = _manager_rate_state(ip)
     if state["blocked"]:
