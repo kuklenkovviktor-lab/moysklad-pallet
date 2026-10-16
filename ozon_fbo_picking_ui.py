@@ -252,7 +252,15 @@ h1{margin:12px 0}a{color:#48647a}table{width:100%;border-collapse:collapse;min-w
 th,td{padding:10px;border-bottom:1px solid #dce5eb;text-align:left;font-size:13px}
 th{background:#e6eef2}.scroll{overflow:auto}button{border:0;background:#48647a;color:#fff;padding:9px;border-radius:8px;cursor:pointer}
 button:disabled{opacity:.5}.secondary{background:#dce8ef;color:#314657}.small{font-size:13px;color:#6b7785}
-.progress{background:#dae5ea;border-radius:30px;height:9px;overflow:hidden;min-width:100px}.progress>div{background:#547c92;height:100%}
+.progress{background:#dae5ea;border-radius:30px;height:9px;overflow:hidden;min-width:100px}.progress>div{background:#9caab3;height:100%;transition:width .2s}
+.progress.is-started>div{background:#547c92}.progress.is-done>div{background:#349267}
+.status-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:800;white-space:nowrap}
+.status-badge.is-planned{background:#e7edf1;color:#5b6a76}
+.status-badge.is-started{background:#deebf5;color:#35668c}
+.status-badge.is-done{background:#d8efe1;color:#226c48}
+tbody tr.is-done{background:#f0f8f3}
+tbody tr.is-done td{border-bottom-color:#d7eade}
+tbody tr.is-done td:first-child{box-shadow:inset 3px 0 0 #49a474}
 #audit{margin-top:12px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
 </style></head><body><main><a href="/manager/ozon-fbo">← Поставки Ozon FBO</a>
 <h1>📦 Монитор сборки Ozon FBO</h1><p class="small">Подтверждённые сканирования. Обновление каждые 15 секунд. Никаких списаний в МойСклад.</p>
@@ -262,15 +270,17 @@ button:disabled{opacity:.5}.secondary{background:#dce8ef;color:#314657}.small{fo
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let list=[];
+function progressState(c){return c.status==='done'?'is-done':c.status==='started'?'is-started':'is-planned'}
+function statusLabel(c){return ({planned:'План',started:'Собирается',done:'Собрано'}[c.status]||c.status)}
 async function load(){
  const r=await fetch('/api/manager/ozon-fbo/progress',{cache:'no-store'}),d=await r.json();
  if(!r.ok)throw Error(d.error||'Не удалось загрузить');
  list=d.cargo||[];
  document.getElementById('rows').innerHTML=list.length?list.map(c=>
- '<tr><td><b>'+esc(c.supply)+'</b><div class="small">'+esc(c.destination)+' · '+esc(c.label)+'</div></td>'+
+ '<tr class="'+progressState(c)+'"><td><b>'+esc(c.supply)+'</b><div class="small">'+esc(c.destination)+' · '+esc(c.label)+'</div></td>'+
  '<td>'+esc(c.barcode)+'</td><td>'+esc(c.employee||'—')+'</td>'+
- '<td>'+esc(c.picked)+' / '+esc(c.qty)+'<div class="progress"><div style="width:'+Math.min(100,c.qty?100*c.picked/c.qty:0)+'%"></div></div></td>'+
- '<td>'+esc(({planned:'План',started:'Собирается',done:'Собрано'}[c.status]||c.status))+'</td>'+
+ '<td>'+esc(c.picked)+' / '+esc(c.qty)+'<div class="progress '+progressState(c)+'"><div style="width:'+Math.min(100,c.qty?100*c.picked/c.qty:0)+'%"></div></div></td>'+
+ '<td><span class="status-badge '+progressState(c)+'">'+(c.status==='done'?'✓ ':'')+esc(statusLabel(c))+'</span></td>'+
  '<td><button data-history="'+esc(c.id)+'" class="secondary">История</button> '+
  (c.status!=='done'&&c.employee_id?'<button data-release="'+esc(c.id)+'">Передать</button>':'')+'</td></tr>').join(''):
  '<tr><td colspan="6">Нет поставок.</td></tr>';
