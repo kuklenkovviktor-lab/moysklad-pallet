@@ -1,0 +1,27 @@
+name: ONIX Ozon FBO tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ozon_fbo*.py'
+      - 'wms.py'
+      - 'app.py'
+      - 'tests/test_ozon_fbo_picking.py'
+      - '.github/workflows/onix-ozon-fbo-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  fbo-picking:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Compile Python modules
+        run: python -m compileall -q app.py wms.py ozon_fbo.py ozon_fbo_parser.py ozon_fbo_picking.py ozon_fbo_picking_ui.py
+      - name: Test Ozon FBO server workflows
+        run: python -m unittest discover -s tests -p 'test_ozon_fbo_picking.py' -v
