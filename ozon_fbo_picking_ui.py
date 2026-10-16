@@ -61,6 +61,7 @@ const code=s=>{s=String(s||'').trim();return /^\\][A-Za-z]\\d/.test(s)?s.slice(3
 const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
 const pendingKey='onix_fbo_pending_scan_v1';
+const pendingUndoKey='onix_fbo_pending_undo_v1';
 function status(s,error=false){E('message').className=error?'error':'small';E('message').textContent=s}
 function vibrate(ok){try{if(navigator.vibrate)navigator.vibrate(ok?70:[120,70,120])}catch(e){}}
 function makeId(){return crypto.randomUUID?crypto.randomUUID(): 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?r:(r&3|8)).toString(16)})}
@@ -111,6 +112,7 @@ E('claimBtn').addEventListener('click',async()=>{
  finally{busy=false;E('claimBtn').disabled=false}
 });
 function getPending(){try{return JSON.parse(localStorage.getItem(pendingKey)||'null')}catch(e){return null}}
+function getPendingUndo(){try{return JSON.parse(localStorage.getItem(pendingUndoKey)||'null')}catch(e){return null}}
 async function sendPending(p){
  const d=await req('/cargo/'+encodeURIComponent(p.cargo_id)+'/scan','POST',{
   barcode:p.barcode,quantity:p.quantity,request_id:p.request_id
@@ -149,11 +151,29 @@ E('addBtn').addEventListener('click',async()=>{
   else{status('Нет подтверждения сервера. Повторный скан пока НЕ делай. При восстановлении сети операция безопасно повторится.',true)}
  }finally{busy=false;E('addBtn').disabled=false}
 });
+async function recoverUndo(){
+ const pending=getPendingUndo();if(!pending)return;
+ if(pending.employee_id!==employee.id){localStorage.removeItem(pendingUndoKey);return}
+ if(pending.cargo_id!==cargoId){status('Незавершённая отмена относится к другому грузоместу.',true);return}
+ busy=true;E('undoBtn').disabled=true;
+ try{
+  const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/undo','POST',{request_id:pending.request_id});
+  localStorage.removeItem(pendingUndoKey);
+  verifiedItem=null;E('barcode').value='';await draw(d.cargo);
+  status(d.replayed?'Отмена уже была сохранена.':'Последнее подтверждение отменено.');
+ }catch(e){
+  if(e.status&&e.status<500){localStorage.removeItem(pendingUndoKey);status(e.message,true)}
+  else status('Неизвестен результат отмены. Не нажимай повторно: запрос восстановится автоматически.',true);
+ }finally{busy=false;E('undoBtn').disabled=false}
+}
 E('undoBtn').addEventListener('click',async()=>{
  if(busy||getPending())return status('Сначала восстанови последнее подтверждение.',true);
+ if(getPendingUndo()){await recoverUndo();return}
  if(!confirm('Отменить последнее подтверждённое количество в этом грузоместе?'))return;
- busy=true;try{const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/undo','POST',{});await draw(d.cargo);status('Последнее подтверждение отменено.');verifiedItem=null;E('barcode').value=''}
- catch(e){status(e.message,true)}finally{busy=false}
+ localStorage.setItem(pendingUndoKey,JSON.stringify({
+  cargo_id:cargoId,employee_id:employee.id,request_id:makeId()
+ }));
+ await recoverUndo();
 });
 E('cargoCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();E('finishBtn').click()}});
 E('finishBtn').addEventListener('click',async()=>{
@@ -168,6 +188,13 @@ async function startup(){
  const response=await fetch('/api/auth/me',{cache:'no-store'});
  if(!response.ok){location.href='/login';return}
  const d=await response.json();employee=d.employee;E('identity').textContent='Сотрудник: '+employee.name;
+ for(const key of [pendingKey,pendingUndoKey]){
+  const p=(()=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){return null}})();
+  if(p&&p.employee_id!==employee.id)localStorage.removeItem(key);
+  else if(p&&p.cargo_id!==cargoId){
+   location.replace('/ozon-fbo/pick?cargo_id='+encodeURIComponent(p.cargo_id));return;
+  }
+ }
  if(!cargoId){
   const active=await req('/active');
   if(active.active){location.replace('/ozon-fbo/pick?cargo_id='+encodeURIComponent(active.cargo_id));return}
@@ -175,6 +202,7 @@ async function startup(){
  }
  await refresh();
  await recoverPending();
+ await recoverUndo();
 }
 startup().catch(e=>status('Ошибка подключения: '+e.message+'. При восстановлении сети обнови страницу.',true));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&employee&&cargoId&&!busy)refresh().catch(()=>{})});
