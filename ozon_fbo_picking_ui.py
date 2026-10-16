@@ -97,10 +97,12 @@ async function refresh(){
 function verifyBarcode(){
  if(!cargo||!employee)return;
  const barcode=code(E('barcode').value),item=cargo.items.find(i=>i.barcode===barcode);
- if(!item){verifiedItem=null;status('Неверный товар: этого штрихкода нет в задании.',true);vibrate(false);return}
- if(!item.remaining){verifiedItem=null;status('Этот артикул уже собран полностью.',true);vibrate(false);return}
+ if(!item){verifiedItem=null;status('Неверный товар: этого штрихкода нет в задании.',true);vibrate(false);E('barcode').value='';E('barcode').focus();return}
+ if(!item.remaining){verifiedItem=null;status('Этот артикул уже собран полностью.',true);vibrate(false);E('barcode').value='';E('barcode').focus();return}
+ // A new SKU always starts at 1. Do not carry over quantity from a previous SKU.
+ if(!verifiedItem||verifiedItem.barcode!==item.barcode)E('quantity').value=1;
  verifiedItem=item;E('selected').textContent=item.article+' · необходимо ещё '+item.remaining+' шт.';
- E('quantity').max=item.remaining;E('quantity').value=Math.min(item.remaining,Math.max(1,Number(E('quantity').value)||1));
+ E('quantity').max=item.remaining;
  status('Товар верный. Укажи фактическое количество и подтверди.');vibrate(true);E('quantity').focus();
 }
 E('barcode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();verifyBarcode()}});
