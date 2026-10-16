@@ -2,7 +2,8 @@
 
 WORKER_PICK_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ONIX · Ozon FBO · Сборка</title><style>
+<title>ONIX · Ozon FBO · Сборка</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
 *{box-sizing:border-box}body{margin:0;background:#e9eef3;color:#25313d;font-family:system-ui,Arial}
 main{max-width:940px;margin:auto;padding:12px}.card{background:#f7f9fb;padding:16px;border:1px solid #d7e0e7;border-radius:14px;margin:10px 0}
 a{color:#466b85}h1{font-size:25px;margin:12px 0 6px}h2{font-size:19px;margin:4px 0 12px}
@@ -20,6 +21,7 @@ label{font-size:13px;font-weight:800;display:block;margin-bottom:5px}
 table{width:100%;border-collapse:collapse;min-width:480px}td,th{border-bottom:1px solid #dde7eb;text-align:left;padding:9px;font-size:13px}
 th{background:#e8eef2;position:sticky;top:0}.scroll{overflow:auto;max-height:48vh}
 .complete{background:#dcefe3}.hidden{display:none!important}
+#reader{margin-top:12px;max-width:490px;overflow:hidden;border-radius:12px}
 #message{padding:12px;background:#eef3f6;border-radius:9px;min-height:42px;overflow-wrap:anywhere}
 @media(max-width:620px){.grid{grid-template-columns:1fr}.metrics{gap:5px}.metric{padding:9px}.metric b{font-size:20px}}
 </style></head><body><main>
@@ -41,7 +43,9 @@ th{background:#e8eef2;position:sticky;top:0}.scroll{overflow:auto;max-height:48v
 </div>
 <div id="selected" class="small" style="padding:12px 0">Сначала сканируй товар.</div>
 <div class="actions"><button id="addBtn">Подтвердить количество</button>
-<button id="undoBtn" class="secondary">Отменить последний скан</button></div>
+<button id="undoBtn" class="secondary">Отменить последний скан</button>
+<button id="cameraProduct" class="secondary">📷 Камера товара</button></div>
+<div id="reader" class="hidden"></div>
 <p class="small">Скан товара без подтверждения количества не изменяет план. При сбое сети незавершённое подтверждение будет повторено безопасно.</p>
 </section>
 <section class="card hidden complete" id="finishCard">
@@ -49,6 +53,7 @@ th{background:#e8eef2;position:sticky;top:0}.scroll{overflow:auto;max-height:48v
 <p class="small">Все позиции собраны. Отсканируй ШК грузоместа с его этикетки, чтобы завершить задание.</p>
 <div class="grid"><input id="cargoCode" class="full" autocomplete="off" autocapitalize="none" placeholder="ШК грузоместа">
 <button id="finishBtn">Завершить грузоместо</button></div>
+<p><button class="secondary" id="cameraCargo">📷 Камера ШК грузоместа</button></p>
 </section>
 <div id="message" role="status" aria-live="polite">Готовлю сборку…</div>
 <section class="card"><h2>Позиции этого грузоместа</h2>
@@ -62,6 +67,31 @@ const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
 const pendingKey='onix_fbo_pending_scan_v1';
 const pendingUndoKey='onix_fbo_pending_undo_v1';
+let camera=null,cameraTarget='',cameraBusy=false;
+async function stopCamera(){
+ const active=camera;camera=null;cameraBusy=false;
+ if(active){try{await active.stop()}catch(e){}try{await active.clear()}catch(e){}}
+ E('reader').classList.add('hidden');
+}
+async function toggleCamera(target){
+ if(camera){await stopCamera();return}
+ if(typeof Html5Qrcode==='undefined'){status('Модуль камеры не загрузился. Используй HID-сканер или ручной ввод ШК.',true);return}
+ cameraTarget=target;E('reader').classList.remove('hidden');
+ const instance=new Html5Qrcode('reader');camera=instance;
+ try{
+  await instance.start({facingMode:'environment'},{fps:12,qrbox:{width:260,height:160}},
+   async value=>{
+    if(camera!==instance||cameraBusy)return;
+    cameraBusy=true;
+    await stopCamera();
+    const scanned=code(value);
+    if(target==='item'){E('barcode').value=scanned;verifyBarcode()}
+    else{E('cargoCode').value=scanned;status('ШК грузоместа считан. Подтверди завершение.')}
+   },()=>{});
+ }catch(e){await stopCamera();status('Не удалось открыть камеру: '+e.message,true)}
+}
+window.addEventListener('pagehide',()=>{if(camera)stopCamera()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&camera)stopCamera()});
 function status(s,error=false){E('message').className=error?'error':'small';E('message').textContent=s}
 function vibrate(ok){try{if(navigator.vibrate)navigator.vibrate(ok?70:[120,70,120])}catch(e){}}
 function makeId(){return crypto.randomUUID?crypto.randomUUID(): 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]&15;return (c==='x'?r:(r&3|8)).toString(16)})}
@@ -105,6 +135,8 @@ function verifyBarcode(){
  E('quantity').max=item.remaining;
  status('Товар верный. Укажи фактическое количество и подтверди.');vibrate(true);E('quantity').focus();
 }
+E('cameraProduct').addEventListener('click',()=>toggleCamera('item'));
+E('cameraCargo').addEventListener('click',()=>toggleCamera('cargo'));
 E('barcode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();verifyBarcode()}});
 E('barcode').addEventListener('change',verifyBarcode);
 E('claimBtn').addEventListener('click',async()=>{
