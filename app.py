@@ -1413,19 +1413,31 @@ document.getElementById('barcode').addEventListener('keydown',e=>{
 
 async function loadWmsIdentity(){
   try{
-    const r=await fetch('/api/auth/me');
+    const r=await fetch('/api/auth/me',{cache:'no-store'});
     if(!r.ok){location.href='/login';return;}
     const d=await r.json();
+    const employeeId=d.employee.id;
+    const previousEmployee=localStorage.getItem('onix_employee_id');
+    // The one shared phone must not show a previous employee's receipt
+    // after an authorized QR handover. Normal browser close preserves it.
+    if(previousEmployee && previousEmployee!==employeeId){
+      localStorage.removeItem('receipt_id');
+      localStorage.removeItem('receipt_name');
+    }
+    localStorage.setItem('onix_employee_id',employeeId);
     document.getElementById('navIdentity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
-    await fetch('/api/operation/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation:'receiving'})});
-  }catch(e){}
+    const op=await fetch('/api/operation/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation:'receiving'})});
+    if(!op.ok)throw Error('Не удалось восстановить работу с приёмкой');
+    const savedId=localStorage.getItem('receipt_id')||'';
+    const savedName=localStorage.getItem('receipt_name')||'';
+    if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+  }catch(e){
+    showError('Не удалось восстановить рабочую приёмку. Проверь подключение к сети и обнови страницу.');
+  }
 }
 loadWmsIdentity();
 loadBootstrap();
 setTimeout(()=>fetch('/api/warmup',{method:'POST'}).catch(()=>{}),2500);
-const savedId=localStorage.getItem('receipt_id')||'';
-const savedName=localStorage.getItem('receipt_name')||'';
-if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
 </script>
 </body>
 </html>"""
