@@ -1195,6 +1195,7 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
   <a class="active" href="/fbs">🧺 Сборка</a>
   <a href="/move">↔ Перемещение</a>
   <a href="/replenishment" id="repLinkFbs">📦 Пополнение <span id="repCountFbs"></span></a>
+  <a href="/ozon-fbo">📦 Ozon FBO</a>
 </div>
 <script>
 (function(){
@@ -1685,6 +1686,7 @@ STATS_PAGE = """<!doctype html>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
    <a href="/manager/replenishment">📦 Пополнение</a>
+  <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
