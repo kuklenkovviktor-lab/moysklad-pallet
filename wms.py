@@ -513,6 +513,10 @@ def get_session_employee():
     if not row:
         session.clear()
         return None
+    # Upgrade legacy browser-only sessions on first valid request as well as
+    # newly scanned sessions. A page reload/phone restart must retain the badge.
+    if not session.permanent:
+        session.permanent = True
     return {
         "id": row[0],
         "name": row[1],
@@ -2226,6 +2230,15 @@ def normalize_badge_input(value):
 @wms_bp.post("/api/auth/login")
 def auth_login():
     ensure_db()
+    # One shared terminal, one employee. No badge can overwrite an occupied
+    # session, even by calling the JSON endpoint directly.
+    current = get_session_employee()
+    if current:
+        return jsonify(
+            error="Терминал занят: " + current["name"] + ". Для смены сотрудника нужен QR старшего.",
+            occupied=True,
+            employee=current["name"],
+        ), 409
     data = request.get_json(force=True)
     badge_code = normalize_badge_input(data.get("badge_code", ""))
     if not badge_code:
@@ -2271,6 +2284,7 @@ def auth_login():
 
     session.clear()
     session["employee_id"] = row[0]
+    session.permanent = True
     shift_id, _ = ensure_active_shift(row[0], "other")
     log_event(row[0], "auth", "login", shift_id=shift_id, object_code=badge_code, result="ok")
     return jsonify(ok=True, shift_id=shift_id, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
