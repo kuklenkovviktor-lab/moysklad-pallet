@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import tempfile
+from datetime import timedelta
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
@@ -40,6 +41,10 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    # Rolling persistent employee cookie: closing Safari/PWA must never log out a TSD.
+    # The official employee logout still clears the cookie after supervisor QR.
+    PERMANENT_SESSION_LIFETIME=timedelta(days=3650),
+    SESSION_REFRESH_EACH_REQUEST=True,
 )
 app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
