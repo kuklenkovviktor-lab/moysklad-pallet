@@ -36,7 +36,8 @@ summary{cursor:pointer;font-weight:750}#warnings{margin-top:10px}
 @media(max-width:650px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.controls{align-items:stretch;flex-direction:column}}
 </style></head><body><main>
 <a href="/manager">← Панель руководителя</a><h1>📦 Ozon FBO</h1>
-<p class="small">Первый этап: импорт Excel, проверка позиций и формирование плановых заданий по грузоместам. Фактическая сборка и списания пока не выполняются.</p>
+<p><a href="/manager/ozon-fbo/picking">📊 Открыть монитор фактической сборки →</a></p>
+<p class="small">Импорт Excel и создание плана грузомест. Фактическая сборка подтверждается на отдельном терминале сотрудника; остатки МойСклад не изменяются.</p>
 <section class="card"><h2>Загрузить поставку</h2>
 <div class="controls"><label>Название поставки <input id="title" maxlength="140" placeholder="Стекло · 17.10"></label>
 <label>Excel-файл <input id="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
@@ -132,7 +133,8 @@ h1{margin:14px 0}h2{font-size:19px}a{color:#48647a}.small{font-size:13px;color:#
 .item{border-top:1px solid #dce5eb;padding:11px 0}.item:first-child{border:0}.item summary{cursor:pointer;font-weight:750}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px;text-align:left;border-bottom:1px solid #dfe7ec}
 </style></head><body><main><a href="/fbs">← Рабочая панель</a>
-<h1>📦 Ozon FBO</h1><p class="small">Плановые задания по грузоместам. Сканирование и фактическое подтверждение сборки будут добавлены отдельным этапом.</p>
+<h1>📦 Ozon FBO</h1><p class="small">Выбери грузоместо и начни сборку со сканером. Прогресс сохраняется на сервере.</p>
+<p><a href="/ozon-fbo/pick">▶ Продолжить мою сборку</a></p>
 <div id="list">Загрузка…</div>
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -146,7 +148,7 @@ async function load(){
    const res=await fetch('/api/ozon-fbo/supplies/'+encodeURIComponent(s.id),{cache:'no-store'});
    const data=await res.json();if(!res.ok)throw Error(data.error||'Ошибка');
    document.getElementById('s-'+s.id).innerHTML=data.cargo.map(p=>
-    '<details class="item"><summary>'+esc(p.destination)+' · '+esc(p.label)+' · '+esc(p.qty)+' шт.</summary><div class="small">ШК грузоместа: '+esc(p.barcode)+'</div><table><thead><tr><th>Артикул</th><th>ШК</th><th>План</th></tr></thead><tbody>'+
+    '<details class="item"><summary>'+esc(p.destination)+' · '+esc(p.label)+' · '+esc(p.qty)+' шт.</summary><div class="small">ШК грузоместа: '+esc(p.barcode)+'</div><p><a href="/ozon-fbo/pick?cargo_id='+encodeURIComponent(p.id)+'">▶ Открыть сборку грузоместа →</a></p><table><thead><tr><th>Артикул</th><th>ШК</th><th>План</th></tr></thead><tbody>'+
     p.items.map(i=>'<tr><td>'+esc(i.article)+'</td><td>'+esc(i.barcode)+'</td><td>'+esc(i.qty)+'</td></tr>').join('')+'</tbody></table></details>').join('');
   }catch(e){document.getElementById('s-'+s.id).textContent=e.message}
  }
