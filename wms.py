@@ -1511,6 +1511,8 @@ async function finish(code){
   localStorage.removeItem('receipt_id');
   localStorage.removeItem('receipt_name');
   localStorage.removeItem('onix_employee_id');
+  localStorage.removeItem('onix_fbo_pending_scan_v1');
+  localStorage.removeItem('onix_fbo_pending_undo_v1');
   document.getElementById('result').innerHTML='<div class="ok">Смена завершена. TSD свободен.</div>';
   setTimeout(()=>location.href='/login',500);
  }finally{busy=false}
