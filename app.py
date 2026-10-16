@@ -24,6 +24,7 @@ from wms import (
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from ozon_fbo import ozon_fbo_bp
+from ozon_fbo_picking import fbo_picking_bp
 from storage_backup import (
     restore_if_needed,
     start_worker as start_backup_worker,
@@ -51,6 +52,7 @@ app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
 app.register_blueprint(ozon_fbo_bp)
+app.register_blueprint(fbo_picking_bp)
 
 _WMS_READY = threading.Event()
 _WMS_INITIALIZER_STARTED = False
@@ -280,6 +282,7 @@ def require_employee_login():
         "/api/manager/replenishment/locations",
         "/manager/replenishment/label",
         "/manager/ozon-fbo",
+        "/manager/ozon-fbo/picking",
         "/api/manager/ozon-fbo/preview",
         "/api/manager/ozon-fbo/import",
         "/api/manager/ozon-fbo/supplies",
@@ -306,7 +309,7 @@ def require_employee_login():
     }
     # Desktop manager routes are authenticated only by the dedicated
     # manager password/session. Do not fall through to employee badge auth.
-    if path in manager_paths or path.startswith("/api/manager/ozon-fbo/supplies/"):
+    if path in manager_paths or path.startswith("/api/manager/ozon-fbo/"):
         if session.get("manager_web") is True:
             return None
         if path.startswith("/api/"):
