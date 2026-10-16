@@ -114,6 +114,7 @@ def parse_ozon_xlsx(blob):
         warnings = []
         errors = []
         seen = {}
+        barcode_articles = {}
         total_lines = 0
         for sheet in wb.findall(".//" + MAIN + "sheets/" + MAIN + "sheet"):
             sheet_name = (sheet.get("name") or "").strip()
@@ -163,6 +164,14 @@ def parse_ozon_xlsx(blob):
                     except ValueError as exc:
                         errors.append(f"{location}: {exc}")
                         continue
+                    article_for_barcode = barcode_articles.get(barcode)
+                    if article_for_barcode and article_for_barcode.casefold() != article.casefold():
+                        errors.append(
+                            f"{location}: ШК товара {barcode} встречается с разными артикулами: "
+                            f"{article_for_barcode} и {article}. Уточни исходный Excel."
+                        )
+                        continue
+                    barcode_articles[barcode] = article
                     key = (gm, barcode, article.casefold())
                     old = seen.get(key)
                     if old:
