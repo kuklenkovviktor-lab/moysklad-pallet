@@ -1290,6 +1290,7 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
 let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
+let fbsFocusInitialized=false,hidScanBuffer='',hidScanLastAt=0,hidScanResetTimer=null;
 
 function beep(ok=true){
  try{
@@ -1356,6 +1357,8 @@ async function refresh(){
  const r=await fetch('/api/fbs/stats?shift_id='+encodeURIComponent(shiftId)),d=await r.json();
  if(!r.ok){localStorage.removeItem('fbs_shift_id');shiftId='';return}
  document.getElementById('startCard').classList.add('hidden');document.getElementById('work').classList.remove('hidden');
+ // The first screen must be ready for HID scanning without a manual tap.
+ if(!fbsFocusInitialized){fbsFocusInitialized=true;setTimeout(focusFbsInput,100)}
  document.getElementById('employeeName').textContent=d.employee;
  document.getElementById('orders').textContent=d.orders;document.getElementById('target').textContent=d.target;
  document.getElementById('pickTime').textContent=Math.round((d.picking_seconds||0)/60)+' мин';
@@ -1419,6 +1422,44 @@ async function handleScan(code){
   setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},220);
  }
 }
+// Android HID scanners act as hardware keyboards. Keep focus when possible, but
+// also accept a complete scan if the operator has tapped elsewhere on the page.
+function focusFbsInput(){
+ if(!shiftId||document.hidden)return;
+ const work=document.getElementById('work'),overlay=document.getElementById('tsdError'),input=document.getElementById('barcode');
+ if(!work||work.classList.contains('hidden')||overlay.classList.contains('open')||!input)return;
+ const active=document.activeElement;
+ if(active&&active!==input&&['INPUT','TEXTAREA','SELECT'].includes(active.tagName))return;
+ try{input.focus({preventScroll:true})}catch(e){input.focus()}
+}
+document.addEventListener('keydown',e=>{
+ const input=document.getElementById('barcode'),work=document.getElementById('work');
+ if(!shiftId||document.hidden||!work||work.classList.contains('hidden')||document.getElementById('tsdError').classList.contains('open'))return;
+ // Existing focused-input handler processes the scan: never submit it twice.
+ if(document.activeElement===input)return;
+ const target=e.target;
+ if(target&&(target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(target.tagName)))return;
+ if(e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.key==='Enter'||e.key==='Tab'){
+  if(hidScanBuffer.length>=4){
+   e.preventDefault();
+   const code=hidScanBuffer;
+   hidScanBuffer='';
+   clearTimeout(hidScanResetTimer);
+   handleScan(code);
+  }else{hidScanBuffer=''}
+  return;
+ }
+ if(e.key.length!==1)return;
+ const now=Date.now();
+ if(now-hidScanLastAt>350)hidScanBuffer='';
+ hidScanLastAt=now;
+ if(hidScanBuffer.length<256)hidScanBuffer+=e.key;
+ clearTimeout(hidScanResetTimer);
+ hidScanResetTimer=setTimeout(()=>{hidScanBuffer=''},900);
+});
+window.addEventListener('pageshow',()=>setTimeout(focusFbsInput,120));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(focusFbsInput,120)});
 function manualScan(){const el=document.getElementById('barcode');const v=el.value;el.value='';handleScan(v)}
 document.getElementById('barcode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();manualScan()}});
 function cameraScan(code){
