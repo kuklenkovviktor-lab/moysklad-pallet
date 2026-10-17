@@ -1,7 +1,7 @@
 """ONIX WMS: independent replenishment task queue. No inventory or scanning mutations."""
 import uuid
 from flask import Blueprint, jsonify, redirect, request
-from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, sql
+from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 replenishment_bp = Blueprint("replenishment", __name__)
 
@@ -177,6 +177,16 @@ async function getTasks(){
    (v.note?'<div class="small">'+esc(v.note)+'</div>':'')+'</div></div>'
  }).join(''):'<p class="small">Событий пока нет.</p>';
 }
+async function readReplenishmentResponse(response){
+ const type=response.headers.get('content-type')||'';
+ if(!type.toLowerCase().includes('application/json')){
+  if(response.status===401||response.status===403)return {error:'Нет доступа. Проверь вход руководителя.'};
+  if(response.redirected)return {error:'Сессия завершилась. Войди заново и проверь, не было ли создано задание.'};
+  return {error:'Сервер вернул не JSON (HTTP '+response.status+'). Перед повтором проверь список задач.'};
+ }
+ try{return await response.json()}
+ catch(e){throw Error('Некорректный ответ сервера. Перед повтором проверь список задач.')}
+}
 document.getElementById('newTask').addEventListener('submit',async function(e){
  e.preventDefault();const b=document.getElementById('createBtn'),m=document.getElementById('msg');
  b.disabled=true;m.textContent='';
@@ -187,8 +197,8 @@ document.getElementById('newTask').addEventListener('submit',async function(e){
   const qty=f.get('planned_qty');
   const r=await fetch('/api/manager/replenishment/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
    article:f.get('article'),product_id:f.get('product_id'),line:f.get('line'),planned_qty:qty?Number(qty):null,priority:f.get('priority'),note:f.get('note')})});
-  const d=await r.json();
-  if(!r.ok)throw Error(d.error||'Ошибка создания');
+  const d=await readReplenishmentResponse(r);
+  if(!r.ok||d.error)throw Error(d.error||'Ошибка создания');
   this.reset();document.getElementById('productSearch').value='';document.getElementById('productMatches').innerHTML='';
   m.className='ok';m.textContent='Задача добавлена';await getTasks();
  }catch(e){m.className='bad';m.textContent=e.message}finally{b.disabled=false}
@@ -203,7 +213,7 @@ async function change(e){
  b.disabled=true;
  try{
   const r=await fetch('/api/manager/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id,action:action,note:note})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  const d=await readReplenishmentResponse(r);if(!r.ok||d.error)throw Error(d.error||'Ошибка');
   await getTasks();
  }catch(e){alert(e.message);b.disabled=false}
 }
