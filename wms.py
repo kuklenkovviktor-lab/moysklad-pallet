@@ -1120,82 +1120,167 @@ FBS_PAGE = """<!doctype html>
 <title>FBS · Выработка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-:root{--bg:#e9eef3;--panel:#f7f9fb;--panel2:#eef3f6;--text:#25313d;--muted:#6b7785;--line:#d7e0e7;--accent:#48647a;--accent2:#dde8ef}
+:root{--bg:#12202e;--panel:#1f3548;--panel2:#233d52;--text:#f2f7fc;--muted:#b9cbda;--line:#345067;--accent:#36546e;--accent2:#29465d}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text)}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100dvh;-webkit-text-size-adjust:100%}
-.wrap{width:100%;max-width:1100px;margin:auto;padding:10px}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%;min-height:100dvh}
+.wrap{width:100%;max-width:1100px;margin:auto;padding:max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
 .hidden{display:none!important}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
-.nav{display:flex;gap:6px;margin-bottom:6px}
-.nav a{flex:1;display:flex;align-items:center;justify-content:center;min-height:34px;padding:6px 8px;border-radius:9px;background:var(--accent2);color:#314657;border:1px solid #cbd9e2;text-decoration:none;font-size:11px;font-weight:800}
-.nav a.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-#topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;padding:6px 9px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
-#topbar .who{font-size:11px;font-weight:800}
-#topbar a{font-size:10px;color:#536f83;text-decoration:none;font-weight:800}
-#startCard{max-width:520px;margin:20px auto;padding:16px}
-#startCard h2{margin:0 0 5px;font-size:18px}
-#startCard .muted{font-size:11px;color:var(--muted)}
-button{width:100%;border:1px solid transparent;border-radius:9px;background:var(--accent);color:#fff;font-weight:850;padding:10px;font-size:12px;cursor:pointer;margin-top:6px}
-button.secondary{background:var(--accent2);color:var(--text);border-color:#cbd9e2}
-button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:inset 0 0 0 1px #8ca7b9}
-#work{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(230px,.8fr);gap:6px}
-#scanCard{display:flex;flex-direction:column;min-height:0}
-.scan-stage{background:var(--panel2);border:1px solid #dce5eb;border-radius:11px;padding:12px;text-align:center}
-.scan-stage .label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-#scanStage{font-size:28px;font-weight:900;line-height:1.05;margin-top:3px}
-#productInfo{font-size:10px;color:var(--muted);margin-top:5px;min-height:24px;line-height:1.25}
-#reader{margin-top:6px;border-radius:10px;overflow:hidden;max-height:150px}
-#barcode{width:100%;margin-top:7px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:11px;outline:none}
-#result{margin-top:6px}
-.ok,.err{padding:7px;border-radius:8px;font-size:10px}
-.ok{background:#e1f1e6;color:#2f6b45}.err{background:#f6e4e4;color:#8a4343}
+.card{border-radius:9px;background:var(--panel)}
+#topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;min-height:22px;color:#d4e2ee;font-size:11px;font-weight:750}
+#topbar .brand{letter-spacing:.02em}
+#topbar .who{text-align:right;text-transform:uppercase}
+#startCard{max-width:480px;margin:14vh auto 0;padding:20px}
+#startCard h2{font-size:19px;margin:0 0 5px}
+#startCard .muted{font-size:13px;color:var(--muted)}
+button{font:inherit;cursor:pointer;border:0;border-radius:8px;background:var(--accent);color:#fff;padding:12px;font-weight:750}
+button.secondary{background:var(--accent2);color:#eef5fa}
+button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
+#startCard button{width:100%;margin-top:14px}
+#work{display:flex;flex-direction:column;gap:10px}
+#scanCard{position:relative;display:flex;flex-direction:column;min-height:0}
+.scan-stage{min-height:120px;height:clamp(120px,37dvh,260px);padding:12px 14px;border-radius:8px;background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px}
+.scan-icon{width:36px;height:36px;color:#8bd3f0;flex:none}
+.scan-stage .label{display:none}
+#scanStage{font-size:clamp(19px,3.9vw,29px);font-weight:750;line-height:1.13;letter-spacing:-.015em}
+#productInfo{font-size:clamp(11px,1.75vw,14px);color:var(--muted);line-height:1.3;max-width:95%;overflow-wrap:anywhere}
+#reader{margin-top:7px;border-radius:8px;overflow:hidden;max-height:150px}
+#scanCard #resetProduct{position:absolute;right:8px;top:7px;width:auto;max-width:115px;padding:5px 7px;font-size:10px;background:#35546c;color:white;z-index:2}
+.manual-entry{position:absolute;left:4px;top:4px;pointer-events:none;height:0}
+#barcode{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;outline:none}
+#scanButton{display:none}
+.manual-entry.open{position:static;height:auto;display:flex;gap:7px;pointer-events:auto;margin-top:8px}
+.manual-entry.open #barcode{position:static;opacity:1;width:100%;height:40px;padding:9px;background:#eef4f8;color:#203242;border:1px solid #91afc2;border-radius:8px;min-width:0}
+.manual-entry.open #scanButton{display:block;flex:none;min-width:118px;padding:8px;font-size:11px}
+#result:empty{display:none}
+#result{margin-top:6px;font-size:11px}
+.ok,.err{border-radius:7px;padding:6px 9px;overflow-wrap:anywhere}
+.ok{background:#1d463a;color:#b5ebcd}.err{background:#593033;color:#ffcbca}
+#side{display:flex;flex-direction:column;gap:10px}
+.stats-card{background:transparent}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{min-width:0;border-radius:8px;background:var(--panel);padding:10px;text-align:center;min-height:70px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.stat.orders{grid-column:auto}
+.stat .small{font-size:11px;color:var(--muted)}
+.stat .big{font-size:23px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat.time-meta,.goal,.progress,#remaining,#employeeName{display:none}
+.activity-switch{background:transparent}
+#activityToggle{width:100%;min-height:46px;background:#2b455b;font-size:14px;margin:0}
+#activityMenu{margin-top:8px;padding:10px;background:var(--panel);border-radius:9px}
+.activities{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.activities button{width:100%;min-height:40px;font-size:12px;padding:8px;margin:0}
+#backToPicking{grid-column:1/-1;background:#345c52;color:#ebfff6}
+.utility-grid{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--line);padding-top:9px;margin-top:2px}
+.utility-grid button{background:#36556f}
+.nav{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;border-top:1px solid var(--line);padding-top:9px}
+.nav a{display:flex;align-items:center;justify-content:center;min-height:35px;border-radius:7px;text-decoration:none;background:#2a455b;color:#dfeef8;text-align:center;font-size:11px;font-weight:650}
+.nav a.active{background:#3d6581;color:#fff}
+.exit-btn{grid-column:1/-1;display:block;text-align:center;background:#3b3643;color:#f7e1e1;border-radius:7px;text-decoration:none;padding:10px;font-size:12px}
 .tsd-error{position:fixed;inset:0;z-index:5000;background:#b42318;color:#fff;display:none;align-items:center;justify-content:center;padding:20px}
-.tsd-error.open{display:flex}.tsd-error-box{width:min(720px,94vw);text-align:center}.tsd-error-icon{font-size:58px;font-weight:900;line-height:1}.tsd-error-title{font-size:34px;font-weight:950;margin-top:8px}.tsd-error-text{font-size:18px;font-weight:750;margin-top:10px;line-height:1.3}.tsd-error button{margin:18px auto 0;max-width:260px;background:#fff;color:#8a1f17;border:0;font-size:18px;padding:12px}
-#side{display:flex;flex-direction:column;gap:6px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:5px}
-.stat{background:var(--panel2);border:1px solid #dde5eb;border-radius:9px;padding:7px}
-.stat.orders{grid-column:1/-1}
-.stat .small{font-size:8px;color:var(--muted)}
-.stat .big{font-size:20px;font-weight:900;line-height:1.05}
-.progress{height:6px;background:#dbe3e9;border-radius:999px;overflow:hidden;margin:5px 0}.progress>div{height:100%;background:#6f8ca1;width:0%}
-#remaining{font-size:8px;color:var(--muted)}
-#employeeName{display:none}
-.ops-title{font-size:9px;color:var(--muted);margin:1px 0 3px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
-.activities{display:grid;grid-template-columns:1fr 1fr;gap:4px}
-.activities button{margin:0;padding:7px 4px;font-size:10px;min-height:32px}
-.activity-switch{position:relative}
-#activityMenu{margin-top:5px}
-#activityMenu.hidden{display:none!important}
-#activityToggle{margin:0}
-#backToPicking{grid-column:1/-1;background:#dfeaf1;color:#25313d;border:1px solid #b9cbd8}
-.exit-btn{margin-top:auto}
+.tsd-error.open{display:flex}
+.tsd-error-box{width:min(720px,94vw);text-align:center}
+.tsd-error-icon{font-size:58px;font-weight:900;line-height:1}
+.tsd-error-title{font-size:34px;font-weight:950;margin-top:8px}
+.tsd-error-text{font-size:18px;font-weight:750;margin-top:10px;line-height:1.3}
+.tsd-error button{margin:18px auto 0;max-width:260px;background:#fff;color:#8a1f17;padding:12px}
 @media (orientation:landscape) and (max-height:600px){
- body{overflow:hidden}
- .wrap{max-width:none;height:100dvh;overflow:hidden;padding:max(4px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left))}
- .nav{margin-bottom:4px}.nav a{min-height:28px;padding:4px 6px;font-size:9px}
- #topbar{margin-bottom:4px;padding:4px 7px;min-height:28px}#topbar .who{font-size:9px}#topbar a{font-size:9px}
- #work{height:calc(100dvh - 68px);grid-template-columns:minmax(0,1.9fr) minmax(210px,.72fr);gap:4px}
- .card{padding:6px;border-radius:9px}
- .scan-stage{padding:7px}.scan-stage .label{font-size:7px}#scanStage{font-size:23px}#productInfo{font-size:8px;min-height:18px;margin-top:3px}
- #scanCard button{padding:6px;font-size:9px;margin-top:4px}
- #reader{max-height:105px;margin-top:4px}
- #barcode{padding:5px;font-size:9px;margin-top:4px}
- .ok,.err{padding:5px;font-size:8px}
- #side{gap:4px}.stats{gap:3px}.stat{padding:5px}.stat .small{font-size:7px}.stat .big{font-size:17px}.progress{height:5px;margin:3px 0}#remaining{font-size:7px}
- .ops-title{font-size:7px;margin:0 0 2px}.activities{gap:3px}.activities button{padding:5px 2px;font-size:8px;min-height:25px}
- .exit-btn{padding:6px!important;font-size:9px!important}
+ .wrap{padding-top:max(4px,env(safe-area-inset-top));padding-bottom:max(4px,env(safe-area-inset-bottom))}
+ #topbar{min-height:22px;margin-bottom:7px;font-size:10px}
+ #work,#side{gap:7px}
+ .scan-stage{height:clamp(115px,35dvh,180px);min-height:115px;padding:7px 10px;gap:2px}
+ .scan-icon{width:28px;height:28px}
+ #scanStage{font-size:clamp(19px,3.4vw,24px)}
+ #productInfo{font-size:11px}
+ .stat{min-height:61px;padding:7px}
+ .stat .small{font-size:10px}.stat .big{font-size:20px}
+ #activityToggle{min-height:43px}
+ #activityMenu{max-height:calc(100dvh - 65px);overflow:auto}
+}
+@media (max-width:390px){
+ .wrap{padding-left:7px;padding-right:7px}
+ #scanStage{font-size:19px}
+ .manual-entry.open{flex-wrap:wrap}
+ .manual-entry.open #scanButton{width:100%}
 }
 </style>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
 <body>
 <div class="wrap">
-<div class="nav">
-  <a href="/">📦 Приёмка</a>
-  <a class="active" href="/fbs">🧺 Сборка</a>
-  <a href="/move">↔ Перемещение</a>
-  <a href="/replenishment" id="repLinkFbs">📦 Пополнение <span id="repCountFbs"></span></a>
-  <a href="/ozon-fbo">📦 Ozon FBO</a>
+
+
+<div id="topbar">
+  <div class="brand">ONIX WMS · FBS</div>
+  <div class="who" id="identity"></div>
+</div>
+
+<div class="card" id="startCard">
+  <h2 id="startName">Сотрудник</h2>
+  <div class="muted">Нажми кнопку и начинай работу.</div>
+  <button onclick="startShift()">Начать смену</button>
+</div>
+
+<div id="work" class="hidden">
+  <div class="card" id="scanCard">
+    <div class="scan-stage" id="scanStageBox">
+      <svg class="scan-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <path d="M12 5H7a2 2 0 0 0-2 2v5M24 5h5a2 2 0 0 1 2 2v5M5 24v5a2 2 0 0 0 2 2h5M31 24v5a2 2 0 0 1-2 2h-5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <path d="M12 18h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div class="label">Сканируй сейчас</div>
+      <div id="scanStage">СКАНИРУЙ ТОВАР</div>
+      <div id="productInfo">Ожидание штрихкода</div>
+    </div>
+    <button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сброс товара</button>
+    <div id="reader" class="hidden"></div>
+    <div class="manual-entry" id="manualEntry">
+      <input id="barcode" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none" placeholder="Сканируй ШК">
+      <button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
+    </div>
+    <div id="result" role="status" aria-live="polite"></div>
+  </div>
+  <div id="side">
+    <div class="card stats-card">
+      <div id="employeeName">Сотрудник</div>
+      <div class="stats">
+        <div class="stat orders">
+          <div class="small">Собрано</div>
+          <div class="big"><span id="orders">0</span><span class="goal"> / <span id="target">1600</span></span></div>
+          <div class="progress"><div id="bar"></div></div>
+          <div id="remaining"></div>
+        </div>
+        <div class="stat">
+          <div class="small">Заказов/час</div>
+          <div class="big" id="speed">0</div>
+        </div>
+        <div class="stat time-meta"><span id="pickTime">0 мин</span></div>
+      </div>
+    </div>
+    <div class="card activity-switch">
+      <button class="secondary" id="activityToggle" onclick="toggleActivityMenu()">☰ &nbsp; Другие операции</button>
+      <div class="activities hidden" id="activityMenu">
+        <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
+        <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
+        <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
+        <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
+        <button data-a="downtime" onclick="activity('downtime')">Простой</button>
+        <button data-a="other" onclick="activity('other')">Другое</button>
+        <button id="backToPicking" class="hidden" onclick="activity('picking')">Вернуться к сборке</button>
+        <div class="utility-grid">
+          <button class="secondary" type="button" onclick="toggleManualEntry()">⌨ Ручной ввод</button>
+          <button class="secondary" type="button" onclick="toggleCamera()">📷 Камера</button>
+        </div>
+        <div class="nav">
+          <a href="/">📦 Приёмка</a>
+          <a class="active" href="/fbs">🧺 Сборка</a>
+          <a href="/move">↔ Перемещение</a>
+          <a href="/replenishment">📦 Пополнение <span id="repCountFbs"></span></a>
+          <a href="/ozon-fbo">📦 Ozon FBO</a>
+        </div>
+        <a class="exit-btn" href="/exit">🚪 Завершить смену</a>
+      </div>
+    </div>
+  </div>
+</div>
 </div>
 <script>
 (function(){
@@ -1214,71 +1299,6 @@ button.active{background:#d3e3ed;color:#243b4c;border-color:#8ca7b9;box-shadow:i
  update();setInterval(update,30000);
 })();
 </script>
-
-<div id="topbar">
-  <div class="who"><span id="identity"></span></div>
-  <a href="/exit">🚪 Завершить смену</a>
-</div>
-
-<div class="card" id="startCard">
-  <h2 id="startName">Сотрудник</h2>
-  <div class="muted">Нажми кнопку и начинай работу.</div>
-  <button onclick="startShift()">Начать смену</button>
-</div>
-
-<div id="work" class="hidden">
-  <div class="card" id="scanCard">
-    <div class="scan-stage" id="scanStageBox">
-      <div class="label">Сканируй сейчас</div>
-      <div id="scanStage">1. ТОВАР</div>
-      <div id="productInfo">После товара система попросит ШК WB.</div>
-    </div>
-
-    <button onclick="toggleCamera()">📷 Камера</button>
-    <div id="reader" class="hidden"></div>
-
-    <input id="barcode" autocomplete="off" inputmode="text" placeholder="Сканируй ШК">
-    <button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
-    <button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сбросить товар</button>
-    <div id="result"></div>
-  </div>
-
-  <div id="side">
-    <div class="card">
-      <div id="employeeName">Сотрудник</div>
-      <div class="stats">
-        <div class="stat orders">
-          <div class="small">Заказы</div>
-          <div class="big"><span id="orders">0</span> / <span id="target">1600</span></div>
-          <div class="progress"><div id="bar"></div></div>
-          <div id="remaining"></div>
-        </div>
-        <div class="stat">
-          <div class="small">Заказов/час</div>
-          <div class="big" id="speed">0</div>
-        </div>
-        <div class="stat">
-          <div class="small">Сборка</div>
-          <div class="big" id="pickTime">0 мин</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card activity-switch">
-      <button class="secondary" id="activityToggle" onclick="toggleActivityMenu()">Другая работа</button>
-      <div class="activities hidden" id="activityMenu">
-        <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
-        <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
-        <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
-        <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
-        <button data-a="downtime" onclick="activity('downtime')">Простой</button>
-        <button data-a="other" onclick="activity('other')">Другое</button>
-        <button id="backToPicking" class="hidden" onclick="activity('picking')">Вернуться к сборке</button>
-      </div>
-    </div>
-  </div>
-</div>
-</div>
 <div id="tsdError" class="tsd-error" onclick="closeTsdError()">
  <div class="tsd-error-box" onclick="event.stopPropagation()">
   <div class="tsd-error-icon">!</div>
@@ -1318,7 +1338,7 @@ function closeTsdError(){
 async function loadIdentity(){
  const r=await fetch('/api/auth/me'),d=await r.json();
  if(!r.ok){location.href='/login';return}
- document.getElementById('identity').textContent=d.employee.name+(d.employee.badge_number?' · бейдж №'+d.employee.badge_number:'');
+ document.getElementById('identity').textContent=d.employee.name;
  document.getElementById('startName').textContent=d.employee.name;
  if(d.employee.role==='manager')document.querySelectorAll('.manager-only').forEach(x=>x.classList.remove('hidden'));
  // The server owns the shift. Browser localStorage is only a convenience;
@@ -1366,7 +1386,7 @@ async function refresh(){
  document.getElementById('bar').style.width=Math.min(d.percent,100)+'%';
  document.getElementById('remaining').textContent=d.target_done?'✅ Минималка выполнена':'До 1600: '+d.remaining;
  document.querySelectorAll('[data-a]').forEach(b=>b.classList.toggle('active',b.dataset.a===d.activity));
- const labels={picking:'Другая работа',replenishment:'Сейчас: Пополнение',shipping:'Сейчас: Отгрузка',pallets:'Сейчас: Палеты',kgt:'Сейчас: КГТ',downtime:'Сейчас: Простой',other:'Сейчас: Другое'};
+ const labels={picking:'☰  Другие операции',replenishment:'☰  Сейчас: Пополнение',shipping:'☰  Сейчас: Отгрузка',pallets:'☰  Сейчас: Палеты',kgt:'☰  Сейчас: КГТ',downtime:'☰  Сейчас: Простой',other:'☰  Сейчас: Другое'};
  const toggle=document.getElementById('activityToggle');
  if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
  const back=document.getElementById('backToPicking');
@@ -1376,13 +1396,13 @@ function updateScanStage(){
  const input=document.getElementById('barcode');
  const reset=document.getElementById('resetProduct');
  if(pendingProduct){
-  document.getElementById('scanStage').textContent='2. ШК WB';
+  document.getElementById('scanStage').textContent='СКАНИРУЙ ШК WB';
   document.getElementById('productInfo').innerHTML='<b>'+esc(pendingProduct.article||'Без артикула')+'</b> · '+esc(pendingProduct.name||'Товар')+'<br>ШК товара: '+esc(pendingProduct.barcode);
   input.placeholder='Теперь сканируй ШК WB';
   reset.classList.remove('hidden');
  }else{
-  document.getElementById('scanStage').textContent='1. ТОВАР';
-  document.getElementById('productInfo').textContent='После товара система попросит ШК WB.';
+  document.getElementById('scanStage').textContent='СКАНИРУЙ ТОВАР';
+  document.getElementById('productInfo').textContent='Ожидание штрихкода';
   input.placeholder='Сканируй ШК товара';
   reset.classList.add('hidden');
  }
@@ -1471,6 +1491,16 @@ function cameraScan(code){
 function toggleActivityMenu(){
  const menu=document.getElementById('activityMenu');
  if(menu)menu.classList.toggle('hidden');
+}
+function toggleManualEntry(){
+ const area=document.getElementById('manualEntry');
+ const input=document.getElementById('barcode');
+ const open=area.classList.toggle('open');
+ input.setAttribute('inputmode',open?'text':'none');
+ input.value='';
+ document.getElementById('activityMenu').classList.add('hidden');
+ if(open)setTimeout(()=>input.focus(),60);
+ else setTimeout(focusFbsInput,60);
 }
 async function activity(type){
  const r=await fetch('/api/fbs/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shift_id:shiftId,activity_type:type})});
