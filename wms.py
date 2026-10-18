@@ -1129,7 +1129,11 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text
 .card{border-radius:9px;background:var(--panel)}
 #topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;min-height:22px;color:#d4e2ee;font-size:11px;font-weight:750}
 #topbar .brand{letter-spacing:.02em}
+#topbar .top-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
 #topbar .who{text-align:right;text-transform:uppercase}
+#topbar .mini-earnings{white-space:nowrap;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums;color:#e8f5ff}
+#topbar .mini-earnings .mini-label{font-size:9px;font-weight:600;color:var(--muted);margin-right:4px}
+#topbar .mini-earnings .mini-note{font-size:8px;font-weight:500;color:var(--muted);margin-left:2px}
 #startCard{max-width:480px;margin:14vh auto 0;padding:20px}
 #startCard h2{font-size:19px;margin:0 0 5px}
 #startCard .muted{font-size:13px;color:var(--muted)}
@@ -1210,7 +1214,10 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 
 <div id="topbar">
   <div class="brand">ONIX WMS · FBS</div>
-  <div class="who" id="identity"></div>
+  <div class="top-right">
+    <div class="who" id="identity"></div>
+    <div class="mini-earnings hidden" id="miniEarnings"><span class="mini-label">Выработка</span><span id="miniOrders">0</span> / <span id="miniEarned">0 ₽</span><span class="mini-note">расч.</span></div>
+  </div>
 </div>
 
 <div class="card" id="startCard">
@@ -1239,22 +1246,6 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
     <div id="result" role="status" aria-live="polite"></div>
   </div>
   <div id="side">
-    <div class="card stats-card">
-      <div id="employeeName">Сотрудник</div>
-      <div class="stats">
-        <div class="stat orders">
-          <div class="small">Собрано</div>
-          <div class="big"><span id="orders">0</span><span class="goal"> / <span id="target">1600</span></span></div>
-          <div class="progress"><div id="bar"></div></div>
-          <div id="remaining"></div>
-        </div>
-        <div class="stat">
-          <div class="small">Заказов/час</div>
-          <div class="big" id="speed">0</div>
-        </div>
-        <div class="stat time-meta"><span id="pickTime">0 мин</span></div>
-      </div>
-    </div>
     <div class="card activity-switch">
       <button class="secondary" id="activityToggle" onclick="toggleActivityMenu()">☰ &nbsp; Другие операции</button>
       <div class="activities hidden" id="activityMenu">
@@ -1379,12 +1370,9 @@ async function refresh(){
  document.getElementById('startCard').classList.add('hidden');document.getElementById('work').classList.remove('hidden');
  // The first screen must be ready for HID scanning without a manual tap.
  if(!fbsFocusInitialized){fbsFocusInitialized=true;setTimeout(focusFbsInput,100)}
- document.getElementById('employeeName').textContent=d.employee;
- document.getElementById('orders').textContent=d.orders;document.getElementById('target').textContent=d.target;
- document.getElementById('pickTime').textContent=Math.round((d.picking_seconds||0)/60)+' мин';
- document.getElementById('speed').textContent=d.orders_per_hour;
- document.getElementById('bar').style.width=Math.min(d.percent,100)+'%';
- document.getElementById('remaining').textContent=d.target_done?'✅ Минималка выполнена':'До 1600: '+d.remaining;
+ document.getElementById('miniOrders').textContent=Number(d.orders||0).toLocaleString('ru-RU');
+ document.getElementById('miniEarned').textContent=Number(d.earned||0).toLocaleString('ru-RU',{maximumFractionDigits:2})+' ₽';
+ document.getElementById('miniEarnings').classList.remove('hidden');
  document.querySelectorAll('[data-a]').forEach(b=>b.classList.toggle('active',b.dataset.a===d.activity));
  const labels={picking:'☰  Другие операции',replenishment:'☰  Сейчас: Пополнение',shipping:'☰  Сейчас: Отгрузка',pallets:'☰  Сейчас: Палеты',kgt:'☰  Сейчас: КГТ',downtime:'☰  Сейчас: Простой',other:'☰  Сейчас: Другое'};
  const toggle=document.getElementById('activityToggle');
