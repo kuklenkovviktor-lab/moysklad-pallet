@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("WMS_BADGE_SECRET", "test-badge-secret")
 os.environ.setdefault("WMS_TERMINAL_SECRET", "test-terminal-secret")
 os.environ.setdefault("SECRET_KEY", "test-flask-secret")
+os.environ.setdefault("MOYSKLAD_TOKEN", "test-only-placeholder")
 os.environ["WMS_REQUIRE_POSTGRES"] = "0"
 os.environ.pop("DATABASE_URL", None)
 
