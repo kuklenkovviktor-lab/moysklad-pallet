@@ -7,7 +7,7 @@ from datetime import timedelta
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
-from flask import Flask, request, jsonify, session, redirect, Response
+from flask import Flask, request, jsonify, session, redirect, Response, after_this_request
 from wms import (
     wms_bp,
     init_wms_db,
@@ -23,6 +23,7 @@ from wms import (
 )
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
+from fbs_diagnostics import diag_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
 from storage_backup import (
@@ -51,6 +52,7 @@ app.config.update(
 app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
+app.register_blueprint(diag_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
 
@@ -275,6 +277,8 @@ def require_employee_login():
         "/api/manager/shifts/actions",
         "/api/manager/shifts/force-close",
         "/manager/replenishment",
+        "/manager/fbs-diagnostics",
+        "/api/manager/fbs-diagnostics",
         "/api/manager/replenishment/tasks",
         "/api/manager/replenishment/create",
         "/api/manager/replenishment/action",
@@ -2157,6 +2161,14 @@ def osz_check():
 
 @app.post("/api/fbs/product-info")
 def fbs_product_info():
+    started = time.perf_counter()
+
+    @after_this_request
+    def add_scan_timing(response):
+        response.headers["X-ONIX-Server-Ms"] = f"{(time.perf_counter() - started) * 1000:.1f}"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     employee = get_session_employee()
     if not employee:
         return jsonify(error="Требуется вход по бейджу"), 401

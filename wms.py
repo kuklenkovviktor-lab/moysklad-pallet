@@ -1273,6 +1273,7 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
           <a class="active" href="/fbs">🧺 Сборка</a>
           <a href="/move">↔ Перемещение</a>
           <a href="/replenishment">📦 Пополнение <span id="repCountFbs"></span></a>
+          <a href="/fbs-diagnostics">📶 Тест скорости</a>
           <a href="/ozon-fbo">📦 Ozon FBO</a>
         </div>
         <a class="exit-btn" href="/exit">🚪 Завершить смену</a>
@@ -1755,6 +1756,7 @@ STATS_PAGE = """<!doctype html>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
    <a href="/manager/replenishment">📦 Пополнение</a>
+   <a href="/manager/fbs-diagnostics">📶 Скорость сканирования</a>
   <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
