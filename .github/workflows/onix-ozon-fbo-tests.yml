@@ -8,6 +8,7 @@ on:
       - 'wms.py'
       - 'app.py'
       - 'tests/test_ozon_fbo_picking.py'
+      - 'tests/test_wms_operation_times.py'
       - '.github/workflows/onix-ozon-fbo-tests.yml'
   workflow_dispatch:
 
@@ -23,5 +24,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Compile Python modules
         run: python -m compileall -q app.py wms.py ozon_fbo.py ozon_fbo_parser.py ozon_fbo_picking.py ozon_fbo_picking_ui.py
-      - name: Test Ozon FBO server workflows
-        run: python -m unittest discover -s tests -p 'test_ozon_fbo_picking.py' -v
+      - name: Test ONIX WMS workflows
+        run: python -m unittest discover -s tests -p 'test_*.py' -v

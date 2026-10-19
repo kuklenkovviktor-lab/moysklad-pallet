@@ -685,23 +685,28 @@ def current_activity(shift_id):
     return {"id": row[0], "type": row[1], "started_at": row[2]}
 
 
-def picking_seconds(shift_id, now=None):
+def activity_seconds_by_type(shift_id, now=None):
+    """Sum all activity intervals by type, including an active interval."""
     now = now or datetime.now(timezone.utc)
     rows = query_all(
         """
-        SELECT started_at, ended_at
+        SELECT activity_type, started_at, ended_at
         FROM activities
-        WHERE shift_id = ? AND activity_type = 'picking'
+        WHERE shift_id = ?
         """,
         (shift_id,),
     )
-    total = 0.0
-    for started_at, ended_at in rows:
+    durations = {}
+    for activity_type, started_at, ended_at in rows:
         start = parse_iso(started_at)
         end = parse_iso(ended_at) if ended_at else now
         if start and end and end >= start:
-            total += (end - start).total_seconds()
-    return max(total, 0.0)
+            durations[activity_type] = durations.get(activity_type, 0.0) + (end - start).total_seconds()
+    return {key: max(0, int(seconds)) for key, seconds in durations.items()}
+
+
+def picking_seconds(shift_id, now=None):
+    return activity_seconds_by_type(shift_id, now).get("picking", 0)
 
 
 def shift_stats(shift_id):
@@ -719,7 +724,8 @@ def shift_stats(shift_id):
 
     count_row = query_one("SELECT COUNT(*) FROM scans WHERE shift_id = ?", (shift_id,))
     orders = int(count_row[0] if count_row else 0)
-    pick_sec = picking_seconds(shift_id)
+    activity_durations = activity_seconds_by_type(shift_id, parse_iso(shift[4]) if shift[4] else None)
+    pick_sec = activity_durations.get("picking", 0)
     pick_hours = pick_sec / 3600.0
     speed = round(orders / pick_hours, 1) if pick_hours > 0 else 0.0
     rate = float(shift[5])
@@ -741,6 +747,8 @@ def shift_stats(shift_id):
         "earned": earned,
         "orders_per_hour": speed,
         "picking_seconds": int(pick_sec),
+        "replenishment_seconds": activity_durations.get("replenishment", 0),
+        "activity_seconds": activity_durations,
         "activity": active["type"] if active else None,
         "activity_started_at": active["started_at"] if active else None,
         "target_done": orders >= target,
@@ -1731,7 +1739,7 @@ STATS_PAGE = """<!doctype html>
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:15px}.kpi .v{font-size:31px;font-weight:850;margin-top:4px}.kpi .l{font-size:12px;color:#6b7785}
 .progress-card{margin-bottom:12px}.progress-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.progress-main{display:flex;align-items:baseline;gap:8px}.progress-main .done{font-size:32px;font-weight:850}.progress-main .plan{font-size:18px;color:#6b7785;font-weight:750}.progress{height:14px;background:#dce4ea;border-radius:999px;overflow:hidden;margin:12px 0 7px}.progress>div{height:100%;background:#607f95;width:0%;transition:width .2s}.plan-edit{display:flex;align-items:center;gap:7px}.plan-edit input{width:110px;padding:8px 9px;border:1px solid #cbd9e2;border-radius:9px;font-size:14px;background:#fff}.plan-edit button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:9px 11px;font-weight:750;cursor:pointer}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.section-title b{font-size:16px}.section-link{font-size:12px;color:#536f83;text-decoration:none;font-weight:750}
-.worker{display:grid;grid-template-columns:1.35fr .8fr .8fr .9fr;gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.worker b{font-size:14px}.op{font-weight:750}
+.worker{display:grid;grid-template-columns:1.25fr .6fr .8fr .9fr .9fr;gap:8px;padding:11px 0;border-bottom:1px solid #dde5eb}.worker:last-child{border:0}.worker b{font-size:14px}.op{font-weight:750}
 .receiving-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mini{background:#eef3f6;border-radius:10px;padding:11px}.mini .n{font-size:24px;font-weight:850}.mini .t{font-size:11px;color:#6b7785;margin-top:2px}
 .dev{display:grid;grid-template-columns:80px 110px 140px minmax(0,1fr);gap:10px;padding:10px 0;border-bottom:1px solid #e1e7eb;align-items:center;font-size:12px}.dev:last-child{border:0}.dev .why{font-weight:750}.danger{color:#944747}.warn{color:#916d2d}.empty{padding:16px 0;color:#6b7785;font-size:13px}
 .wbbar{display:none;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 14px;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px}.wbstate{display:flex;align-items:center;gap:9px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:#a7b2bb;flex:0 0 auto}.dot.ok{background:#4f8a64}.dot.warn{background:#c08a32}.dot.err{background:#ad5757}.wbbar button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:8px 11px;font-weight:750;cursor:pointer}.wbbar button:disabled{opacity:.55;cursor:wait}
@@ -1805,6 +1813,11 @@ STATS_PAGE = """<!doctype html>
   </div>
  </div>
 
+ <div class="card" id="completedCard" style="margin-bottom:12px;display:none">
+  <div class="section-title"><b>Завершённые смены сегодня</b><span class="small">время по операциям сохраняется после выхода</span></div>
+  <div id="completedWorkers"></div>
+ </div>
+
  <div class="card">
   <div class="section-title"><b>Последние ошибки и отклонения</b><span class="small">только то, что требует внимания</span></div>
   <div id="deviations">Загрузка…</div>
@@ -1831,6 +1844,21 @@ function dayBounds(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),
 function dayKey(){const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),x=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+x}
 function activityName(v){return ({picking:'Сборка',replenishment:'Пополнение',receiving:'Приёмка',shipping:'Отгрузка',pallets:'Палеты',kgt:'КГТ',downtime:'Простой',other:'Другое'})[v]||v||'—'}
 function activityMinutes(ts){if(!ts)return 0;return Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/60000))}
+function formatDuration(seconds){
+ const m=Math.max(0,Math.round(Number(seconds||0)/60));
+ return m>=60?Math.floor(m/60)+' ч '+m%60+' мин':m+' мин';
+}
+function renderEmployeeShift(x,completed){
+ const current=completed?'Завершена · '+fmt(x.ended_at):activityName(x.activity)+' · '+activityMinutes(x.activity_started_at)+' мин';
+ const extra=Object.entries(x.activity_seconds||{}).filter(([type,sec])=>type!=='picking'&&type!=='replenishment'&&sec>=60)
+   .map(([type,sec])=>activityName(type)+': '+formatDuration(sec)).join(' · ');
+ return '<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(current)+'</div>'
+   +(extra?'<div class="small">'+esc(extra)+'</div>':'')+'</div>'
+   +'<div><b>'+Number(x.orders||0)+'</b><div class="small">заказов</div></div>'
+   +'<div><b>'+Number(x.orders_per_hour||0)+'</b><div class="small">заказ/ч</div></div>'
+   +'<div><b>'+formatDuration(x.picking_seconds)+'</b><div class="small">чистая сборка</div></div>'
+   +'<div><b>'+formatDuration(x.replenishment_seconds)+'</b><div class="small">пополнение за смену</div></div></div>';
+}
 function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
 function deviationClass(v){return ['product_mismatch','duplicate_wb','product_not_found'].includes(v)?'danger':'warn'}
 function renderHourly(rows){
@@ -1868,7 +1896,7 @@ async function fetchWithTimeout(url,options={},timeoutMs=5000){
 async function load(){
  const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
  const [dashR,fbsR,recR,planR,devR,hourR]=await Promise.all([
-  fetchWithTimeout('/api/fbs/dashboard'),
+  fetchWithTimeout('/api/fbs/dashboard?'+p.toString()),
   fetchWithTimeout('/api/fbs/overview?'+p.toString()),
   fetchWithTimeout('/api/receiving/overview?'+p.toString()),
   fetchWithTimeout('/api/manager/daily-plan?date='+encodeURIComponent(date)),
@@ -1888,7 +1916,10 @@ async function load(){
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
- box.innerHTML=d.workers.length?d.workers.map(x=>'<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(activityName(x.activity))+' · '+activityMinutes(x.activity_started_at)+' мин</div></div><div><b>'+x.orders+'</b><div class="small">заказов</div></div><div><b>'+x.orders_per_hour+'</b><div class="small">заказ/ч</div></div><div><b>'+Math.round((x.picking_seconds||0)/60)+' мин</b><div class="small">чистая сборка</div></div></div>').join(''):'<div class="empty">Нет активных смен</div>';
+ box.innerHTML=d.workers.length?d.workers.map(x=>renderEmployeeShift(x,false)).join(''):'<div class="empty">Нет активных смен</div>';
+ const completed=d.completed||[];
+ document.getElementById('completedCard').style.display=completed.length?'':'none';
+ document.getElementById('completedWorkers').innerHTML=completed.map(x=>renderEmployeeShift(x,true)).join('');
 
  document.getElementById('receivingOps').textContent=r.operations||0;
  document.getElementById('receivingWorkers').textContent=r.workers||0;
@@ -3628,4 +3659,29 @@ def dashboard():
         item = shift_stats(row[0])
         if item:
             workers.append(item)
-    return jsonify(workers=workers, target=TARGET, rate=RATE)
+    completed = []
+    date_from = request.args.get("from")
+    date_to = request.args.get("to")
+    if date_from or date_to:
+        try:
+            start = parse_iso(date_from)
+            end = parse_iso(date_to)
+            if not start or not end or not start.tzinfo or not end.tzinfo or end <= start:
+                raise ValueError("invalid interval")
+            if (end - start).total_seconds() > 31 * 86400:
+                raise ValueError("interval too large")
+        except (ValueError, TypeError, OverflowError):
+            return jsonify(error="Неверный период статистики"), 400
+        ended_rows = query_all(
+            """
+            SELECT s.id FROM shifts s
+            WHERE s.ended_at IS NOT NULL AND s.ended_at >= ? AND s.ended_at < ?
+            ORDER BY s.ended_at DESC LIMIT 100
+            """,
+            (start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()),
+        )
+        for row in ended_rows:
+            item = shift_stats(row[0])
+            if item:
+                completed.append(item)
+    return jsonify(workers=workers, completed=completed, target=TARGET, rate=RATE)
