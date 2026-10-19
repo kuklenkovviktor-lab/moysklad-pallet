@@ -1,0 +1,33 @@
+name: ONIX FBS persistent catalog tests
+
+on:
+  push:
+    branches:
+      - main
+      - onix/fbs-persistent-catalog-20261019
+    paths:
+      - 'fbs_catalog.py'
+      - 'app.py'
+      - 'tests/test_fbs_persistent_catalog.py'
+      - 'tests/test_fbs_fast_lookup.py'
+      - '.github/workflows/onix-fbs-catalog-tests.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  persistent-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile catalog and application
+        run: python -m compileall -q fbs_catalog.py app.py wms.py
+      - name: Test persisted product and package barcodes
+        run: python -m unittest discover -s tests -p 'test_fbs_persistent_catalog.py' -v
+      - name: Test existing fast lookup
+        run: python -m unittest discover -s tests -p 'test_fbs_fast_lookup.py' -v
