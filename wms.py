@@ -1436,7 +1436,7 @@ async function handleScan(code){
   if(pendingProduct)await acceptWb(code);
   else await acceptProduct(code);
  }finally{
-  setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},220);
+  setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},60);
  }
 }
 // Android HID scanners act as hardware keyboards. Keep focus when possible, but
