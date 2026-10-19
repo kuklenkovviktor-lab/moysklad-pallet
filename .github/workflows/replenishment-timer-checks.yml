@@ -1,0 +1,26 @@
+name: ONIX replenishment timer checks
+on:
+  push:
+    branches:
+      - feature/replenishment-time-2026-10-19
+  pull_request:
+    paths:
+      - replenishment_time.py
+      - templates/replenishment_timer.html
+      - templates/replenishment_timer_manager.html
+      - tests/test_replenishment_time.py
+      - .github/workflows/replenishment-timer-checks.yml
+jobs:
+  timer-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Check Python syntax
+        run: python -m compileall -q wms.py app.py replenishment_time.py
+      - name: Regression tests
+        run: python -m unittest discover -s tests -p 'test_replenishment_time.py' -v

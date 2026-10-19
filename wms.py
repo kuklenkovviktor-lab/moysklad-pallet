@@ -1249,7 +1249,7 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
     <div class="card activity-switch">
       <button class="secondary" id="activityToggle" onclick="toggleActivityMenu()">☰ &nbsp; Другие операции</button>
       <div class="activities hidden" id="activityMenu">
-        <button data-a="replenishment" onclick="activity('replenishment')">Пополнение</button>
+        <button data-a="replenishment" onclick="location.href='/replenishment-time'">Пополнение · учёт времени</button>
         <button data-a="shipping" onclick="activity('shipping')">Отгрузка</button>
         <button data-a="pallets" onclick="activity('pallets')">Палеты</button>
         <button data-a="kgt" onclick="activity('kgt')">КГТ</button>
@@ -1747,6 +1747,7 @@ STATS_PAGE = """<!doctype html>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
    <a href="/manager/replenishment">📦 Пополнение</a>
+   <a href="/manager/replenishment-time">⏱ Время пополнений</a>
   <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
