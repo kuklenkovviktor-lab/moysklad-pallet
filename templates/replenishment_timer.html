@@ -1,0 +1,106 @@
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ONIX · Время пополнения</title>
+<style>
+*{box-sizing:border-box}body{background:#0f1d2d;color:#eef6fb;font:16px system-ui,Arial;margin:0}
+main{padding:12px;max-width:620px;margin:auto}.panel{background:#243950;border-radius:14px;padding:16px;margin-top:12px}
+header{display:flex;justify-content:space-between;align-items:center;gap:9px;font-weight:800}
+h1{text-align:center;font-size:25px;margin:12px 0}.big{font-size:36px;text-align:center;font-weight:900;font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:#bbd3e2;line-height:1.5}
+button{background:#377eb0;border:0;border-radius:10px;color:white;padding:12px;font-size:15px;font-weight:750;min-height:45px}
+button.secondary{background:#426079}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.hidden{display:none!important}input{padding:12px;border-radius:8px;width:100%;font-size:16px}
+#hid{position:absolute;left:-9999px;opacity:0;width:1px;height:1px}
+#notice{min-height:35px;padding-top:10px;font-size:14px;font-weight:700}.error{color:#ffb0ad}.good{color:#a8f0c0}
+a{color:#b6dcff;text-decoration:none}details{margin-top:14px;padding:9px;background:#304b61;border-radius:9px}
+#back{margin-top:15px}
+</style></head><body><main>
+<header><span>ONIX WMS · ПОПОЛНЕНИЕ</span><span id="who"></span></header>
+<section class="panel">
+<h1 id="step">СКАНИРУЙ ЯЧЕЙКУ</h1>
+<div class="big" id="cell"></div><div class="big" id="clock"></div>
+<p class="note" id="hint">Отсканируй ячейку отбора перед походом на резерв.</p>
+<input id="hid" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none">
+<div id="notice" aria-live="polite"></div>
+<div class="row"><button class="secondary" onclick="toggleManual()">⌨ Ручной ввод</button>
+<button class="secondary" onclick="load()">↻ Обновить</button></div>
+<div id="manual" class="hidden" style="margin-top:12px">
+<input id="typed" placeholder="Ячейка или QR склада 3/4">
+<button onclick="submitTyped()" style="margin-top:6px">Подтвердить</button></div>
+<div id="completeActions" class="hidden">
+<details><summary class="note">Не получается сканировать QR?</summary>
+<div class="row"><button onclick="scan('ONIX-RESERVE-3')">Вернулся со склада №3</button>
+<button onclick="scan('ONIX-RESERVE-4')">Вернулся со склада №4</button></div></details>
+<div class="row"><button class="secondary" onclick="cancel()">Отменить ошибочное начало</button></div>
+</div>
+</section>
+<section class="panel"><div class="note">Смена · время пополнений</div>
+<strong id="stats">Загрузка…</strong></section>
+<div id="back"><a href="/fbs">← Вернуться к FBS</a></div>
+<p class="note">QR склада №3 и №4 размещаются на основном складе. Сканируй его по возвращении. Таймер не изменяет остатки МойСклад.</p>
+</main>
+<script>
+let active=null,busy=false,buf='',lastKey=0,lastNotice='';
+const el=id=>document.getElementById(id);
+function secs(x){let n=Math.max(0,Math.floor(Number(x)||0));return String(Math.floor(n/3600)).padStart(2,'0')+':'+String(Math.floor(n%3600/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
+function say(m,err){el('notice').textContent=m;el('notice').className=err?'error':'good'}
+function focusScanner(){if(document.hidden||!el('manual').classList.contains('hidden'))return;try{el('hid').focus({preventScroll:true})}catch(e){}}
+function draw(){
+ el('step').textContent=active?'ПОПОЛНЕНИЕ ИДЁТ':'СКАНИРУЙ ЯЧЕЙКУ';
+ el('cell').textContent=active?'Ячейка '+active.location:'';
+ el('hint').textContent=active?'После возвращения на основной склад сканируй QR «СКЛАД 3» или «СКЛАД 4»':'Сначала отсканируй ШК ячейки отбора';
+ el('completeActions').classList.toggle('hidden',!active);
+ el('back').classList.toggle('hidden',!!active);
+ tick();setTimeout(focusScanner,40);
+}
+function tick(){el('clock').textContent=active?secs((Date.now()-Date.parse(active.started_at))/1000):''}
+async function api(path,body){
+ const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+ const d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось сохранить');return d;
+}
+async function load(){
+ try{
+  const r=await fetch('/api/replenishment-time/state',{cache:'no-store'});const d=await r.json();
+  if(!r.ok)throw Error(d.error||'Ошибка подключения');
+  active=d.active;el('who').textContent=d.employee;el('stats').textContent=d.trips+' поездок · '+secs(d.seconds);
+  draw();
+ }catch(e){say(e.message,true)}
+}
+async function scan(code){
+ code=String(code||'').trim().toUpperCase();if(!code||busy)return;
+ busy=true;say('Сохраняю…',false);
+ try{
+  if(active){
+   if(code!=='ONIX-RESERVE-3'&&code!=='ONIX-RESERVE-4')throw Error('Нужен QR склада №3 или №4');
+   const d=await api('/api/replenishment-time/finish',{barcode:code});
+   active=null;await load();say('✅ '+d.trip.location+' · склад '+d.trip.reserve+' · '+secs(d.trip.seconds),false);
+  }else{
+   if(code.startsWith('ONIX-RESERVE-'))throw Error('Сначала сканируй ячейку отбора');
+   const d=await api('/api/replenishment-time/start',{location:code});
+   active=d.active;await load();say('✅ Таймер запущен. Иди на резерв.',false);
+  }
+ }catch(e){say(e.message,true);await load()}
+ finally{busy=false;draw()}
+}
+function toggleManual(){el('manual').classList.toggle('hidden');if(!el('manual').classList.contains('hidden'))el('typed').focus();else focusScanner()}
+function submitTyped(){const v=el('typed').value;el('typed').value='';el('manual').classList.add('hidden');scan(v)}
+async function cancel(){
+ if(!active||busy||!confirm('Отменить ошибочное начало? В итог время не войдёт.'))return;
+ busy=true;try{await api('/api/replenishment-time/cancel',{});active=null;await load();say('Операция отменена',false)}
+ catch(e){say(e.message,true)}finally{busy=false;draw()}
+}
+el('hid').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const code=el('hid').value;el('hid').value='';scan(code)}});
+el('typed').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitTyped()}});
+document.addEventListener('keydown',e=>{
+ if(busy||e.ctrlKey||e.metaKey||e.altKey||e.target===el('hid')||e.target===el('typed'))return;
+ if(e.key==='Enter'||e.key==='Tab'){
+  if(buf.length){e.preventDefault();const code=buf;buf='';scan(code)}return;
+ }
+ if(e.key.length!==1||e.target.tagName==='INPUT')return;
+ const now=Date.now();if(now-lastKey>350)buf='';lastKey=now;
+ if(buf.length<200)buf+=e.key;
+});
+window.addEventListener('pageshow',()=>{load();focusScanner()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});
+setInterval(tick,1000);load();
+</script></body></html>
