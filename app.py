@@ -211,6 +211,10 @@ def _wms_initializer():
                 _WMS_STARTUP_STATE["stage"] = "ready"
             _WMS_READY.set()
             print("WMS startup stage: ready", flush=True)
+            # Build/refresh the permanent FBS catalog in the background after
+            # database startup. It must not block workers, login or picking.
+            if TOKEN:
+                start_pack_warmup()
             return
         except Exception as exc:
             with _WMS_STARTUP_LOCK:
