@@ -26,6 +26,12 @@ from replenishment_checks import replenishment_checks_bp
 from fbs_diagnostics import diag_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
+from fbs_catalog import (
+    init_fbs_catalog_db,
+    find_persisted_fbs_barcode,
+    save_fbs_catalog_snapshot,
+    fbs_catalog_status,
+)
 from storage_backup import (
     restore_if_needed,
     start_worker as start_backup_worker,
@@ -195,6 +201,7 @@ def _wms_initializer():
             restore_if_needed()
             _set_startup_stage("init_db")
             init_wms_db()
+            init_fbs_catalog_db()
             _set_startup_stage("migration")
             _migrate_sqlite_backup_to_postgres_if_needed()
             _set_startup_stage("backup_worker")
@@ -1732,6 +1739,21 @@ def find_fbs_product_by_barcode(barcode):
     if product:
         return product, pack
 
+    # After Render restarts, use the last verified PostgreSQL snapshot first.
+    # Existing barcodes must not wait on MoySklad or packaging warm-up.
+    try:
+        product, pack = find_persisted_fbs_barcode(target)
+    except Exception as exc:
+        print(f"FBS persistent catalog read failed: {exc}", flush=True)
+        product, pack = None, None
+    if product:
+        with CACHE_LOCK:
+            if pack.get("name") == "Упаковка":
+                PACK_CACHE[target] = {"product": product, "pack": pack}
+            else:
+                PRODUCT_BARCODE_CACHE[target] = product
+        return product, pack
+
     response = requests.get(
         f"{API_BASE}/entity/product",
         headers=headers(),
@@ -1868,8 +1890,21 @@ def _warm_pack_cache_worker():
             # Не забиваем общий лимит API: приёмка важнее фонового прогрева.
             time.sleep(0.25)
 
+        # Publish only a complete catalog; a failed MoySklad request must
+        # never overwrite the previously working PostgreSQL snapshot.
         with CACHE_LOCK:
-            WARMUP_STATE["ready"] = True
+            snapshot_complete = not bool(WARMUP_STATE["error"])
+            unit_codes = dict(PRODUCT_BARCODE_CACHE)
+            pack_codes = dict(PACK_CACHE)
+        if snapshot_complete:
+            try:
+                persisted = save_fbs_catalog_snapshot(unit_codes, pack_codes)
+                print(f"FBS persisted catalog: {persisted} barcodes", flush=True)
+            except Exception as exc:
+                with CACHE_LOCK:
+                    WARMUP_STATE["error"] = str(exc)
+        with CACHE_LOCK:
+            WARMUP_STATE["ready"] = not bool(WARMUP_STATE["error"])
             WARMUP_STATE["indexed"] = len(PACK_CACHE)
     except Exception as e:
         with CACHE_LOCK:
@@ -2350,6 +2385,7 @@ def cache_status():
             ok=True,
             cached_barcodes=len(PACK_CACHE),
             detailed_products=len(DETAILED_PRODUCT_IDS),
+            **fbs_catalog_status(),
             **WARMUP_STATE,
         )
 
