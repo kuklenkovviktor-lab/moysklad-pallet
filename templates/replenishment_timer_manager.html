@@ -1,0 +1,41 @@
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ONIX · Время пополнений</title>
+<style>
+*{box-sizing:border-box}body{font:15px system-ui,Arial;background:#e7eef4;color:#243443;margin:20px}
+h1{font-size:24px}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+input,button{padding:9px}table{border-collapse:collapse;width:100%;background:white}
+td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}
+.labels{display:flex;gap:20px;flex-wrap:wrap;margin-top:15px}
+.label{width:245px;border:2px solid #111;background:white;text-align:center;padding:14px;font-size:18px}
+.label img{display:block;width:190px;height:190px;margin:12px auto}
+a{color:#2f6697}@media print{.controls,table,h1,#summary,h2{display:none}.label{break-inside:avoid}}
+</style></head><body>
+<h1>ONIX WMS · Учёт времени пополнений</h1>
+<div class="controls"><a href="/manager">← Панель</a>
+<input id="date" type="date"><button onclick="load()">Показать</button>
+<button onclick="window.print()">Распечатать QR</button></div>
+<h2 id="summary">Загрузка…</h2>
+<table><thead><tr><th>Сотрудник</th><th>Ячейка</th><th>Резерв</th><th>Начало</th><th>Длительность</th><th>Статус</th></tr></thead>
+<tbody id="rows"></tbody></table>
+<h2>QR размещаются на основном складе, в точке возвращения</h2>
+<div class="labels">
+<div class="label"><b>СКЛАД №3</b><img src="/manager/replenishment-time/qr.png?store=3">ЗАВЕРШИТЬ ПОПОЛНЕНИЕ · №3</div>
+<div class="label"><b>СКЛАД №4</b><img src="/manager/replenishment-time/qr.png?store=4">ЗАВЕРШИТЬ ПОПОЛНЕНИЕ · №4</div>
+</div>
+<script>
+const el=x=>document.getElementById(x);
+function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function duration(s){if(s==null)return 'идёт';s=Math.max(0,s);return Math.floor(s/60)+' мин '+s%60+' сек'}
+async function load(){
+ try{
+  const r=await fetch('/api/manager/replenishment-time?date='+encodeURIComponent(el('date').value));
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка данных');
+  const good=d.rows.filter(x=>x.status==='completed');
+  const total=good.reduce((v,x)=>v+x.seconds,0);
+  el('summary').textContent='Завершено: '+good.length+' · Затрачено: '+duration(total)+' · Активно: '+d.rows.filter(x=>x.status==='active').length;
+  el('rows').innerHTML=d.rows.map(x=>'<tr><td>'+escapeHtml(x.employee)+'</td><td>'+escapeHtml(x.location)+(x.verified?'':' *')+'</td><td>'+escapeHtml(x.reserve||'—')+'</td><td>'+new Date(x.started_at).toLocaleTimeString('ru-RU')+'</td><td>'+duration(x.seconds)+'</td><td>'+escapeHtml(x.status)+'</td></tr>').join('')||'<tr><td colspan="6">Нет записей</td></tr>';
+ }catch(e){el('summary').textContent=e.message}
+}
+el('date').value=new Date(Date.now()+3*3600000).toISOString().slice(0,10);load();
+</script></body></html>
