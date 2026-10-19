@@ -22,6 +22,7 @@ from wms import (
     WB_STRICT_MATCHING,
 )
 from replenishment import replenishment_bp
+from replenishment_time import timer_bp
 from replenishment_checks import replenishment_checks_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
@@ -50,6 +51,7 @@ app.config.update(
 )
 app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
+app.register_blueprint(timer_bp)
 app.register_blueprint(replenishment_checks_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
