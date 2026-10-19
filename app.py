@@ -1700,6 +1700,69 @@ def find_product_pack_by_barcode(barcode):
 
     return None, None
 
+def _cached_product_by_barcode(target):
+    """Fast memory-only lookup for a unit or its packaging barcode."""
+    with CACHE_LOCK:
+        pack_found = PACK_CACHE.get(target)
+        product_found = PRODUCT_BARCODE_CACHE.get(target)
+    if pack_found:
+        return pack_found["product"], pack_found["pack"]
+    if product_found:
+        return product_found, {"name": "ШК товара", "quantity": 1}
+    return None, None
+
+
+class FbsCatalogIndexPending(Exception):
+    """A barcode may exist in a pack not yet loaded into the local index."""
+
+
+def find_fbs_product_by_barcode(barcode):
+    """FBS-specific bounded lookup: never scan every product card synchronously.
+
+    The full-pack index remains in the background for receiving and unusual
+    package barcodes. For a cold FBS barcode use one exact filtered API request
+    rather than the former O(number of products) series of 30-second calls.
+    """
+    target = str(barcode).strip()
+    product, pack = _cached_product_by_barcode(target)
+    if product:
+        return product, pack
+
+    response = requests.get(
+        f"{API_BASE}/entity/product",
+        headers=headers(),
+        params={"filter": "barcode=" + target, "limit": 100},
+        timeout=(3, 8),
+    )
+    response.raise_for_status()
+    for candidate in response.json().get("rows", []):
+        if isinstance(candidate, dict):
+            _index_product(candidate)
+
+    # A filtered result must be independently verified against the scanned
+    # barcode; never accept an unrelated SKU just because API returned it.
+    product, pack = _cached_product_by_barcode(target)
+    if product:
+        return product, pack
+
+    # Package barcodes may only appear on the detailed product record.
+    # Allow the background index to finish, but don't block a worker's scan
+    # while fetching hundreds of individual products synchronously.
+    start_pack_warmup()
+    product, pack = _cached_product_by_barcode(target)
+    if product:
+        return product, pack
+    with CACHE_LOCK:
+        ready = bool(WARMUP_STATE["ready"])
+        error = str(WARMUP_STATE["error"] or "")
+    if not ready or error:
+        raise FbsCatalogIndexPending(
+            "ШК пока не найден в быстром справочнике. Идёт загрузка упаковок; "
+            "повтори сканирование после завершения обновления каталога."
+        )
+    return None, None
+
+
 def find_product_by_any_barcode(barcode):
     target = str(barcode).strip()
 
@@ -2103,7 +2166,7 @@ def fbs_product_info():
         if not barcode:
             return jsonify(error="Пустой ШК товара"), 400
 
-        product, pack = find_product_by_any_barcode(barcode)
+        product, pack = find_fbs_product_by_barcode(barcode)
         if not product:
             employee = get_session_employee()
             if employee:
@@ -2129,9 +2192,13 @@ def fbs_product_info():
             article=product.get("article"),
             name=product.get("name"),
         )
+    except FbsCatalogIndexPending as e:
+        return jsonify(error=str(e), retryable=True, reason="catalog_indexing"), 503
     except requests.HTTPError as e:
         body = e.response.text[:800] if e.response is not None else ""
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+    except requests.Timeout:
+        return jsonify(error="МойСклад долго отвечает. Проверь связь и повтори ШК товара."), 504
     except Exception as e:
         return jsonify(error=str(e)), 500
 

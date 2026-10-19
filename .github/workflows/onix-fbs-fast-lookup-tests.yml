@@ -1,0 +1,26 @@
+name: ONIX FBS fast barcode lookup tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app.py'
+      - 'wms.py'
+      - 'tests/test_fbs_fast_lookup.py'
+      - '.github/workflows/onix-fbs-fast-lookup-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  fast-barcode-lookup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requirements
+        run: pip install -r requirements.txt
+      - name: Compile application
+        run: python -m compileall -q app.py wms.py
+      - name: Test first-scan cache and API fallback
+        run: python -m unittest discover -s tests -p 'test_fbs_fast_lookup.py' -v
