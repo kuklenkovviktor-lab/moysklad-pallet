@@ -106,3 +106,17 @@ def has_unresolved_operations(receipt_id):
         WHERE receipt_id = ? AND status IN ('processing', 'uncertain')
     """), (receipt_id,))
     return bool(row and row[0])
+
+
+def reconcile_after_manual_check(operation_id):
+    """Human confirmed MoySklad receipt was inspected; never replay the write."""
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(sql("""
+            UPDATE receiving_confirmations
+            SET status = 'reconciled', updated_at = ?
+            WHERE operation_id = ? AND status IN ('processing', 'uncertain')
+        """), (now_iso(), operation_id))
+        conn.commit()
+        cur.close()
+    return read_operation(operation_id)
