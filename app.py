@@ -792,6 +792,10 @@ let audioCtx=null;
 let scanMode='full';
 let partialBarcode='';
 let partialStandardQty=0;
+let partialMeta=null;
+let stagedPallet=null;
+let pendingConfirmation=null;
+const RECEIVING_PENDING_KEY='onix_receiving_confirmation_v1';
 let lastBarcode='';
 let lastScanAt=0;
 let oszSscc='';
@@ -932,6 +936,7 @@ function fillSelect(el,items,placeholder){
 }
 
 async function createReceipt(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const stateId=stateSelect.value;
   const organizationId=orgSelect.value;
   const storeId=storeSelect.value;
@@ -989,6 +994,7 @@ async function loadReceipts(){
 }
 
 function useSelectedReceipt(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const o=receiptSelect.options[receiptSelect.selectedIndex];
   if(!o||!o.value){
     showError('Выбери Приёмку.');
@@ -1000,6 +1006,7 @@ function useSelectedReceipt(){
 
 async function completeReceipt(){
   if(!activeReceiptId)return;
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши или сверь предыдущую палету.');return;}
   if(!confirm('Провести это Оприходование? После этого документ будет проведён в МойСклад.'))return;
 
   try{
@@ -1068,6 +1075,7 @@ async function stopScanner(){
 async function toggleCamera(mode='full'){
   initAudio();
   if(!activeReceiptId){showError('Сначала создай или открой Оприходование.');return;}
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши подтверждение предыдущей палеты.');return;}
 
   if(scanner){
     await stopScanner();
@@ -1143,6 +1151,7 @@ function looksLikeSscc(code){
 }
 
 async function sendManualFull(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
@@ -1175,6 +1184,7 @@ async function sendManualFull(){
 }
 
 async function sendManualPartial(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
@@ -1183,6 +1193,7 @@ async function sendManualPartial(){
 }
 
 async function preparePartial(barcode){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
   busy=true;
   try{
@@ -1198,6 +1209,7 @@ async function preparePartial(barcode){
 
     partialBarcode=barcode;
     partialStandardQty=Number(data.standard_qty||0);
+    partialMeta=data;
     document.getElementById('partialTitle').textContent=(data.article||data.name||'Неполная палета');
     document.getElementById('partialMeta').textContent='Стандартная палета: '+partialStandardQty+' шт. · '+barcode;
     document.getElementById('partialQty').value='';
@@ -1215,6 +1227,7 @@ async function preparePartial(barcode){
 function cancelPartial(){
   partialBarcode='';
   partialStandardQty=0;
+  partialMeta=null;
   document.getElementById('partialForm').classList.add('hidden');
 }
 
@@ -1225,8 +1238,9 @@ async function confirmPartial(){
   if(qty>partialStandardQty){showError('Фактическое количество не может быть больше стандартной палеты '+partialStandardQty+' шт.');return;}
 
   const barcode=partialBarcode;
+  const data=partialMeta;
   cancelPartial();
-  await sendScan(barcode,qty);
+  await submitReceivingPallet(makeReceivingPallet(barcode,qty,data));
 }
 
 function resetOszForm(){
@@ -1245,6 +1259,7 @@ function resetOszForm(){
 }
 
 async function startOszFlow(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
   resetOszForm();
   document.getElementById('oszForm').classList.remove('hidden');
@@ -1344,6 +1359,7 @@ function oszQtyClear(){
 }
 
 async function acceptOszPallet(){
+  if(busy)return;
   if(!oszSscc||!oszProductBarcode){showError('Сначала отсканируйте SSCC и товар.');return;}
   const qty=Number(document.getElementById('oszQty').value);
   if(!Number.isFinite(qty)||qty<=0){showError('Введите количество с этикетки ОСЗ.');return;}
@@ -1394,43 +1410,151 @@ async function cancelOszFlow(){
   document.getElementById('oszForm').classList.add('hidden');
 }
 
-async function sendScan(barcode,quantity=null){
-  if(busy)return;
-  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
-  busy=true;
+function makeReceivingPallet(barcode,quantity,meta){
+  if(!window.crypto||!crypto.randomUUID){
+    showError('Устройство не поддерживает безопасный номер операции. Обнови браузер.');
+    return null;
+  }
+  return {
+    operation_id:crypto.randomUUID(),
+    receipt_id:activeReceiptId,
+    barcode:String(barcode),
+    quantity:quantity,
+    article:(meta&&meta.article)||'',
+    name:(meta&&meta.name)||'',
+    pack_name:(meta&&meta.pack_name)||'',
+    standard_qty:(meta&&meta.standard_qty)||0
+  };
+}
 
+function showStagedPallet(){
+  if(!stagedPallet)return;
+  const p=stagedPallet;
+  document.getElementById('result').innerHTML=
+    '<div class="info"><b>Палета готова к приёмке</b><br>'+
+    escapeHtml(p.article||p.name||'Товар')+' · <b>'+escapeHtml(p.quantity===null?p.standard_qty:p.quantity)+' шт.</b><br>'+
+    '<span class="small">'+escapeHtml(p.barcode)+' · Пока ничего не добавлено</span><br>'+
+    '<button type="button" onclick="confirmStagedPallet()">✓ Подтвердить 1 палету</button> '+
+    '<button type="button" class="secondary" onclick="cancelStagedPallet()">Отмена</button></div>';
+}
+function cancelStagedPallet(){
+  if(pendingConfirmation)return;
+  stagedPallet=null;
+  document.getElementById('result').innerHTML='<div class="info">Скан отменён, количество не менялось.</div>';
+}
+async function confirmStagedPallet(){
+  if(busy||!stagedPallet)return;
+  await submitReceivingPallet(stagedPallet);
+}
+function clearConfirmedPallet(response,pending){
+  pendingConfirmation=null;
+  localStorage.removeItem(RECEIVING_PENDING_KEY);
+  // One count per confirmed operation in this local session.
+  pallets+=1;
+  units+=Number(response.added||0);
+  document.getElementById('pallets').textContent=pallets;
+  document.getElementById('units').textContent=units;
+  successFeedback();
+  document.getElementById('result').innerHTML=
+    '<div class="ok"><b>Палета принята</b><br>'+
+    escapeHtml(response.article||response.name||pending.article||'')+' · <b>'+escapeHtml(response.added)+' шт.</b><br>'+
+    'В МойСклад: <b>'+escapeHtml(response.total)+' шт.</b><br>'+
+    '<span class="small">'+escapeHtml(pending.barcode)+'</span></div>';
+}
+function showUncertainPallet(){
+  const p=pendingConfirmation;
+  if(!p)return;
+  document.getElementById('result').innerHTML=
+    '<div class="err"><b>Результат приёмки требует проверки</b><br>'+
+    escapeHtml(p.article||p.name||p.barcode)+' · '+escapeHtml(p.quantity===null?p.standard_qty:p.quantity)+' шт.<br>'+
+    'Не сканируй палету снова: запись могла пройти в МойСклад.<br>'+
+    '<button type="button" onclick="checkReceivingPallet()">Проверить состояние</button> '+
+    '<button type="button" class="secondary" onclick="reconcileReceivingPallet()">Сверил в МойСклад</button></div>';
+}
+async function checkReceivingPallet(){
+  if(busy||!pendingConfirmation)return;
+  busy=true;
+  try{
+    const p=pendingConfirmation;
+    const r=await fetch('/api/scan-operation/'+encodeURIComponent(p.operation_id),{cache:'no-store'});
+    const d=await r.json();
+    if(r.ok&&d.status==='done'){
+      clearConfirmedPallet(d.response,p);
+    }else if(r.status===404){
+      // Same UUID, never a second distinct operation.
+      busy=false;
+      await submitReceivingPallet(p);
+      return;
+    }else{
+      showUncertainPallet();
+    }
+  }catch(e){showUncertainPallet();}
+  finally{busy=false;}
+}
+async function reconcileReceivingPallet(){
+  if(busy||!pendingConfirmation)return;
+  if(!confirm('Сначала сверь количество в документе МойСклад. Операция не будет автоматически повторена. Ты проверил результат?'))return;
+  busy=true;
+  try{
+    const p=pendingConfirmation;
+    const r=await fetch('/api/scan-operation/'+encodeURIComponent(p.operation_id)+'/reconcile',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({verified:true})
+    });
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Не удалось закрыть проверку');
+    if(d.status==='done'){
+      clearConfirmedPallet(d.response,p);
+      return;
+    }
+    pendingConfirmation=null;
+    localStorage.removeItem(RECEIVING_PENDING_KEY);
+    document.getElementById('result').innerHTML='<div class="info">Сверка отмечена. ONIX не прибавляла товар повторно.</div>';
+  }catch(e){showError(e.message);}
+  finally{busy=false;}
+}
+async function submitReceivingPallet(p){
+  if(!p||busy)return;
+  if(pendingConfirmation&&pendingConfirmation.operation_id!==p.operation_id){
+    showUncertainPallet();return;
+  }
+  busy=true;
+  stagedPallet=null;
+  pendingConfirmation=p;
+  // Save BEFORE network request. Browser restart cannot silently issue a new UUID.
+  localStorage.setItem(RECEIVING_PENDING_KEY,JSON.stringify(p));
+  document.getElementById('result').innerHTML='<div class="info"><b>Подтверждаю палету в МойСклад…</b></div>';
   try{
     const r=await fetch('/api/scan',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({barcode:barcode,receipt_id:activeReceiptId,quantity:quantity})
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(p)
+    });
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Результат не подтверждён');
+    clearConfirmedPallet(d,p);
+  }catch(e){
+    showUncertainPallet();
+  }finally{busy=false;}
+}
+async function sendScan(barcode,quantity=null){
+  if(busy)return;
+  if(stagedPallet||pendingConfirmation){showError('Подтверди предыдущую палету.');return;}
+  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
+  busy=true;
+  try{
+    const r=await fetch('/api/pack-info',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({barcode:barcode})
     });
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Ошибка');
-
-    pallets+=1;
-    units+=Number(data.added||0);
-    document.getElementById('pallets').textContent=pallets;
-    document.getElementById('units').textContent=units;
-
-    successFeedback();
-
-    // После успешного сканирования камерой сразу закрываем её.
-    // Это исключает случайный повторный захват той же палеты.
-    if(scanner){
+    if(!r.ok)throw new Error(data.error||'Упаковка не найдена');
+    stagedPallet=makeReceivingPallet(barcode,quantity,data);
+    if(stagedPallet){
       await stopScanner();
+      showStagedPallet();
+      successFeedback();
     }
-
-    document.getElementById('result').innerHTML=
-      '<div class="ok"><b>'+escapeHtml(data.article||data.name||'')+'</b><br>'+
-      'Добавлено: <b>'+data.added+' шт.</b><br>'+
-      'Теперь в Приёмке: <b>'+data.total+' шт.</b><br>'+
-      '<span class="small">'+escapeHtml(data.pack_name||'')+' · '+escapeHtml(data.barcode)+'</span></div>';
-  }catch(e){
-    showError(e.message);
-  }finally{
-    setTimeout(()=>{busy=false;},900);
-  }
+  }catch(e){showError(e.message);}
+  finally{busy=false;}
 }
 
 function showError(message){
@@ -1465,7 +1589,15 @@ async function loadWmsIdentity(){
     if(!op.ok)throw Error('Не удалось восстановить работу с приёмкой');
     const savedId=localStorage.getItem('receipt_id')||'';
     const savedName=localStorage.getItem('receipt_name')||'';
-    if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    try{
+      const savedPending=JSON.parse(localStorage.getItem(RECEIVING_PENDING_KEY)||'null');
+      if(savedPending&&savedPending.operation_id&&savedPending.receipt_id){
+        pendingConfirmation=savedPending;
+      }
+    }catch(e){localStorage.removeItem(RECEIVING_PENDING_KEY);}
+    const selectedId=(pendingConfirmation&&pendingConfirmation.receipt_id)||savedId;
+    if(selectedId)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    if(pendingConfirmation)showUncertainPallet();
   }catch(e){
     showError('Не удалось восстановить рабочую приёмку. Проверь подключение к сети и обнови страницу.');
   }
