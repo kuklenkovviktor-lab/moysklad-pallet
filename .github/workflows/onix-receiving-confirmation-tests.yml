@@ -34,10 +34,10 @@ jobs:
           os.environ.setdefault('WMS_BADGE_SECRET', 'test-badge')
           os.environ.setdefault('WMS_TERMINAL_SECRET', 'test-terminal')
           import app
-          snippets=re.findall(r'<script(?:\\s+[^>]*)?>(.*?)</script>',app.PAGE,re.S)
+          snippets=re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>',app.PAGE,re.S)
           assert snippets, 'no inline scripts'
           with open('/tmp/onix-receiving.js','w') as f:
-              f.write('\\n'.join(snippets))
+              f.write('\n'.join(snippets))
           PY
           node --check /tmp/onix-receiving.js
       - name: Test receipt confirmation and idempotency
