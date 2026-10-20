@@ -1,9 +1,11 @@
 import os
 import json
+import uuid
+import math
 import time
 import threading
 import tempfile
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
@@ -26,6 +28,15 @@ from replenishment_checks import replenishment_checks_bp
 from fbs_diagnostics import diag_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
+from receiving_idempotency import (
+    init_receiving_operations,
+    claim_operation,
+    read_operation,
+    finish_operation,
+    mark_uncertain,
+    has_unresolved_operations,
+    reconcile_after_manual_check,
+)
 from fbs_catalog import (
     init_fbs_catalog_db,
     find_persisted_fbs_barcode,
@@ -202,6 +213,7 @@ def _wms_initializer():
             _set_startup_stage("init_db")
             init_wms_db()
             init_fbs_catalog_db()
+            init_receiving_operations()
             _set_startup_stage("migration")
             _migrate_sqlite_backup_to_postgres_if_needed()
             _set_startup_stage("backup_worker")
@@ -781,6 +793,10 @@ let audioCtx=null;
 let scanMode='full';
 let partialBarcode='';
 let partialStandardQty=0;
+let partialMeta=null;
+let stagedPallet=null;
+let pendingConfirmation=null;
+const RECEIVING_PENDING_KEY='onix_receiving_confirmation_v1';
 let lastBarcode='';
 let lastScanAt=0;
 let oszSscc='';
@@ -921,6 +937,7 @@ function fillSelect(el,items,placeholder){
 }
 
 async function createReceipt(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const stateId=stateSelect.value;
   const organizationId=orgSelect.value;
   const storeId=storeSelect.value;
@@ -978,6 +995,7 @@ async function loadReceipts(){
 }
 
 function useSelectedReceipt(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const o=receiptSelect.options[receiptSelect.selectedIndex];
   if(!o||!o.value){
     showError('Выбери Приёмку.');
@@ -989,6 +1007,7 @@ function useSelectedReceipt(){
 
 async function completeReceipt(){
   if(!activeReceiptId)return;
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши или сверь предыдущую палету.');return;}
   if(!confirm('Провести это Оприходование? После этого документ будет проведён в МойСклад.'))return;
 
   try{
@@ -1057,6 +1076,7 @@ async function stopScanner(){
 async function toggleCamera(mode='full'){
   initAudio();
   if(!activeReceiptId){showError('Сначала создай или открой Оприходование.');return;}
+  if(stagedPallet||pendingConfirmation){showError('Сначала заверши подтверждение предыдущей палеты.');return;}
 
   if(scanner){
     await stopScanner();
@@ -1132,6 +1152,7 @@ function looksLikeSscc(code){
 }
 
 async function sendManualFull(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
@@ -1164,6 +1185,7 @@ async function sendManualFull(){
 }
 
 async function sendManualPartial(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   const input=document.getElementById('barcode');
   const code=input.value.trim();
   if(!code)return;
@@ -1172,6 +1194,7 @@ async function sendManualPartial(){
 }
 
 async function preparePartial(barcode){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
   busy=true;
   try{
@@ -1187,6 +1210,7 @@ async function preparePartial(barcode){
 
     partialBarcode=barcode;
     partialStandardQty=Number(data.standard_qty||0);
+    partialMeta=data;
     document.getElementById('partialTitle').textContent=(data.article||data.name||'Неполная палета');
     document.getElementById('partialMeta').textContent='Стандартная палета: '+partialStandardQty+' шт. · '+barcode;
     document.getElementById('partialQty').value='';
@@ -1204,6 +1228,7 @@ async function preparePartial(barcode){
 function cancelPartial(){
   partialBarcode='';
   partialStandardQty=0;
+  partialMeta=null;
   document.getElementById('partialForm').classList.add('hidden');
 }
 
@@ -1214,8 +1239,9 @@ async function confirmPartial(){
   if(qty>partialStandardQty){showError('Фактическое количество не может быть больше стандартной палеты '+partialStandardQty+' шт.');return;}
 
   const barcode=partialBarcode;
+  const data=partialMeta;
   cancelPartial();
-  await sendScan(barcode,qty);
+  await submitReceivingPallet(makeReceivingPallet(barcode,qty,data));
 }
 
 function resetOszForm(){
@@ -1234,6 +1260,7 @@ function resetOszForm(){
 }
 
 async function startOszFlow(){
+  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
   resetOszForm();
   document.getElementById('oszForm').classList.remove('hidden');
@@ -1333,6 +1360,7 @@ function oszQtyClear(){
 }
 
 async function acceptOszPallet(){
+  if(busy)return;
   if(!oszSscc||!oszProductBarcode){showError('Сначала отсканируйте SSCC и товар.');return;}
   const qty=Number(document.getElementById('oszQty').value);
   if(!Number.isFinite(qty)||qty<=0){showError('Введите количество с этикетки ОСЗ.');return;}
@@ -1383,43 +1411,151 @@ async function cancelOszFlow(){
   document.getElementById('oszForm').classList.add('hidden');
 }
 
-async function sendScan(barcode,quantity=null){
-  if(busy)return;
-  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
-  busy=true;
+function makeReceivingPallet(barcode,quantity,meta){
+  if(!window.crypto||!crypto.randomUUID){
+    showError('Устройство не поддерживает безопасный номер операции. Обнови браузер.');
+    return null;
+  }
+  return {
+    operation_id:crypto.randomUUID(),
+    receipt_id:activeReceiptId,
+    barcode:String(barcode),
+    quantity:quantity,
+    article:(meta&&meta.article)||'',
+    name:(meta&&meta.name)||'',
+    pack_name:(meta&&meta.pack_name)||'',
+    standard_qty:(meta&&meta.standard_qty)||0
+  };
+}
 
+function showStagedPallet(){
+  if(!stagedPallet)return;
+  const p=stagedPallet;
+  document.getElementById('result').innerHTML=
+    '<div class="info"><b>Палета готова к приёмке</b><br>'+
+    escapeHtml(p.article||p.name||'Товар')+' · <b>'+escapeHtml(p.quantity===null?p.standard_qty:p.quantity)+' шт.</b><br>'+
+    '<span class="small">'+escapeHtml(p.barcode)+' · Пока ничего не добавлено</span><br>'+
+    '<button type="button" onclick="confirmStagedPallet()">✓ Подтвердить 1 палету</button> '+
+    '<button type="button" class="secondary" onclick="cancelStagedPallet()">Отмена</button></div>';
+}
+function cancelStagedPallet(){
+  if(pendingConfirmation)return;
+  stagedPallet=null;
+  document.getElementById('result').innerHTML='<div class="info">Скан отменён, количество не менялось.</div>';
+}
+async function confirmStagedPallet(){
+  if(busy||!stagedPallet)return;
+  await submitReceivingPallet(stagedPallet);
+}
+function clearConfirmedPallet(response,pending){
+  pendingConfirmation=null;
+  localStorage.removeItem(RECEIVING_PENDING_KEY);
+  // One count per confirmed operation in this local session.
+  pallets+=1;
+  units+=Number(response.added||0);
+  document.getElementById('pallets').textContent=pallets;
+  document.getElementById('units').textContent=units;
+  successFeedback();
+  document.getElementById('result').innerHTML=
+    '<div class="ok"><b>Палета принята</b><br>'+
+    escapeHtml(response.article||response.name||pending.article||'')+' · <b>'+escapeHtml(response.added)+' шт.</b><br>'+
+    'В МойСклад: <b>'+escapeHtml(response.total)+' шт.</b><br>'+
+    '<span class="small">'+escapeHtml(pending.barcode)+'</span></div>';
+}
+function showUncertainPallet(){
+  const p=pendingConfirmation;
+  if(!p)return;
+  document.getElementById('result').innerHTML=
+    '<div class="err"><b>Результат приёмки требует проверки</b><br>'+
+    escapeHtml(p.article||p.name||p.barcode)+' · '+escapeHtml(p.quantity===null?p.standard_qty:p.quantity)+' шт.<br>'+
+    'Не сканируй палету снова: запись могла пройти в МойСклад.<br>'+
+    '<button type="button" onclick="checkReceivingPallet()">Проверить состояние</button> '+
+    '<button type="button" class="secondary" onclick="reconcileReceivingPallet()">Сверил в МойСклад</button></div>';
+}
+async function checkReceivingPallet(){
+  if(busy||!pendingConfirmation)return;
+  busy=true;
+  try{
+    const p=pendingConfirmation;
+    const r=await fetch('/api/scan-operation/'+encodeURIComponent(p.operation_id),{cache:'no-store'});
+    const d=await r.json();
+    if(r.ok&&d.status==='done'){
+      clearConfirmedPallet(d.response,p);
+    }else if(r.status===404){
+      // Same UUID, never a second distinct operation.
+      busy=false;
+      await submitReceivingPallet(p);
+      return;
+    }else{
+      showUncertainPallet();
+    }
+  }catch(e){showUncertainPallet();}
+  finally{busy=false;}
+}
+async function reconcileReceivingPallet(){
+  if(busy||!pendingConfirmation)return;
+  if(!confirm('Сначала сверь количество в документе МойСклад. Операция не будет автоматически повторена. Ты проверил результат?'))return;
+  busy=true;
+  try{
+    const p=pendingConfirmation;
+    const r=await fetch('/api/scan-operation/'+encodeURIComponent(p.operation_id)+'/reconcile',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({verified:true})
+    });
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Не удалось закрыть проверку');
+    if(d.status==='done'){
+      clearConfirmedPallet(d.response,p);
+      return;
+    }
+    pendingConfirmation=null;
+    localStorage.removeItem(RECEIVING_PENDING_KEY);
+    document.getElementById('result').innerHTML='<div class="info">Сверка отмечена. ONIX не прибавляла товар повторно.</div>';
+  }catch(e){showError(e.message);}
+  finally{busy=false;}
+}
+async function submitReceivingPallet(p){
+  if(!p||busy)return;
+  if(pendingConfirmation&&pendingConfirmation.operation_id!==p.operation_id){
+    showUncertainPallet();return;
+  }
+  busy=true;
+  stagedPallet=null;
+  pendingConfirmation=p;
+  // Save BEFORE network request. Browser restart cannot silently issue a new UUID.
+  localStorage.setItem(RECEIVING_PENDING_KEY,JSON.stringify(p));
+  document.getElementById('result').innerHTML='<div class="info"><b>Подтверждаю палету в МойСклад…</b></div>';
   try{
     const r=await fetch('/api/scan',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({barcode:barcode,receipt_id:activeReceiptId,quantity:quantity})
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(p)
+    });
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Результат не подтверждён');
+    clearConfirmedPallet(d,p);
+  }catch(e){
+    showUncertainPallet();
+  }finally{busy=false;}
+}
+async function sendScan(barcode,quantity=null){
+  if(busy)return;
+  if(stagedPallet||pendingConfirmation){showError('Подтверди предыдущую палету.');return;}
+  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
+  busy=true;
+  try{
+    const r=await fetch('/api/pack-info',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({barcode:barcode})
     });
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Ошибка');
-
-    pallets+=1;
-    units+=Number(data.added||0);
-    document.getElementById('pallets').textContent=pallets;
-    document.getElementById('units').textContent=units;
-
-    successFeedback();
-
-    // После успешного сканирования камерой сразу закрываем её.
-    // Это исключает случайный повторный захват той же палеты.
-    if(scanner){
+    if(!r.ok)throw new Error(data.error||'Упаковка не найдена');
+    stagedPallet=makeReceivingPallet(barcode,quantity,data);
+    if(stagedPallet){
       await stopScanner();
+      showStagedPallet();
+      successFeedback();
     }
-
-    document.getElementById('result').innerHTML=
-      '<div class="ok"><b>'+escapeHtml(data.article||data.name||'')+'</b><br>'+
-      'Добавлено: <b>'+data.added+' шт.</b><br>'+
-      'Теперь в Приёмке: <b>'+data.total+' шт.</b><br>'+
-      '<span class="small">'+escapeHtml(data.pack_name||'')+' · '+escapeHtml(data.barcode)+'</span></div>';
-  }catch(e){
-    showError(e.message);
-  }finally{
-    setTimeout(()=>{busy=false;},900);
-  }
+  }catch(e){showError(e.message);}
+  finally{busy=false;}
 }
 
 function showError(message){
@@ -1454,7 +1590,15 @@ async function loadWmsIdentity(){
     if(!op.ok)throw Error('Не удалось восстановить работу с приёмкой');
     const savedId=localStorage.getItem('receipt_id')||'';
     const savedName=localStorage.getItem('receipt_name')||'';
-    if(savedId)setActiveReceipt(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    try{
+      const savedPending=JSON.parse(localStorage.getItem(RECEIVING_PENDING_KEY)||'null');
+      if(savedPending&&savedPending.operation_id&&savedPending.receipt_id){
+        pendingConfirmation=savedPending;
+      }
+    }catch(e){localStorage.removeItem(RECEIVING_PENDING_KEY);}
+    const selectedId=(pendingConfirmation&&pendingConfirmation.receipt_id)||savedId;
+    if(selectedId)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    if(pendingConfirmation)showUncertainPallet();
   }catch(e){
     showError('Не удалось восстановить рабочую приёмку. Проверь подключение к сети и обнови страницу.');
   }
@@ -2122,6 +2266,8 @@ def new_receipt():
 @app.post("/api/receipts/<receipt_id>/complete")
 def finish_receipt(receipt_id):
     try:
+        if has_unresolved_operations(receipt_id):
+            return jsonify(error="Есть неподтверждённая операция приёмки. Сначала сверь документ МойСклад."), 409
         # Сводку считаем по самому документу МойСклад, чтобы финальный экран
         # не зависел от локальных счётчиков телефона.
         before = get_receipt(receipt_id)
@@ -2419,26 +2565,129 @@ def pack_info():
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+@app.get("/api/scan-operation/<operation_id>")
+def receiving_scan_operation_status(operation_id):
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Нужен вход по бейджу"), 401
+    try:
+        operation_id = str(uuid.UUID(operation_id))
+    except ValueError:
+        return jsonify(error="Неверный номер операции"), 400
+    record = read_operation(operation_id)
+    if not record or record["employee_id"] != employee["id"]:
+        return jsonify(error="Операция не найдена"), 404
+    return jsonify(ok=record["status"] == "done",
+                   status=record["status"],
+                   receipt_id=record["receipt_id"],
+                   response=record["response"] if record["status"] == "done" else None)
+
+
+@app.post("/api/scan-operation/<operation_id>/reconcile")
+def manually_reconcile_receiving_scan(operation_id):
+    """After a MoySklad document check, close an uncertain operation, not retry it."""
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Нужен вход по бейджу"), 401
+    try:
+        operation_id = str(uuid.UUID(operation_id))
+    except ValueError:
+        return jsonify(error="Неверный номер операции"), 400
+    record = read_operation(operation_id)
+    if not record or record["employee_id"] != employee["id"]:
+        return jsonify(error="Операция не найдена"), 404
+    if not (request.get_json(silent=True) or {}).get("verified"):
+        return jsonify(error="Необходимо подтвердить сверку с МойСклад"), 400
+    if record["status"] == "done":
+        return jsonify(ok=True, status="done", response=record["response"])
+    if record["status"] == "processing":
+        try:
+            started = datetime.fromisoformat(record["created_at"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - started < timedelta(minutes=2):
+                return jsonify(error="Операция ещё обрабатывается. Повтори проверку через 2 минуты."), 409
+        except (TypeError, ValueError):
+            return jsonify(error="Невозможно проверить время операции"), 409
+    if record["status"] not in ("processing", "uncertain"):
+        return jsonify(error="Операция уже закрыта"), 409
+    updated = reconcile_after_manual_check(operation_id)
+    if updated["status"] == "done":
+        return jsonify(ok=True, status="done", response=updated["response"])
+    return jsonify(ok=True, status=updated["status"])
+
+
 @app.post("/api/scan")
 def scan():
+    """Confirmed pallet acceptance. Exactly one MoySklad write attempt per UUID.
+
+    A crash or timeout after MoySklad write leaves status processing/uncertain.
+    Never retry such an operation automatically; it requires reconciliation.
+    """
     try:
         data = request.get_json(force=True)
         barcode = str(data.get("barcode", "")).strip()
         receipt_id = str(data.get("receipt_id", "")).strip()
-        requested_qty = data.get("quantity", None)
-
+        employee = get_session_employee()
+        if not employee:
+            return jsonify(error="Нужен вход по бейджу"), 401
+        try:
+            operation_id = str(uuid.UUID(str(data.get("operation_id", "")).strip()))
+        except ValueError:
+            return jsonify(error="Обнови страницу приёмки: для подтверждения нужен номер операции"), 400
         if not barcode:
             return jsonify(error="Пустой штрихкод"), 400
         if not receipt_id:
             return jsonify(error="Не выбрано Оприходование"), 400
+        requested_qty = data.get("quantity", None)
+        if requested_qty is not None:
+            requested_qty = float(requested_qty)
+            if not math.isfinite(requested_qty) or requested_qty <= 0:
+                return jsonify(error="Некорректное количество"), 400
+        qty_key = "" if requested_qty is None else str(requested_qty)
+
+        # Return an already processed operation BEFORE looking up MoySklad.
+        existing = read_operation(operation_id)
+        if existing:
+            if (existing["receipt_id"] != receipt_id or existing["barcode"] != barcode
+                    or existing["employee_id"] != employee["id"]
+                    or existing["requested_qty"] != qty_key):
+                return jsonify(error="Номер операции уже относится к другой палете"), 409
+            if existing["status"] == "done":
+                return jsonify(ok=True, operation_id=operation_id, replayed=True, **existing["response"])
+            return jsonify(error="Операция уже отправлена. Проверь результат в МойСклад; повторно товар не добавлялся.",
+                           operation_id=operation_id, status=existing["status"]), 409
 
         product, pack = find_product_pack_by_barcode(barcode)
         if not product:
             return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
+        # Atomic claim blocks concurrent requests, double-taps, and HTTP retries.
+        claimed, record = claim_operation(
+            operation_id, receipt_id, employee["id"], barcode, qty_key
+        )
+        if not claimed:
+            if record["status"] == "done":
+                return jsonify(ok=True, operation_id=operation_id, replayed=True, **record["response"])
+            return jsonify(error="Операция обрабатывается или требует сверки.",
+                           operation_id=operation_id, status=record["status"]), 409
 
-        result = add_or_increment_position(receipt_id, product, pack, requested_qty)
-        employee = get_session_employee()
-        if employee:
+        try:
+            result = add_or_increment_position(receipt_id, product, pack, requested_qty)
+            response = dict(
+                barcode=barcode,
+                name=product.get("name"),
+                article=product.get("article"),
+                pack_name=pack.get("name"),
+                added=result["added"],
+                total=result["total"],
+                mode=result["mode"],
+            )
+            # Commit the idempotency result FIRST; logging must not turn a
+            # successful MoySklad write into a retryable error.
+            finish_operation(operation_id, response)
+        except Exception as exc:
+            mark_uncertain(operation_id, str(exc))
+            raise
+
+        try:
             log_event(
                 employee["id"],
                 "receiving",
@@ -2449,23 +2698,19 @@ def scan():
                 article=product.get("article"),
                 product_name=product.get("name"),
             )
-        return jsonify(
-            ok=True,
-            barcode=barcode,
-            name=product.get("name"),
-            article=product.get("article"),
-            pack_name=pack.get("name"),
-            added=result["added"],
-            total=result["total"],
-            mode=result["mode"],
-        )
+        except Exception as exc:
+            print(f"Receiving audit event failed for {operation_id}: {exc}", flush=True)
+
+        return jsonify(ok=True, operation_id=operation_id, **response)
     except ValueError as e:
         return jsonify(error=str(e)), 409
     except requests.HTTPError as e:
         body = e.response.text[:1200] if e.response is not None else ""
-        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
+        return jsonify(error=f"Запись в МойСклад не подтверждена: {e}. {body}. Проверь документ перед новым сканом.",
+                       status="uncertain"), 503
     except Exception as e:
-        return jsonify(error=str(e)), 500
+        return jsonify(error=f"Результат операции не подтверждён: {e}. Не сканируй эту палету повторно до сверки.",
+                       status="uncertain"), 503
 
 if __name__ == "__main__":
     _start_wms_initializer()

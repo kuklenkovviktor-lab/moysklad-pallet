@@ -1,0 +1,44 @@
+name: ONIX safe receiving confirmation tests
+
+on:
+  push:
+    branches:
+      - main
+      - onix/receiving-safety-20261020
+    paths:
+      - 'app.py'
+      - 'receiving_idempotency.py'
+      - 'tests/test_receiving_confirmation.py'
+      - '.github/workflows/onix-receiving-confirmation-tests.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  receiving-confirmation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q receiving_idempotency.py app.py wms.py
+      - name: Check receiving browser JavaScript syntax
+        run: |
+          python - <<'PY'
+          import os, re
+          os.environ.setdefault('SECRET_KEY', 'test-secret')
+          os.environ.setdefault('WMS_BADGE_SECRET', 'test-badge')
+          os.environ.setdefault('WMS_TERMINAL_SECRET', 'test-terminal')
+          import app
+          snippets=re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>',app.PAGE,re.S)
+          assert snippets, 'no inline scripts'
+          with open('/tmp/onix-receiving.js','w') as f:
+              f.write('\n'.join(snippets))
+          PY
+          node --check /tmp/onix-receiving.js
+      - name: Test receipt confirmation and idempotency
+        run: python -m unittest discover -s tests -p 'test_receiving_confirmation.py' -v
