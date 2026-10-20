@@ -5,7 +5,7 @@ import math
 import time
 import threading
 import tempfile
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
@@ -35,6 +35,7 @@ from receiving_idempotency import (
     finish_operation,
     mark_uncertain,
     has_unresolved_operations,
+    reconcile_after_manual_check,
 )
 from fbs_catalog import (
     init_fbs_catalog_db,
@@ -2580,6 +2581,38 @@ def receiving_scan_operation_status(operation_id):
                    status=record["status"],
                    receipt_id=record["receipt_id"],
                    response=record["response"] if record["status"] == "done" else None)
+
+
+@app.post("/api/scan-operation/<operation_id>/reconcile")
+def manually_reconcile_receiving_scan(operation_id):
+    """After a MoySklad document check, close an uncertain operation, not retry it."""
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Нужен вход по бейджу"), 401
+    try:
+        operation_id = str(uuid.UUID(operation_id))
+    except ValueError:
+        return jsonify(error="Неверный номер операции"), 400
+    record = read_operation(operation_id)
+    if not record or record["employee_id"] != employee["id"]:
+        return jsonify(error="Операция не найдена"), 404
+    if not (request.get_json(silent=True) or {}).get("verified"):
+        return jsonify(error="Необходимо подтвердить сверку с МойСклад"), 400
+    if record["status"] == "done":
+        return jsonify(ok=True, status="done", response=record["response"])
+    if record["status"] == "processing":
+        try:
+            started = datetime.fromisoformat(record["created_at"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - started < timedelta(minutes=2):
+                return jsonify(error="Операция ещё обрабатывается. Повтори проверку через 2 минуты."), 409
+        except (TypeError, ValueError):
+            return jsonify(error="Невозможно проверить время операции"), 409
+    if record["status"] not in ("processing", "uncertain"):
+        return jsonify(error="Операция уже закрыта"), 409
+    updated = reconcile_after_manual_check(operation_id)
+    if updated["status"] == "done":
+        return jsonify(ok=True, status="done", response=updated["response"])
+    return jsonify(ok=True, status=updated["status"])
 
 
 @app.post("/api/scan")
