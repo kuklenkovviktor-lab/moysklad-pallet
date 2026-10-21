@@ -2068,6 +2068,54 @@ def start_pack_warmup():
         WARMUP_STATE["running"] = True
     threading.Thread(target=_warm_pack_cache_worker, daemon=True).start()
 
+class ReceiptUnavailable(Exception):
+    def __init__(self, reason, name=""):
+        self.reason = reason
+        self.name = str(name or "").strip()
+        super().__init__("Оприходование недоступно")
+
+
+def receipt_is_deleted(doc):
+    # Deleted entity representations differ depending on MoySklad API version.
+    return any(doc.get(key) for key in ("deleted", "isDeleted", "deletedAt"))
+
+
+def receipt_error_is_deleted(exc):
+    response = getattr(exc, "response", None)
+    if response is None:
+        return False
+    if response.status_code != 412:
+        return False
+    body = str(response.text or "").lower()
+    return "корзин" in body or '"code": 3007' in body or '"code":3007' in body
+
+
+def validate_receipt_document(doc):
+    if receipt_is_deleted(doc):
+        raise ReceiptUnavailable("deleted", doc.get("name"))
+    if doc.get("applicable"):
+        raise ReceiptUnavailable("completed", doc.get("name"))
+    return doc
+
+
+def receipt_unavailable_response(exc, fallback_name=""):
+    name = exc.name or fallback_name or "Выбранное оприходование"
+    if exc.reason == "completed":
+        return jsonify(
+            error=f"Оприходование №{name} уже проведено. Выберите другое или начните новую приёмку.",
+            reason="completed", document_name=name,
+        ), 409
+    if exc.reason == "missing":
+        return jsonify(
+            error="Оприходование больше недоступно в МойСклад. Выберите другое или начните новую приёмку.",
+            reason="missing", document_name=name,
+        ), 409
+    return jsonify(
+        error=f"Оприходование №{name} находится в корзине МойСклад. Выберите другое оприходование или начните новую приёмку.",
+        reason="deleted", document_name=name,
+    ), 409
+
+
 def get_receipt(receipt_id):
     r = requests.get(
         f"{API_BASE}/entity/enter/{receipt_id}",
@@ -2076,7 +2124,30 @@ def get_receipt(receipt_id):
         timeout=30,
     )
     r.raise_for_status()
-    return r.json()
+    doc = r.json()
+    validate_receipt_document(doc)
+    return doc
+
+
+@app.get("/api/receipts/<receipt_id>/status")
+def receipt_document_status(receipt_id):
+    """Read-only check before restoring/opening a stored document on the phone."""
+    try:
+        receipt = get_receipt(receipt_id)
+        return jsonify(ok=True, id=receipt.get("id"), name=receipt.get("name"), status="draft")
+    except ReceiptUnavailable as exc:
+        return receipt_unavailable_response(exc)
+    except requests.HTTPError as exc:
+        if receipt_error_is_deleted(exc):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted"))
+        if exc.response is not None and exc.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
+        return jsonify(error="Не удалось проверить оприходование в МойСклад. Попробуйте обновить страницу.",
+                       reason="temporary"), 502
+    except Exception:
+        return jsonify(error="Не удалось проверить доступность оприходования. Проверьте подключение.",
+                       reason="temporary"), 503
+
 
 def add_or_increment_position(receipt_id, product, pack, requested_qty=None, enforce_pack_limit=True):
     receipt = get_receipt(receipt_id)
@@ -2314,7 +2385,13 @@ def finish_receipt(receipt_id):
             pallets=pallets_count,
             employee=(employee or {}).get("name", ""),
         )
+    except ReceiptUnavailable as exc:
+        return receipt_unavailable_response(exc)
     except requests.HTTPError as e:
+        if receipt_error_is_deleted(e):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted", before.get("name", "") if "before" in locals() else ""))
+        if e.response is not None and e.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
@@ -2702,9 +2779,15 @@ def scan():
             print(f"Receiving audit event failed for {operation_id}: {exc}", flush=True)
 
         return jsonify(ok=True, operation_id=operation_id, **response)
+    except ReceiptUnavailable as e:
+        return receipt_unavailable_response(e)
     except ValueError as e:
         return jsonify(error=str(e)), 409
     except requests.HTTPError as e:
+        if receipt_error_is_deleted(e):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted"))
+        if e.response is not None and e.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Запись в МойСклад не подтверждена: {e}. {body}. Проверь документ перед новым сканом.",
                        status="uncertain"), 503
