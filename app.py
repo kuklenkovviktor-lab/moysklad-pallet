@@ -34,6 +34,7 @@ from receiving_idempotency import (
     read_operation,
     finish_operation,
     mark_uncertain,
+    reject_operation,
     has_unresolved_operations,
     reconcile_after_manual_check,
 )
@@ -892,6 +893,7 @@ function setActiveReceipt(id,name,meta=''){
 }
 
 const RECEIPT_UNAVAILABLE_REASONS=['deleted','missing','completed'];
+let receiptToRecheck=null;
 
 function showUnavailableReceipt(info,name=''){
   // Never change or restore MoySklad documents. Only forget the invalid selection.
@@ -899,6 +901,8 @@ function showUnavailableReceipt(info,name=''){
   if(scanner)stopScanner().catch(()=>{});
   stagedPallet=null;
   cancelPartial();
+  resetOszForm();
+  document.getElementById('oszForm').classList.add('hidden');
   setActiveReceipt('','','');
   hideDocForms();
   document.getElementById('docCard').classList.remove('hidden');
@@ -925,6 +929,7 @@ async function openReceiptSafely(id,name,meta=''){
     return false;
   }
   // Refuse scans until a fresh MoySklad check succeeds.
+  receiptToRecheck={id,name,meta};
   setActiveReceipt('','','');
   document.getElementById('docCard').classList.remove('hidden');
   const notice=document.getElementById('docNotice');
@@ -938,7 +943,7 @@ async function openReceiptSafely(id,name,meta=''){
         showUnavailableReceipt(data,name);
       }else{
         notice.innerHTML='<div class="err">Не удалось проверить документ в МойСклад. Повтори проверку после восстановления связи.</div>'+
-          '<button type="button" onclick="openReceiptSafely('+JSON.stringify(id)+','+JSON.stringify(name)+','+JSON.stringify(meta)+')">Повторить проверку</button>';
+          '<button type="button" onclick="retryReceiptCheck()">Повторить проверку</button>';
       }
       return false;
     }
@@ -946,9 +951,13 @@ async function openReceiptSafely(id,name,meta=''){
     return true;
   }catch(e){
     notice.innerHTML='<div class="err">Нет связи с МойСклад. Документ пока недоступен для сканирования.</div>'+
-      '<button type="button" onclick="openReceiptSafely('+JSON.stringify(id)+','+JSON.stringify(name)+','+JSON.stringify(meta)+')">Повторить проверку</button>';
+      '<button type="button" onclick="retryReceiptCheck()">Повторить проверку</button>';
     return false;
   }
+}
+
+function retryReceiptCheck(){
+  if(receiptToRecheck){const r=receiptToRecheck;openReceiptSafely(r.id,r.name,r.meta);}
 }
 
 function showNewDoc(){
@@ -1554,6 +1563,10 @@ async function checkReceivingPallet(){
     const d=await r.json();
     if(r.ok&&d.status==='done'){
       clearConfirmedPallet(d.response,p);
+    }else if(d.status==='rejected' && RECEIPT_UNAVAILABLE_REASONS.includes(d.reason)){
+      pendingConfirmation=null;
+      localStorage.removeItem(RECEIVING_PENDING_KEY);
+      showUnavailableReceipt(d,activeReceiptName);
     }else if(r.status===404){
       // Same UUID, never a second distinct operation.
       busy=false;
@@ -2746,6 +2759,7 @@ def receiving_scan_operation_status(operation_id):
     return jsonify(ok=record["status"] == "done",
                    status=record["status"],
                    receipt_id=record["receipt_id"],
+                   reason=record["error"] if record["status"] == "rejected" else None,
                    response=record["response"] if record["status"] == "done" else None)
 
 
@@ -2849,6 +2863,17 @@ def scan():
             # Commit the idempotency result FIRST; logging must not turn a
             # successful MoySklad write into a retryable error.
             finish_operation(operation_id, response)
+        except ReceiptUnavailable as exc:
+            reject_operation(operation_id, exc.reason)
+            raise
+        except requests.HTTPError as exc:
+            if receipt_error_is_deleted(exc):
+                reject_operation(operation_id, "deleted")
+            elif exc.response is not None and exc.response.status_code in (404, 410):
+                reject_operation(operation_id, "missing")
+            else:
+                mark_uncertain(operation_id, str(exc))
+            raise
         except Exception as exc:
             mark_uncertain(operation_id, str(exc))
             raise
