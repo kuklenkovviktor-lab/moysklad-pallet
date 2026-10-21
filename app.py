@@ -689,6 +689,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <div class="step-kicker">ПРИЁМКА</div>
   <h2 id="docTitle">Выбери документ</h2>
   <div id="activeDoc" class="activeDoc hidden"></div>
+  <div id="docNotice" class="hidden" role="alert"></div>
 
   <div id="docHome">
     <button id="newDocBtn" onclick="showNewDoc()">＋ Новая приёмка</button>
@@ -862,6 +863,7 @@ activateReceivingModule();
 
 function setActiveReceipt(id,name,meta=''){
   activeReceiptId=id||'';
+  if(activeReceiptId)document.getElementById('docNotice').classList.add('hidden');
   activeReceiptName=name||'';
   localStorage.setItem('receipt_id',activeReceiptId);
   localStorage.setItem('receipt_name',activeReceiptName);
@@ -889,13 +891,75 @@ function setActiveReceipt(id,name,meta=''){
   }
 }
 
+const RECEIPT_UNAVAILABLE_REASONS=['deleted','missing','completed'];
+
+function showUnavailableReceipt(info,name=''){
+  // Never change or restore MoySklad documents. Only forget the invalid selection.
+  const n=String(info.document_name||name||'').trim();
+  if(scanner)stopScanner().catch(()=>{});
+  stagedPallet=null;
+  cancelPartial();
+  setActiveReceipt('','','');
+  hideDocForms();
+  document.getElementById('docCard').classList.remove('hidden');
+  const box=document.getElementById('docNotice');
+  const description=info.reason==='completed'
+    ? 'уже проведено в МойСклад'
+    : info.reason==='missing'
+      ? 'больше недоступно в МойСклад'
+      : 'находится в корзине МойСклад';
+  box.innerHTML='<div class="err"><b>Оприходование недоступно</b><br>'+
+    (n?'Документ №'+escapeHtml(n)+' ':'Документ ')+escapeHtml(description)+'.<br>'+
+    'Выберите другое оприходование или начните новую приёмку.</div>'+
+    '<div class="quick-row">'+
+    '<button type="button" class="secondary" onclick="showExisting()">Выбрать другое</button>'+
+    '<button type="button" onclick="showNewDoc()">＋ Новая приёмка</button></div>';
+  box.classList.remove('hidden');
+  errorFeedback();
+}
+
+async function openReceiptSafely(id,name,meta=''){
+  if(!id)return false;
+  if(stagedPallet||pendingConfirmation){
+    showError('Сначала заверши или сверь предыдущую операцию приёмки.');
+    return false;
+  }
+  // Refuse scans until a fresh MoySklad check succeeds.
+  setActiveReceipt('','','');
+  document.getElementById('docCard').classList.remove('hidden');
+  const notice=document.getElementById('docNotice');
+  notice.innerHTML='<div class="info">Проверяю документ в МойСклад…</div>';
+  notice.classList.remove('hidden');
+  try{
+    const response=await fetch('/api/receipts/'+encodeURIComponent(id)+'/status',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,name);
+      }else{
+        notice.innerHTML='<div class="err">Не удалось проверить документ в МойСклад. Повтори проверку после восстановления связи.</div>'+
+          '<button type="button" onclick="openReceiptSafely('+JSON.stringify(id)+','+JSON.stringify(name)+','+JSON.stringify(meta)+')">Повторить проверку</button>';
+      }
+      return false;
+    }
+    setActiveReceipt(id,data.name||name,meta);
+    return true;
+  }catch(e){
+    notice.innerHTML='<div class="err">Нет связи с МойСклад. Документ пока недоступен для сканирования.</div>'+
+      '<button type="button" onclick="openReceiptSafely('+JSON.stringify(id)+','+JSON.stringify(name)+','+JSON.stringify(meta)+')">Повторить проверку</button>';
+    return false;
+  }
+}
+
 function showNewDoc(){
+  document.getElementById('docNotice').classList.add('hidden');
   document.getElementById('docHome').classList.add('hidden');
   document.getElementById('newDocForm').classList.remove('hidden');
   document.getElementById('existingForm').classList.add('hidden');
   document.getElementById('docTitle').textContent='Новая приёмка';
 }
 function showExisting(){
+  document.getElementById('docNotice').classList.add('hidden');
   document.getElementById('docHome').classList.add('hidden');
   document.getElementById('existingForm').classList.remove('hidden');
   document.getElementById('newDocForm').classList.add('hidden');
@@ -994,15 +1058,12 @@ async function loadReceipts(){
   }
 }
 
-function useSelectedReceipt(){
+async function useSelectedReceipt(){
   if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const o=receiptSelect.options[receiptSelect.selectedIndex];
-  if(!o||!o.value){
-    showError('Выбери Приёмку.');
-    return;
-  }
-  setActiveReceipt(o.value,o.dataset.name||o.textContent,o.dataset.meta||'');
-  hideDocForms();
+  if(!o||!o.value){showError('Выбери Приёмку.');return;}
+  const ok=await openReceiptSafely(o.value,o.dataset.name||o.textContent,o.dataset.meta||'');
+  if(ok)hideDocForms();
 }
 
 async function completeReceipt(){
@@ -1017,7 +1078,13 @@ async function completeReceipt(){
     const fallbackUnits=units;
     const r=await fetch('/api/receipts/'+activeReceiptId+'/complete',{method:'POST'});
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось провести Оприходование');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,activeReceiptName);
+        return;
+      }
+      throw new Error(data.error||'Не удалось провести Оприходование');
+    }
 
     setActiveReceipt('','','');
 
@@ -1378,7 +1445,13 @@ async function acceptOszPallet(){
       })
     });
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось принять палету ОСЗ');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,activeReceiptName);
+        return;
+      }
+      throw new Error(data.error||'Не удалось принять палету ОСЗ');
+    }
 
     pallets+=1;
     units+=Number(data.added||0);
@@ -1530,7 +1603,17 @@ async function submitReceivingPallet(p){
       body:JSON.stringify(p)
     });
     const d=await r.json();
-    if(!r.ok)throw new Error(d.error||'Результат не подтверждён');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(d.reason)){
+        // Only discard the local UUID when the backend has definitively
+        // rejected the operation without changing the document.
+        pendingConfirmation=null;
+        localStorage.removeItem(RECEIVING_PENDING_KEY);
+        showUnavailableReceipt(d,activeReceiptName);
+        return;
+      }
+      throw new Error(d.error||'Результат не подтверждён');
+    }
     clearConfirmedPallet(d,p);
   }catch(e){
     showUncertainPallet();
@@ -1597,8 +1680,14 @@ async function loadWmsIdentity(){
       }
     }catch(e){localStorage.removeItem(RECEIVING_PENDING_KEY);}
     const selectedId=(pendingConfirmation&&pendingConfirmation.receipt_id)||savedId;
-    if(selectedId)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
-    if(pendingConfirmation)showUncertainPallet();
+    if(selectedId&&pendingConfirmation)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    if(pendingConfirmation){
+      // A previously submitted operation must be reconciled, never silently
+      // discarded on page reload, even if the document was later removed.
+      showUncertainPallet();
+    }else if(savedId){
+      await openReceiptSafely(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    }
   }catch(e){
     showError('Не удалось восстановить рабочую приёмку. Проверь подключение к сети и обнови страницу.');
   }
