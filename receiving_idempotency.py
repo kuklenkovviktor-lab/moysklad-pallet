@@ -120,3 +120,19 @@ def reconcile_after_manual_check(operation_id):
         conn.commit()
         cur.close()
     return read_operation(operation_id)
+
+
+def reject_operation(operation_id, reason):
+    """A definitive MoySklad rejection: document was not modified.
+
+    Preserve the UUID and audit entry, but do not hold the document in an
+    unresolved state. A second request with this UUID remains blocked.
+    """
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(sql("""
+            UPDATE receiving_confirmations SET status = 'rejected', error = ?,
+                updated_at = ? WHERE operation_id = ? AND status = 'processing'
+        """), (str(reason)[:400], now_iso(), operation_id))
+        conn.commit()
+        cur.close()

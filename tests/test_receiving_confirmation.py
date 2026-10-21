@@ -110,5 +110,73 @@ class ReceivingConfirmationTests(unittest.TestCase):
         self.assertIn("async function checkReceivingPallet()",html)
 
 
+    def test_deleted_receipt_status_blocks_reopening(self):
+        with patch.object(app, "get_receipt", side_effect=app.ReceiptUnavailable("deleted", "00003-00033")):
+            response=self.client.get("/api/receipts/old-doc/status")
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(response.json["reason"],"deleted")
+        self.assertIn("корзине",response.json["error"])
+        self.assertEqual(response.json["document_name"],"00003-00033")
+
+    def test_draft_receipt_remains_accessible(self):
+        with patch.object(app, "get_receipt", return_value={"id":"good-id","name":"DOC-01","applicable":False}):
+            response=self.client.get("/api/receipts/good-id/status")
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json["status"],"draft")
+
+    def test_get_receipt_detects_deleted_field(self):
+        with patch.object(app.requests, "get") as get:
+            get.return_value.raise_for_status.return_value=None
+            get.return_value.json.return_value={"id":"removed","name":"00003-00033","deleted":True}
+            with self.assertRaises(app.ReceiptUnavailable) as raised:
+                app.get_receipt("removed")
+        self.assertEqual(raised.exception.reason,"deleted")
+
+    def test_deleted_receipt_rejects_pallet_without_replaying(self):
+        payload=self.payload()
+        with patch.object(app,"find_product_pack_by_barcode",return_value=(self.product,self.pack)), \
+             patch.object(app,"add_or_increment_position",side_effect=app.ReceiptUnavailable("deleted","00003-00033")) as write:
+            first=self.client.post("/api/scan",json=payload)
+            again=self.client.post("/api/scan",json=payload)
+        self.assertEqual(first.status_code,409,first.json)
+        self.assertEqual(first.json["reason"],"deleted")
+        self.assertEqual(again.status_code,409,again.json)
+        write.assert_called_once()
+        operation=read_operation(payload["operation_id"])
+        self.assertEqual(operation["status"],"rejected")
+        self.assertEqual(operation["error"],"deleted")
+
+    def test_moysklad_412_trash_is_not_recorded_as_uncertain(self):
+        import requests
+        resp=requests.Response()
+        resp.status_code=412
+        resp.url="https://api.moysklad.ru/api/remap/1.2/entity/enter/old"
+        resp._content='{"errors":[{"error":"Операция находится в корзине","code":3007}]}'.encode()
+        payload=self.payload()
+        with patch.object(app,"find_product_pack_by_barcode",return_value=(self.product,self.pack)), \
+             patch.object(app,"add_or_increment_position",side_effect=requests.HTTPError("precondition",response=resp)) as write:
+            response=self.client.post("/api/scan",json=payload)
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(response.json["reason"],"deleted")
+        self.assertEqual(read_operation(payload["operation_id"])["status"],"rejected")
+        write.assert_called_once()
+
+    def test_deleted_receipt_cannot_be_completed(self):
+        with patch.object(app,"has_unresolved_operations",return_value=False), \
+             patch.object(app,"get_receipt",side_effect=app.ReceiptUnavailable("deleted","00003-00033")), \
+             patch.object(app,"complete_receipt") as complete:
+            response=self.client.post("/api/receipts/old-doc/complete")
+        self.assertEqual(response.status_code,409,response.json)
+        self.assertEqual(response.json["reason"],"deleted")
+        complete.assert_not_called()
+
+    def test_scanner_contains_unavailable_document_actions(self):
+        html=app.PAGE
+        self.assertIn("Оприходование недоступно",html)
+        self.assertIn("Выбрать другое",html)
+        self.assertIn("Новая приёмка",html)
+        self.assertIn("await openReceiptSafely(savedId",html)
+
+
 if __name__=="__main__":
     unittest.main()

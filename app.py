@@ -34,6 +34,7 @@ from receiving_idempotency import (
     read_operation,
     finish_operation,
     mark_uncertain,
+    reject_operation,
     has_unresolved_operations,
     reconcile_after_manual_check,
 )
@@ -689,6 +690,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <div class="step-kicker">ПРИЁМКА</div>
   <h2 id="docTitle">Выбери документ</h2>
   <div id="activeDoc" class="activeDoc hidden"></div>
+  <div id="docNotice" class="hidden" role="alert"></div>
 
   <div id="docHome">
     <button id="newDocBtn" onclick="showNewDoc()">＋ Новая приёмка</button>
@@ -862,6 +864,7 @@ activateReceivingModule();
 
 function setActiveReceipt(id,name,meta=''){
   activeReceiptId=id||'';
+  if(activeReceiptId)document.getElementById('docNotice').classList.add('hidden');
   activeReceiptName=name||'';
   localStorage.setItem('receipt_id',activeReceiptId);
   localStorage.setItem('receipt_name',activeReceiptName);
@@ -889,13 +892,83 @@ function setActiveReceipt(id,name,meta=''){
   }
 }
 
+const RECEIPT_UNAVAILABLE_REASONS=['deleted','missing','completed'];
+let receiptToRecheck=null;
+
+function showUnavailableReceipt(info,name=''){
+  // Never change or restore MoySklad documents. Only forget the invalid selection.
+  const n=String(info.document_name||name||'').trim();
+  if(scanner)stopScanner().catch(()=>{});
+  stagedPallet=null;
+  cancelPartial();
+  resetOszForm();
+  document.getElementById('oszForm').classList.add('hidden');
+  setActiveReceipt('','','');
+  hideDocForms();
+  document.getElementById('docCard').classList.remove('hidden');
+  const box=document.getElementById('docNotice');
+  const description=info.reason==='completed'
+    ? 'уже проведено в МойСклад'
+    : info.reason==='missing'
+      ? 'больше недоступно в МойСклад'
+      : 'находится в корзине МойСклад';
+  box.innerHTML='<div class="err"><b>Оприходование недоступно</b><br>'+
+    (n?'Документ №'+escapeHtml(n)+' ':'Документ ')+escapeHtml(description)+'.<br>'+
+    'Выберите другое оприходование или начните новую приёмку.</div>'+
+    '<div class="quick-row">'+
+    '<button type="button" class="secondary" onclick="showExisting()">Выбрать другое</button>'+
+    '<button type="button" onclick="showNewDoc()">＋ Новая приёмка</button></div>';
+  box.classList.remove('hidden');
+  errorFeedback();
+}
+
+async function openReceiptSafely(id,name,meta=''){
+  if(!id)return false;
+  if(stagedPallet||pendingConfirmation){
+    showError('Сначала заверши или сверь предыдущую операцию приёмки.');
+    return false;
+  }
+  // Refuse scans until a fresh MoySklad check succeeds.
+  receiptToRecheck={id,name,meta};
+  setActiveReceipt('','','');
+  document.getElementById('docCard').classList.remove('hidden');
+  const notice=document.getElementById('docNotice');
+  notice.innerHTML='<div class="info">Проверяю документ в МойСклад…</div>';
+  notice.classList.remove('hidden');
+  try{
+    const response=await fetch('/api/receipts/'+encodeURIComponent(id)+'/status',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,name);
+      }else{
+        notice.innerHTML='<div class="err">Не удалось проверить документ в МойСклад. Повтори проверку после восстановления связи.</div>'+
+          '<button type="button" onclick="retryReceiptCheck()">Повторить проверку</button>';
+      }
+      return false;
+    }
+    setActiveReceipt(id,data.name||name,meta);
+    return true;
+  }catch(e){
+    notice.innerHTML='<div class="err">Нет связи с МойСклад. Документ пока недоступен для сканирования.</div>'+
+      '<button type="button" onclick="retryReceiptCheck()">Повторить проверку</button>';
+    return false;
+  }
+}
+
+function retryReceiptCheck(){
+  if(receiptToRecheck){const r=receiptToRecheck;openReceiptSafely(r.id,r.name,r.meta);}
+}
+
 function showNewDoc(){
+  document.getElementById('docNotice').classList.add('hidden');
   document.getElementById('docHome').classList.add('hidden');
   document.getElementById('newDocForm').classList.remove('hidden');
   document.getElementById('existingForm').classList.add('hidden');
   document.getElementById('docTitle').textContent='Новая приёмка';
 }
 function showExisting(){
+  document.getElementById('docNotice').classList.add('hidden');
   document.getElementById('docHome').classList.add('hidden');
   document.getElementById('existingForm').classList.remove('hidden');
   document.getElementById('newDocForm').classList.add('hidden');
@@ -994,15 +1067,12 @@ async function loadReceipts(){
   }
 }
 
-function useSelectedReceipt(){
+async function useSelectedReceipt(){
   if(stagedPallet||pendingConfirmation){showError('Сначала заверши предыдущую операцию приёмки.');return;}
   const o=receiptSelect.options[receiptSelect.selectedIndex];
-  if(!o||!o.value){
-    showError('Выбери Приёмку.');
-    return;
-  }
-  setActiveReceipt(o.value,o.dataset.name||o.textContent,o.dataset.meta||'');
-  hideDocForms();
+  if(!o||!o.value){showError('Выбери Приёмку.');return;}
+  const ok=await openReceiptSafely(o.value,o.dataset.name||o.textContent,o.dataset.meta||'');
+  if(ok)hideDocForms();
 }
 
 async function completeReceipt(){
@@ -1017,7 +1087,13 @@ async function completeReceipt(){
     const fallbackUnits=units;
     const r=await fetch('/api/receipts/'+activeReceiptId+'/complete',{method:'POST'});
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось провести Оприходование');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,activeReceiptName);
+        return;
+      }
+      throw new Error(data.error||'Не удалось провести Оприходование');
+    }
 
     setActiveReceipt('','','');
 
@@ -1378,7 +1454,13 @@ async function acceptOszPallet(){
       })
     });
     const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось принять палету ОСЗ');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
+        showUnavailableReceipt(data,activeReceiptName);
+        return;
+      }
+      throw new Error(data.error||'Не удалось принять палету ОСЗ');
+    }
 
     pallets+=1;
     units+=Number(data.added||0);
@@ -1481,6 +1563,10 @@ async function checkReceivingPallet(){
     const d=await r.json();
     if(r.ok&&d.status==='done'){
       clearConfirmedPallet(d.response,p);
+    }else if(d.status==='rejected' && RECEIPT_UNAVAILABLE_REASONS.includes(d.reason)){
+      pendingConfirmation=null;
+      localStorage.removeItem(RECEIVING_PENDING_KEY);
+      showUnavailableReceipt(d,activeReceiptName);
     }else if(r.status===404){
       // Same UUID, never a second distinct operation.
       busy=false;
@@ -1530,7 +1616,17 @@ async function submitReceivingPallet(p){
       body:JSON.stringify(p)
     });
     const d=await r.json();
-    if(!r.ok)throw new Error(d.error||'Результат не подтверждён');
+    if(!r.ok){
+      if(RECEIPT_UNAVAILABLE_REASONS.includes(d.reason)){
+        // Only discard the local UUID when the backend has definitively
+        // rejected the operation without changing the document.
+        pendingConfirmation=null;
+        localStorage.removeItem(RECEIVING_PENDING_KEY);
+        showUnavailableReceipt(d,activeReceiptName);
+        return;
+      }
+      throw new Error(d.error||'Результат не подтверждён');
+    }
     clearConfirmedPallet(d,p);
   }catch(e){
     showUncertainPallet();
@@ -1597,8 +1693,14 @@ async function loadWmsIdentity(){
       }
     }catch(e){localStorage.removeItem(RECEIVING_PENDING_KEY);}
     const selectedId=(pendingConfirmation&&pendingConfirmation.receipt_id)||savedId;
-    if(selectedId)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
-    if(pendingConfirmation)showUncertainPallet();
+    if(selectedId&&pendingConfirmation)setActiveReceipt(selectedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    if(pendingConfirmation){
+      // A previously submitted operation must be reconciled, never silently
+      // discarded on page reload, even if the document was later removed.
+      showUncertainPallet();
+    }else if(savedId){
+      await openReceiptSafely(savedId,savedName||'Ранее выбранная Приёмка','Сохранено на этом телефоне');
+    }
   }catch(e){
     showError('Не удалось восстановить рабочую приёмку. Проверь подключение к сети и обнови страницу.');
   }
@@ -2068,6 +2170,54 @@ def start_pack_warmup():
         WARMUP_STATE["running"] = True
     threading.Thread(target=_warm_pack_cache_worker, daemon=True).start()
 
+class ReceiptUnavailable(Exception):
+    def __init__(self, reason, name=""):
+        self.reason = reason
+        self.name = str(name or "").strip()
+        super().__init__("Оприходование недоступно")
+
+
+def receipt_is_deleted(doc):
+    # Deleted entity representations differ depending on MoySklad API version.
+    return any(doc.get(key) for key in ("deleted", "isDeleted", "deletedAt"))
+
+
+def receipt_error_is_deleted(exc):
+    response = getattr(exc, "response", None)
+    if response is None:
+        return False
+    if response.status_code != 412:
+        return False
+    body = str(response.text or "").lower()
+    return "корзин" in body or '"code": 3007' in body or '"code":3007' in body
+
+
+def validate_receipt_document(doc):
+    if receipt_is_deleted(doc):
+        raise ReceiptUnavailable("deleted", doc.get("name"))
+    if doc.get("applicable"):
+        raise ReceiptUnavailable("completed", doc.get("name"))
+    return doc
+
+
+def receipt_unavailable_response(exc, fallback_name=""):
+    name = exc.name or fallback_name or "Выбранное оприходование"
+    if exc.reason == "completed":
+        return jsonify(
+            error=f"Оприходование №{name} уже проведено. Выберите другое или начните новую приёмку.",
+            reason="completed", document_name=name,
+        ), 409
+    if exc.reason == "missing":
+        return jsonify(
+            error="Оприходование больше недоступно в МойСклад. Выберите другое или начните новую приёмку.",
+            reason="missing", document_name=name,
+        ), 409
+    return jsonify(
+        error=f"Оприходование №{name} находится в корзине МойСклад. Выберите другое оприходование или начните новую приёмку.",
+        reason="deleted", document_name=name,
+    ), 409
+
+
 def get_receipt(receipt_id):
     r = requests.get(
         f"{API_BASE}/entity/enter/{receipt_id}",
@@ -2076,7 +2226,30 @@ def get_receipt(receipt_id):
         timeout=30,
     )
     r.raise_for_status()
-    return r.json()
+    doc = r.json()
+    validate_receipt_document(doc)
+    return doc
+
+
+@app.get("/api/receipts/<receipt_id>/status")
+def receipt_document_status(receipt_id):
+    """Read-only check before restoring/opening a stored document on the phone."""
+    try:
+        receipt = get_receipt(receipt_id)
+        return jsonify(ok=True, id=receipt.get("id"), name=receipt.get("name"), status="draft")
+    except ReceiptUnavailable as exc:
+        return receipt_unavailable_response(exc)
+    except requests.HTTPError as exc:
+        if receipt_error_is_deleted(exc):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted"))
+        if exc.response is not None and exc.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
+        return jsonify(error="Не удалось проверить оприходование в МойСклад. Попробуйте обновить страницу.",
+                       reason="temporary"), 502
+    except Exception:
+        return jsonify(error="Не удалось проверить доступность оприходования. Проверьте подключение.",
+                       reason="temporary"), 503
+
 
 def add_or_increment_position(receipt_id, product, pack, requested_qty=None, enforce_pack_limit=True):
     receipt = get_receipt(receipt_id)
@@ -2314,7 +2487,13 @@ def finish_receipt(receipt_id):
             pallets=pallets_count,
             employee=(employee or {}).get("name", ""),
         )
+    except ReceiptUnavailable as exc:
+        return receipt_unavailable_response(exc)
     except requests.HTTPError as e:
+        if receipt_error_is_deleted(e):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted", before.get("name", "") if "before" in locals() else ""))
+        if e.response is not None and e.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
@@ -2580,6 +2759,7 @@ def receiving_scan_operation_status(operation_id):
     return jsonify(ok=record["status"] == "done",
                    status=record["status"],
                    receipt_id=record["receipt_id"],
+                   reason=record["error"] if record["status"] == "rejected" else None,
                    response=record["response"] if record["status"] == "done" else None)
 
 
@@ -2683,6 +2863,17 @@ def scan():
             # Commit the idempotency result FIRST; logging must not turn a
             # successful MoySklad write into a retryable error.
             finish_operation(operation_id, response)
+        except ReceiptUnavailable as exc:
+            reject_operation(operation_id, exc.reason)
+            raise
+        except requests.HTTPError as exc:
+            if receipt_error_is_deleted(exc):
+                reject_operation(operation_id, "deleted")
+            elif exc.response is not None and exc.response.status_code in (404, 410):
+                reject_operation(operation_id, "missing")
+            else:
+                mark_uncertain(operation_id, str(exc))
+            raise
         except Exception as exc:
             mark_uncertain(operation_id, str(exc))
             raise
@@ -2702,9 +2893,15 @@ def scan():
             print(f"Receiving audit event failed for {operation_id}: {exc}", flush=True)
 
         return jsonify(ok=True, operation_id=operation_id, **response)
+    except ReceiptUnavailable as e:
+        return receipt_unavailable_response(e)
     except ValueError as e:
         return jsonify(error=str(e)), 409
     except requests.HTTPError as e:
+        if receipt_error_is_deleted(e):
+            return receipt_unavailable_response(ReceiptUnavailable("deleted"))
+        if e.response is not None and e.response.status_code in (404, 410):
+            return receipt_unavailable_response(ReceiptUnavailable("missing"))
         body = e.response.text[:1200] if e.response is not None else ""
         return jsonify(error=f"Запись в МойСклад не подтверждена: {e}. {body}. Проверь документ перед новым сканом.",
                        status="uncertain"), 503
