@@ -112,7 +112,7 @@ input,textarea,select{background:white;border:1px solid #bfceda;border-radius:8p
 </style></head>
 <body><div class="wrap">
 <header class="head">
- <div class="top"><div><a href="/manager">← Панель руководителя</a> · <a href="/manager/replenishment">Задания пополнения</a>
+ <div class="top"><div><a href="/manager">← Панель руководителя</a> · <a href="/manager/replenishment">Задания пополнения</a> · <a href="/manager/cell-audit">📷 Обход ячеек</a>
  <h1>🗺️ Карта ячеек ONIX WMS</h1>
  <div class="small">Оперативные статусы пополнения по зарегистрированным адресам. Это не карта фактических остатков.</div></div>
  <button class="action" id="reload" type="button">Обновить карту</button></div>
@@ -180,7 +180,7 @@ function render(){
  const problemOnly=document.getElementById('onlyProblems').checked;
  let visible=allCells.filter(c=>(activeLine==='all'||c.line===activeLine) &&
   (!problemOnly||['queued','started','delayed','urgent','blocked'].includes(c.state)) &&
-  (!q||[c.label,c.last_task?.article||'',...(c.tasks||[]).map(t=>t.article)].some(v=>String(v).toLowerCase().includes(q))));
+  (!q||[c.label,c.assignment?.article||'',c.last_task?.article||'',...(c.tasks||[]).map(t=>t.article)].some(v=>String(v).toLowerCase().includes(q))));
  const grouped={};for(const c of visible)(grouped[c.line]??=[]).push(c);
  const root=document.getElementById('zones');
  root.innerHTML=Object.entries(grouped).map(([line,cells])=>
@@ -188,7 +188,7 @@ function render(){
   '<span class="counts">'+cells.length+' ячеек</span></h2><div class="cells">'+
   cells.map(c=>'<button type="button" class="cell '+esc(c.state)+(c.id===selectedId?' active':'')+
    '" data-id="'+esc(c.id)+'" title="'+esc(c.label+' · '+STATE_TEXT[c.state])+'" aria-label="'+esc(c.label+' · '+STATE_TEXT[c.state])+'">'+
-   esc(c.label)+(c.tasks.length?'<span class="mark">'+c.tasks.length+'</span>':'')+'</button>').join('')+
+   esc(c.label)+(c.assignment?'<span class="mark">✓</span>':c.tasks.length?'<span class="mark">'+c.tasks.length+'</span>':'')+'</button>').join('')+
   '</div></section>').join('')||'<div class="empty">Под выбранный фильтр ячеек нет. Добавить реальные адреса можно ниже.</div>';
  showDetails();
 }
@@ -210,6 +210,8 @@ function showDetails(){
  '<div><dt>Активные задачи</dt><dd>'+c.tasks.length+'</dd></div>'+
  '<div><dt>Последняя проверка товара</dt><dd>'+esc(c.last_task?.verified_product_at?'Да':'Нет данных')+'</dd></div>'+
  '<div><dt>Последняя проверка ячейки</dt><dd>'+esc(c.last_task?.verified_location_at?'Да':'Нет данных')+'</dd></div></dl>'+
+ '<h3>Постоянная привязка товара</h3>'+(c.assignment?'<div class="info"><b>'+esc(c.assignment.article)+'</b><div class="small">'+esc(c.assignment.name||'')+'</div><div class="small">Закреплено: '+esc(fmt(c.assignment.assigned_at))+'</div></div>':'<p class="small">Не задана. Последнее пополнение не назначает SKU автоматически.</p>')+
+ '<p><a href="/manager/cell-audit?location_id='+encodeURIComponent(c.id)+'">📷 Сканировать товар и привязать к ячейке →</a></p>'+
  '<h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
  '<h3>Последнее завершённое пополнение</h3>'+(c.last_task?taskCard(c.last_task):'<p class="small">В истории пока нет завершённых пополнений.</p>')+
  '<p class="small">Статус показывает работу по пополнению, а не фактический остаток товара в ячейке.</p>'+
@@ -280,6 +282,13 @@ TASK_COLUMNS = """
 
 
 def warehouse_map_snapshot():
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
+    assignment_rows = query_all("""
+        SELECT location_id, product_id, article, product_name, assigned_at, assigned_by
+        FROM cell_sku_assignments
+    """)
+    assignments = {r[0]:{"product_id":r[1],"article":r[2],"name":r[3],"assigned_at":r[4],"assigned_by":r[5]} for r in assignment_rows}
     locations = query_all("""
       SELECT id, label, barcode FROM replenishment_locations
       WHERE active = 1 ORDER BY label LIMIT 5000
@@ -309,7 +318,7 @@ def warehouse_map_snapshot():
         last = by_completed.get(label)
         record = {"id": loc_id, "label": label, "line": line_of(label),
                   "state": cell_state(tasks, last, now),
-                  "tasks": tasks, "last_task": last}
+                  "tasks": tasks, "last_task": last, "assignment": assignments.get(loc_id)}
         cells.append(record)
     cells.sort(key=location_sort_key)
     return cells
