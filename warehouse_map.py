@@ -165,8 +165,8 @@ const fmt=(d)=>d?new Date(d).toLocaleString('ru-RU'):'—';
 function count(id,n){document.getElementById(id).textContent=n;}
 function summary(){
  count('nTotal',allCells.length);
- count('nQueued',allCells.filter(c=>c.state==='queued').length);
- count('nStarted',allCells.filter(c=>c.state==='started').length);
+ count('nQueued',allCells.filter(c=>c.tasks.some(t=>t.status==='new')).length);
+ count('nStarted',allCells.filter(c=>c.tasks.some(t=>t.status==='started')).length);
  count('nProblem',allCells.filter(c=>['urgent','blocked','delayed'].includes(c.state)).length);
  count('nUnknown',allCells.filter(c=>c.state==='unknown').length);
 }
