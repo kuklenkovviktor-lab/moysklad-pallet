@@ -1,0 +1,59 @@
+name: ONIX aisle scan mapping tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cell_audit.py"
+      - "warehouse_map.py"
+      - "app.py"
+      - "wms.py"
+      - "tests/test_cell_audit.py"
+      - ".github/workflows/onix-cell-audit-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cell_audit.py"
+      - "warehouse_map.py"
+      - "app.py"
+      - "wms.py"
+      - "tests/test_cell_audit.py"
+      - ".github/workflows/onix-cell-audit-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Python syntax
+        run: python -m compileall -q app.py wms.py warehouse_map.py cell_audit.py tests/test_cell_audit.py
+      - name: JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          for name,pattern in [
+              ("cell_audit.py",r'CELL_AUDIT_PAGE = r"""(.*?)"""'),
+              ("warehouse_map.py",r'WAREHOUSE_MAP_PAGE = r"""(.*?)"""')
+          ]:
+              text=Path(name).read_text()
+              match=re.search(pattern,text,re.S)
+              assert match, name
+              script=re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>',match.group(1),re.S)
+              assert script,name
+              Path('/tmp/'+name+'.js').write_text('\n'.join(script))
+          PY
+          node --check /tmp/cell_audit.py.js
+          node --check /tmp/warehouse_map.py.js
+      - name: Safe assignment and integration tests
+        run: python -m unittest discover -s tests -p test_cell_audit.py -v
+      - name: Existing replenishment flow tests
+        run: python -m unittest discover -s tests -p test_replenishment_flow.py -v
+      - name: Existing map tests
+        run: python -m unittest discover -s tests -p test_warehouse_map.py -v
