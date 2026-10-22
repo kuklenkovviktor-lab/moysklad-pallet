@@ -58,7 +58,7 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 .matches{display:grid;gap:3px;max-height:240px;overflow:auto;margin:8px 0}.matches button{background:#e3ebf2;color:#233c4c;text-align:left}
 #msg{min-height:18px;margin-top:8px}@media(max-width:730px){form{grid-template-columns:1fr 1fr}.item{align-items:flex-start;flex-direction:column}}
 </style></head><body><main>
-<a href="/manager">← Панель руководителя</a><h1>📦 Пополнение ячеек</h1>
+<a href="/manager">← Панель руководителя</a> · <a href="/manager/warehouse-map">🗺️ Карта склада</a><h1>📦 Пополнение ячеек</h1>
 <p class="small">Очередь пополнения. Задания создают руководитель и сами сборщики. МойСклад и учёт FBS не изменяются.</p>
 <section class="card"><h2>Создать задачу</h2>
 <label>Найти товар в МойСклад по названию, артикулу или ШК

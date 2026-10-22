@@ -25,6 +25,7 @@ from wms import (
 )
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
+from warehouse_map import warehouse_map_bp
 from fbs_diagnostics import diag_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
@@ -70,6 +71,7 @@ app.config.update(
 app.register_blueprint(wms_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
+app.register_blueprint(warehouse_map_bp)
 app.register_blueprint(diag_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
@@ -301,6 +303,9 @@ def require_employee_login():
         "/api/manager/shifts/actions",
         "/api/manager/shifts/force-close",
         "/manager/replenishment",
+        "/manager/warehouse-map",
+        "/api/manager/warehouse-map",
+        "/api/manager/warehouse-map/locations",
         "/manager/fbs-diagnostics",
         "/api/manager/fbs-diagnostics",
         "/api/manager/replenishment/tasks",
