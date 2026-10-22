@@ -115,7 +115,7 @@ class CellWalkTests(unittest.TestCase):
 
     def test_unknown_product_or_location_never_writes(self):
         unknown=self.post_lookup("/api/manager/cell-audit/preview",
-                                 self.payload(location="NO-CELL"))
+                                 dict(self.payload(), location="NO-CELL"))
         self.assertEqual(unknown.status_code,404)
         with patch.object(app,"find_product_by_any_barcode",return_value=(None,None)):
             bad=self.client.post("/api/manager/cell-audit/preview",json=self.payload())
