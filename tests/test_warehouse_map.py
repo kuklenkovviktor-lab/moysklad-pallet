@@ -144,9 +144,7 @@ class WarehouseMapTests(unittest.TestCase):
         self.assertIsNone(query_one("SELECT id FROM replenishment_locations WHERE label='К-123'"))
 
     def test_map_contains_controls_and_no_false_stock_status(self):
-        self.assertIn('class="cells"', WAREHOUSE_MAP_PAGE) if False else None
         self.assertIn('id="zones"', WAREHOUSE_MAP_PAGE)
-        self.assertIn("stock", app.app.view_functions["warehouse_map.warehouse_map_data"].__code__.co_names) if False else None
         self.assertIn("Это не карта фактических остатков", WAREHOUSE_MAP_PAGE)
         self.assertIn("fetch('/api/manager/warehouse-map'", WAREHOUSE_MAP_PAGE)
         self.assertIn("interval", WAREHOUSE_MAP_PAGE.lower())
