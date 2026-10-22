@@ -1,7 +1,7 @@
 """ONIX WMS: independent replenishment task queue. No inventory or scanning mutations."""
 import uuid
 from flask import Blueprint, jsonify, redirect, request
-from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, sql
+from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 replenishment_bp = Blueprint("replenishment", __name__)
 
@@ -59,7 +59,7 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 #msg{min-height:18px;margin-top:8px}@media(max-width:730px){form{grid-template-columns:1fr 1fr}.item{align-items:flex-start;flex-direction:column}}
 </style></head><body><main>
 <a href="/manager">← Панель руководителя</a><h1>📦 Пополнение ячеек</h1>
-<p class="small">Очередь задач для сотрудника пополнения. Пока задачи создаются вручную. ONIX не изменяет остатки МойСклад и не вмешивается в FBS.</p>
+<p class="small">Очередь пополнения. Задания создают руководитель и сами сборщики. МойСклад и учёт FBS не изменяются.</p>
 <section class="card"><h2>Создать задачу</h2>
 <label>Найти товар в МойСклад по названию, артикулу или ШК
 <input id="productSearch" type="search" placeholder="Поиск номенклатуры" autocomplete="off"></label>
@@ -83,6 +83,10 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 <section class="card"><h2>Журнал действий</h2><div id="events">Загрузка…</div></section>
 </main><script>
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+async function readApiJson(r){
+ const body=await r.text();
+ try{return JSON.parse(body)}catch(_e){throw Error('Сервер вернул не JSON. Обнови страницу и повтори действие.')}
+}
 function fmt(s){return s?new Date(s).toLocaleString('ru-RU'):'—'}
 function desc(t){
  return '<b>'+esc(t.article)+'</b> · линия '+esc(t.line)+
@@ -110,7 +114,7 @@ function paintLocations(){
  '<a href="/manager/replenishment/label?id='+encodeURIComponent(l.id)+'" target="_blank" rel="noopener">🖨 Этикетка</a></div>').join(''):'<p class="small">Ячеек пока нет</p>';
 }
 async function reloadLocations(){
- const r=await fetch('/api/manager/replenishment/locations',{cache:'no-store'}),d=await r.json();
+ const r=await fetch('/api/manager/replenishment/locations',{cache:'no-store'}),d=await readApiJson(r);
  if(!r.ok)throw Error(d.error||'Ошибка загрузки адресов');
  locations=d.locations||[];paintLocations();
 }
@@ -119,7 +123,7 @@ document.getElementById('addLocation').addEventListener('click',async function()
  if(!input.value.trim())return;this.disabled=true;
  try{
   const r=await fetch('/api/manager/replenishment/locations',{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({label:input.value.trim()})}),d=await r.json();
+   body:JSON.stringify({label:input.value.trim()})}),d=await readApiJson(r);
   if(!r.ok)throw Error(d.error||'Ошибка регистрации');
   await reloadLocations();document.getElementById('targetLocation').value=d.location.label;
   msg.textContent='Адрес зарегистрирован. Распечатай его ШК.';
@@ -132,7 +136,7 @@ document.getElementById('productSearch').addEventListener('input',function(){
  if(text.length<2){box.innerHTML='';return}
  searchDebounce=setTimeout(async function(){
   try{
-   const r=await fetch('/api/manager/replenishment/catalog?q='+encodeURIComponent(text)),d=await r.json();
+   const r=await fetch('/api/manager/replenishment/catalog?q='+encodeURIComponent(text)),d=await readApiJson(r);
    if(!r.ok)throw Error(d.error||'Ошибка поиска');
    if(document.getElementById('productSearch').value.trim()!==text)return;
    selectedCatalog=d.products||[];
@@ -155,7 +159,7 @@ let tasks=[];
 async function getTasks(){
  const r=await fetch('/api/manager/replenishment/tasks',{cache:'no-store'});
  if(r.status===403){location.href='/manager-login';return}
- const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка загрузки');
+ const d=await readApiJson(r);if(!r.ok)throw Error(d.error||'Ошибка загрузки');
  tasks=d.tasks||[];
  const open=tasks.filter(function(t){return t.status==='new'||t.status==='started'});
  const old=tasks.filter(function(t){return t.status!=='new'&&t.status!=='started'});
@@ -187,7 +191,7 @@ document.getElementById('newTask').addEventListener('submit',async function(e){
   const qty=f.get('planned_qty');
   const r=await fetch('/api/manager/replenishment/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
    article:f.get('article'),product_id:f.get('product_id'),line:f.get('line'),planned_qty:qty?Number(qty):null,priority:f.get('priority'),note:f.get('note')})});
-  const d=await r.json();
+  const d=await readApiJson(r);
   if(!r.ok)throw Error(d.error||'Ошибка создания');
   this.reset();document.getElementById('productSearch').value='';document.getElementById('productMatches').innerHTML='';
   m.className='ok';m.textContent='Задача добавлена';await getTasks();
@@ -203,7 +207,7 @@ async function change(e){
  b.disabled=true;
  try{
   const r=await fetch('/api/manager/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:task.id,action:action,note:note})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  const d=await readApiJson(r);if(!r.ok)throw Error(d.error||'Ошибка');
   await getTasks();
  }catch(e){alert(e.message);b.disabled=false}
 }
@@ -220,7 +224,7 @@ WORKER_PAGE = """<!doctype html>
 main{max-width:760px;margin:auto;padding:13px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin:10px 0}
 h1{margin:12px 0}a{color:#49667b}.small{color:#667989;font-size:12px}.task{padding:14px 0;border-top:1px solid #d7e0e7}.task:first-child{border-top:0}
 .task b{font-size:18px}.urgent{color:#a14c28}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-input{width:125px;padding:11px;border:1px solid #b8cbd5;border-radius:8px;font-size:16px}
+input,select{width:125px;padding:11px;border:1px solid #b8cbd5;border-radius:8px;font-size:16px}
 button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9px;font-weight:700;cursor:pointer;min-height:42px}
 .secondary{background:#dce7ed;color:#25313d}button:disabled{opacity:.5}.bad{color:#a33b3b}
 .ok{color:#26764b;font-weight:700}.scanbox{background:#e8f0f5;padding:12px;border-radius:10px;margin-top:10px}
@@ -228,9 +232,14 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 #cameraOverlay{display:none;position:fixed;inset:0;z-index:1000;background:#e9eef3;overflow:auto;padding:12px}
 #repReader{max-width:650px;margin:16px auto}#cameraOverlay button{display:block;margin:15px auto}
 </style></head><body><main>
-<a href="/fbs">← Главный экран сотрудника</a><h1>📦 Пополнение</h1>
+<a id="returnToPicking" href="/fbs">← Вернуться к сборке</a><h1>📦 Пополнение</h1>
 <div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
 <div id="who" class="small" style="margin-top:8px"></div>
+<div class="card"><h2>Самостоятельное пополнение</h2>
+<p class="small">Выбери ячейку и отсканируй товар в резерве. Задача начнётся автоматически. При размещении проверь ШК ячейки и укажи фактическое количество. МойСклад не изменяется.</p>
+<div class="actions"><select id="selfLocation" style="flex:1 1 150px;min-width:135px" aria-label="Ячейка назначения"><option value="">Выбери ячейку</option></select>
+<input id="selfBarcode" class="scaninput" placeholder="ШК товара" autocomplete="off" autocorrect="off" autocapitalize="none">
+<button type="button" id="selfCreate">Начать пополнение</button></div></div>
 <div class="card"><h2>Мои задачи</h2><div id="mine">Загрузка…</div></div>
 <div class="card"><h2>Свободные задачи <button id="refreshList" class="secondary" type="button" style="float:right">Обновить</button></h2><div id="available">Загрузка…</div></div>
 <div id="msg" role="status"></div>
@@ -239,6 +248,10 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 <h2 style="text-align:center" id="cameraTitle">Сканируй</h2><div id="repReader"></div></div>
 <script>
 function esc(t){return String(t==null?'':t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+async function readApiJson(r){
+ const body=await r.text();
+ try{return JSON.parse(body)}catch(_e){throw Error('Сервер вернул не JSON. Обнови страницу и повтори действие.')}
+}
 let tasks=[],sending=false;
 function block(t,mine){
  const note=t.note?'<p class="small">'+esc(t.note)+'</p>':'';
@@ -275,16 +288,42 @@ function block(t,mine){
 async function load(){
  const [me,resp]=await Promise.all([fetch('/api/auth/me'),fetch('/api/replenishment/tasks',{cache:'no-store'})]);
  if(me.status===401||resp.status===401){location.href='/login';return}
- const a=await me.json(),d=await resp.json();
+ const a=await readApiJson(me),d=await readApiJson(resp);
  if(!resp.ok)throw Error(d.error||'Не удалось загрузить задачи');
  document.getElementById('who').textContent='Сотрудник: '+a.employee.name;
  tasks=d.tasks||[];
+ const sel=document.getElementById('selfLocation'),chosen=sel.value;
+ sel.innerHTML='<option value="">Выбери ячейку</option>'+(d.locations||[]).map(function(v){
+  return '<option value="'+esc(v.label)+'">'+esc(v.label)+'</option>';
+ }).join('');
+ if((d.locations||[]).some(v=>v.label===chosen))sel.value=chosen;
  const mine=tasks.filter(function(t){return t.status==='started'});
  const available=tasks.filter(function(t){return t.status==='new'});
  document.getElementById('mine').innerHTML=mine.length?mine.map(function(t){return block(t,true)}).join(''):'<p class="small">Нет задач в работе.</p>';
  document.getElementById('available').innerHTML=available.length?available.map(function(t){return block(t,false)}).join(''):'<p class="small">Очередь пуста.</p>';
 }
 
+async function createSelfTask(){
+ if(sending)return;
+ const barcode=document.getElementById('selfBarcode').value.trim();
+ const line=document.getElementById('selfLocation').value;
+ const msg=document.getElementById('msg'),btn=document.getElementById('selfCreate');
+ if(!line||!barcode){msg.className='bad';msg.textContent='Выбери ячейку и отсканируй ШК товара';return;}
+ sending=true;btn.disabled=true;
+ try{
+  const r=await fetch('/api/replenishment/self-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:barcode,line:line})});
+  const d=await readApiJson(r);
+  if(!r.ok)throw Error(d.error||'Не удалось начать пополнение');
+  document.getElementById('selfBarcode').value='';
+  msg.className='ok';msg.textContent='Задача начата: '+d.article+'. При размещении сканируй ШК ячейки.';
+  await load();
+ }catch(e){msg.className='bad';msg.textContent=e.message;}
+ finally{sending=false;btn.disabled=false;}
+}
+document.getElementById('selfCreate').addEventListener('click',createSelfTask);
+document.getElementById('selfBarcode').addEventListener('keydown',function(e){
+ if(e.key==='Enter'){e.preventDefault();createSelfTask();}
+});
 let scanner=null,cameraActive=false;
 async function stopRepCamera(){
  document.getElementById('cameraOverlay').style.display='none';
@@ -323,7 +362,7 @@ async function verifyScan(id,stage,barcode){
  const msg=document.getElementById('msg');msg.className='';msg.textContent='Проверяю штрихкод…';
  try{
   const r=await fetch('/api/replenishment/verify',{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({task_id:id,stage:stage,barcode:barcode})}),d=await r.json();
+   body:JSON.stringify({task_id:id,stage:stage,barcode:barcode})}),d=await readApiJson(r);
   if(!r.ok)throw Error(d.error||'ШК не прошёл проверку');
   msg.className='ok';msg.textContent=stage==='product'?'✓ Товар проверен. Теперь доставь его к ячейке и отсканируй её ШК.':'✓ Ячейка подтверждена. Укажи фактическое количество.';
   await load();
@@ -355,7 +394,7 @@ async function action(e){
  sending=true;btn.disabled=true;
  try{
   const r=await fetch('/api/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:id,action:type,quantity:quantity,note:note})});
-  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  const d=await readApiJson(r);if(!r.ok)throw Error(d.error||'Ошибка');
   document.getElementById('msg').textContent='Задача обновлена';
   await load();
  }catch(e){document.getElementById('msg').textContent=e.message;btn.disabled=false}
@@ -364,7 +403,32 @@ async function action(e){
 document.getElementById('available').addEventListener('click',action);
 document.getElementById('mine').addEventListener('click',action);
 document.getElementById('refreshList').addEventListener('click',function(){if(!sending)load().catch(function(e){document.getElementById('msg').textContent=e.message})});
-load().catch(function(e){document.getElementById('mine').textContent=e.message});
+async function switchOperation(operation){
+ const r=await fetch('/api/operation/enter',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({operation:operation})
+ });
+ const d=await readApiJson(r);
+ if(!r.ok)throw Error(d.error||'Не удалось переключить учёт времени');
+}
+document.getElementById('returnToPicking').addEventListener('click',async function(e){
+ e.preventDefault();
+ if(sending)return;
+ try{
+  await switchOperation('picking');
+  location.href='/fbs';
+ }catch(err){
+  const msg=document.getElementById('msg');
+  msg.className='bad';
+  msg.textContent='Учёт времени не переключён: '+err.message;
+ }
+});
+switchOperation('replenishment').then(load).catch(function(e){
+ const msg=document.getElementById('msg');
+ msg.className='bad';
+ msg.textContent='Не удалось включить учёт пополнения: '+e.message;
+ document.getElementById('mine').textContent='Проверь соединение и обнови страницу.';
+});
 </script></body></html>"""
 
 
@@ -531,7 +595,74 @@ def worker_replenishment_tasks():
             ORDER BY CASE t.status WHEN 'started' THEN 0 ELSE 1 END,
                      CASE t.priority WHEN 'urgent' THEN 0 ELSE 1 END, t.created_at
             LIMIT 100 """, (emp["id"],))
-    return jsonify(tasks=[_item(r) for r in rows])
+    locations = query_all("""
+        SELECT label FROM replenishment_locations WHERE active = 1 ORDER BY label LIMIT 1000
+    """)
+    return jsonify(tasks=[_item(r) for r in rows],
+                   locations=[{"label": row[0]} for row in locations])
+
+
+@replenishment_bp.post("/api/replenishment/self-create")
+def worker_replenishment_self_create():
+    """Start a worker's own replenishment with a verified product scan; no inventory write."""
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Войди по бейджу"), 401
+    data = _json_required()
+    if data is None:
+        return jsonify(error="Ожидается JSON"), 400
+    from replenishment_checks import _scan_code
+    barcode = _scan_code(data.get("barcode"))
+    line = str(data.get("line") or "").strip().upper()
+    if not 3 <= len(barcode) <= 160 or not 1 <= len(line) <= 80:
+        return jsonify(error="Сканируй ШК товара и выбери зарегистрированную ячейку"), 400
+    if not query_one("SELECT id FROM replenishment_locations WHERE label = ? AND active = 1", (line,)):
+        return jsonify(error="Ячейка не зарегистрирована руководителем"), 409
+    try:
+        from app import find_product_by_any_barcode
+        product, _pack = find_product_by_any_barcode(barcode)
+    except Exception:
+        return jsonify(error="Каталог товаров недоступен. Не создавай задачу наугад."), 502
+    article = str((product or {}).get("article") or "").strip().upper()
+    product_id = str((product or {}).get("id") or "").strip()
+    if not product_id or not article:
+        return jsonify(error="Товар по ШК не найден в каталоге МойСклад"), 404
+    task_id = str(uuid.uuid4())
+    created = now_iso()
+    try:
+        with db_connect() as conn:
+            cur = conn.cursor()
+            try:
+                cur.execute(sql("""
+                    SELECT id FROM replenishment_tasks
+                    WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1
+                """), (article, line))
+                if cur.fetchone():
+                    return jsonify(error="Задача по этому артикулу и ячейке уже есть. Выбери её ниже."), 409
+                cur.execute(sql("""
+                    INSERT INTO replenishment_tasks
+                    (id, article, line_code, planned_qty, priority, note, status,
+                     created_at, started_at, created_by, assigned_employee_id,
+                     product_id, product_name, verify_required,
+                     verified_product_barcode, verified_product_at)
+                    VALUES (?, ?, ?, NULL, 'normal', '', 'started',
+                            ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """), (task_id, article, line, created, created, emp["name"], emp["id"],
+                        product_id, str(product.get("name") or ""), barcode, created))
+                _event(cur, task_id, emp["id"], emp["name"], "created", "Создано сборщиком")
+                _event(cur, task_id, emp["id"], emp["name"], "start", "Взят товар из резерва")
+                _event(cur, task_id, emp["id"], emp["name"], "product_verified", barcode)
+                conn.commit()
+            finally:
+                cur.close()
+    except Exception:
+        if query_one("""SELECT id FROM replenishment_tasks
+                       WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1""",
+                     (article, line)):
+            return jsonify(error="Такая задача уже создана. Обнови список."), 409
+        return jsonify(error="Не удалось сохранить задачу. Проверь связь и обнови страницу."), 503
+    return jsonify(ok=True, task_id=task_id, article=article, line=line), 201
 
 
 @replenishment_bp.post("/api/replenishment/action")
