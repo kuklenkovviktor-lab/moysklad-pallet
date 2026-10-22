@@ -232,7 +232,7 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 #cameraOverlay{display:none;position:fixed;inset:0;z-index:1000;background:#e9eef3;overflow:auto;padding:12px}
 #repReader{max-width:650px;margin:16px auto}#cameraOverlay button{display:block;margin:15px auto}
 </style></head><body><main>
-<a href="/fbs">← Главный экран сотрудника</a><h1>📦 Пополнение</h1>
+<a id="returnToPicking" href="/fbs">← Вернуться к сборке</a><h1>📦 Пополнение</h1>
 <div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
 <div id="who" class="small" style="margin-top:8px"></div>
 <div class="card"><h2>Самостоятельное пополнение</h2>
@@ -403,7 +403,32 @@ async function action(e){
 document.getElementById('available').addEventListener('click',action);
 document.getElementById('mine').addEventListener('click',action);
 document.getElementById('refreshList').addEventListener('click',function(){if(!sending)load().catch(function(e){document.getElementById('msg').textContent=e.message})});
-load().catch(function(e){document.getElementById('mine').textContent=e.message});
+async function switchOperation(operation){
+ const r=await fetch('/api/operation/enter',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({operation:operation})
+ });
+ const d=await readApiJson(r);
+ if(!r.ok)throw Error(d.error||'Не удалось переключить учёт времени');
+}
+document.getElementById('returnToPicking').addEventListener('click',async function(e){
+ e.preventDefault();
+ if(sending)return;
+ try{
+  await switchOperation('picking');
+  location.href='/fbs';
+ }catch(err){
+  const msg=document.getElementById('msg');
+  msg.className='bad';
+  msg.textContent='Учёт времени не переключён: '+err.message;
+ }
+});
+switchOperation('replenishment').then(load).catch(function(e){
+ const msg=document.getElementById('msg');
+ msg.className='bad';
+ msg.textContent='Не удалось включить учёт пополнения: '+e.message;
+ document.getElementById('mine').textContent='Проверь соединение и обнови страницу.';
+});
 </script></body></html>"""
 
 
