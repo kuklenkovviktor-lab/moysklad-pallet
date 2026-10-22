@@ -1758,6 +1758,7 @@ STATS_PAGE = """<!doctype html>
   <a href="/receiving-monitor">📥 Приёмка</a>
    <a href="/manager/replenishment">📦 Пополнение</a>
    <a href="/manager/warehouse-map">🗺️ Карта склада</a>
+   <a href="/manager/cell-audit">📷 Обход ячеек</a>
    <a href="/manager/fbs-diagnostics">📶 Скорость сканирования</a>
   <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
   <a href="/badges">🪪 Бейджи</a>
