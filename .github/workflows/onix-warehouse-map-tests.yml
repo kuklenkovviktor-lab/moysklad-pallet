@@ -1,0 +1,50 @@
+name: ONIX warehouse map tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'warehouse_map.py'
+      - 'wms.py'
+      - 'app.py'
+      - 'replenishment.py'
+      - 'tests/test_warehouse_map.py'
+      - '.github/workflows/onix-warehouse-map-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'warehouse_map.py'
+      - 'wms.py'
+      - 'app.py'
+      - 'replenishment.py'
+      - 'tests/test_warehouse_map.py'
+      - '.github/workflows/onix-warehouse-map-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  warehouse-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+      - name: Compile changed Python and existing application
+        run: python -m compileall -q app.py wms.py replenishment.py warehouse_map.py tests/test_warehouse_map.py
+      - name: Validate warehouse map JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          text=Path("warehouse_map.py").read_text()
+          match=re.search(r'WAREHOUSE_MAP_PAGE = r"""(.*?)"""',text,re.S)
+          assert match,'map HTML not found'
+          parts=re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>',match.group(1),re.S)
+          assert parts,'missing map JavaScript'
+          Path("/tmp/warehouse-map.js").write_text("\n".join(parts))
+          PY
+          node --check /tmp/warehouse-map.js
+      - name: Test warehouse map and permissions
+        run: python -m unittest discover -s tests -p 'test_warehouse_map.py' -v
