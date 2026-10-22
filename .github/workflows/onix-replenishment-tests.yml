@@ -1,0 +1,50 @@
+name: ONIX replenishment flow tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'replenishment.py'
+      - 'replenishment_checks.py'
+      - 'wms.py'
+      - 'tests/test_replenishment_flow.py'
+      - '.github/workflows/onix-replenishment-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'replenishment.py'
+      - 'replenishment_checks.py'
+      - 'wms.py'
+      - 'tests/test_replenishment_flow.py'
+      - '.github/workflows/onix-replenishment-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  replenishment-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requirements
+        run: pip install -r requirements.txt
+      - name: Compile Python modules
+        run: python -m compileall -q replenishment.py replenishment_checks.py wms.py app.py tests/test_replenishment_flow.py
+      - name: Validate embedded browser JavaScript
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          source=Path('replenishment.py').read_text()
+          pages=re.findall(r'(?:MANAGER_PAGE|WORKER_PAGE) = """(.*?)"""',source,re.S)
+          assert len(pages)==2
+          for i,page in enumerate(pages):
+              snippets=re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>',page,re.S)
+              assert snippets, 'no inline scripts'
+              Path(f'/tmp/onix-replenishment-{i}.js').write_text('\n'.join(snippets))
+          PY
+          node --check /tmp/onix-replenishment-0.js
+          node --check /tmp/onix-replenishment-1.js
+      - name: Run replenishment tests
+        run: python -m unittest discover -s tests -p 'test_replenishment_flow.py' -v
