@@ -1,0 +1,44 @@
+name: ONIX FBS double product scan protection
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'wms.py'
+      - 'tests/test_fbs_double_product_scan.py'
+      - '.github/workflows/onix-fbs-double-scan-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'wms.py'
+      - 'tests/test_fbs_double_product_scan.py'
+      - '.github/workflows/onix-fbs-double-scan-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  double-product-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        run: pip install -r requirements.txt
+      - name: Python syntax
+        run: python -m compileall -q wms.py app.py tests/test_fbs_double_product_scan.py
+      - name: FBS regression tests
+        run: python -m unittest discover -s tests -p test_fbs_double_product_scan.py -v
+      - name: Validate FBS worker JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          source = Path("wms.py").read_text()
+          match = re.search(r'FBS_PAGE = """(.*?)"""', source, re.S)
+          assert match, "FBS page missing"
+          scripts = re.findall(r'<script(?:\s+[^>]*)?>(.*?)</script>', match.group(1), re.S)
+          assert scripts, "FBS javascript missing"
+          Path('/tmp/fbs-double-scan.js').write_text('\n'.join(scripts))
+          PY
+          node --check /tmp/fbs-double-scan.js
