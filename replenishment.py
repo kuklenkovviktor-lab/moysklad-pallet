@@ -285,7 +285,29 @@ function block(t,mine){
  (t.priority==='urgent'?' <span class="urgent">СРОЧНО</span>':'')+
  '<div class="small">'+(t.product_name?esc(t.product_name)+' · ':'')+esc(t.status)+plan+'</div>'+note+buttons+'</div>';
 }
-async function load(){
+// A hardware scanner types into the focused field. load() re-renders tasks,
+// so always restore focus when a worker accepts a task or completes a scan.
+function focusTaskInput(preferredId,force=false){
+ const mine=tasks.filter(t=>t.status==='started');
+ const task=mine.find(t=>t.id===preferredId)||mine[0];
+ if(!task)return;
+ const active=document.activeElement;
+ if(!force&&active&&(active.id==='selfBarcode'||active.id==='selfLocation'))return;
+ const verified=!task.verify_required||(task.verified_product_at&&task.verified_location_at);
+ const target=document.getElementById((verified?'qty-':'scan-')+task.id);
+ if(!target)return;
+ requestAnimationFrame(function(){
+  if(!target.isConnected||cameraActive)return;
+  try{target.focus({preventScroll:true})}catch(_e){target.focus()}
+ });
+}
+function retryScanFocus(taskId){
+ const input=document.getElementById('scan-'+taskId);
+ if(!input||cameraActive)return;
+ input.value='';
+ try{input.focus({preventScroll:true})}catch(_e){input.focus()}
+}
+async function load(focusTaskId=null,forceFocus=false){
  const [me,resp]=await Promise.all([fetch('/api/auth/me'),fetch('/api/replenishment/tasks',{cache:'no-store'})]);
  if(me.status===401||resp.status===401){location.href='/login';return}
  const a=await readApiJson(me),d=await readApiJson(resp);
@@ -301,6 +323,7 @@ async function load(){
  const available=tasks.filter(function(t){return t.status==='new'});
  document.getElementById('mine').innerHTML=mine.length?mine.map(function(t){return block(t,true)}).join(''):'<p class="small">Нет задач в работе.</p>';
  document.getElementById('available').innerHTML=available.length?available.map(function(t){return block(t,false)}).join(''):'<p class="small">Очередь пуста.</p>';
+ focusTaskInput(focusTaskId,forceFocus);
 }
 
 async function createSelfTask(){
@@ -316,7 +339,7 @@ async function createSelfTask(){
   if(!r.ok)throw Error(d.error||'Не удалось начать пополнение');
   document.getElementById('selfBarcode').value='';
   msg.className='ok';msg.textContent='Задача начата: '+d.article+'. При размещении сканируй ШК ячейки.';
-  await load();
+  await load(d.task_id,true);
  }catch(e){msg.className='bad';msg.textContent=e.message;}
  finally{sending=false;btn.disabled=false;}
 }
@@ -357,7 +380,7 @@ async function openRepCamera(id,stage){
 async function verifyScan(id,stage,barcode){
  if(sending)return;
  barcode=String(barcode||'').trim();
- if(!barcode){document.getElementById('msg').textContent='Сначала отсканируй ШК';return}
+ if(!barcode){document.getElementById('msg').textContent='Сначала отсканируй ШК';retryScanFocus(id);return}
  sending=true;
  const msg=document.getElementById('msg');msg.className='';msg.textContent='Проверяю штрихкод…';
  try{
@@ -365,8 +388,8 @@ async function verifyScan(id,stage,barcode){
    body:JSON.stringify({task_id:id,stage:stage,barcode:barcode})}),d=await readApiJson(r);
   if(!r.ok)throw Error(d.error||'ШК не прошёл проверку');
   msg.className='ok';msg.textContent=stage==='product'?'✓ Товар проверен. Теперь доставь его к ячейке и отсканируй её ШК.':'✓ Ячейка подтверждена. Укажи фактическое количество.';
-  await load();
- }catch(e){msg.className='bad';msg.textContent=e.message}
+  await load(id,true);
+ }catch(e){msg.className='bad';msg.textContent=e.message;retryScanFocus(id)}
  finally{sending=false}
 }
 document.addEventListener('keydown',function(e){
@@ -396,7 +419,7 @@ async function action(e){
   const r=await fetch('/api/replenishment/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:id,action:type,quantity:quantity,note:note})});
   const d=await readApiJson(r);if(!r.ok)throw Error(d.error||'Ошибка');
   document.getElementById('msg').textContent='Задача обновлена';
-  await load();
+  await load(type==='start'?id:null,type==='start');
  }catch(e){document.getElementById('msg').textContent=e.message;btn.disabled=false}
  finally{sending=false}
 }
