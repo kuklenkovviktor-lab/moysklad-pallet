@@ -62,7 +62,7 @@ class FbsDoubleProductScanTests(unittest.TestCase):
         self.assertIn("НЕ засчитан", result.json["error"])
         self.assertEqual(self.counted(), 0)
         event = query_one("""
-            SELECT event_type, result FROM events
+            SELECT event_type, result FROM operation_events
             WHERE shift_id = ? AND event_type = 'wb_same_as_product'
             ORDER BY created_at DESC LIMIT 1
         """, (self.shift_id,))
