@@ -1,0 +1,33 @@
+name: ONIX 58x40 QR cell labels
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "replenishment_checks.py"
+      - "tests/test_qr_cell_58x40.py"
+      - ".github/workflows/onix-qr-cell-label-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "replenishment_checks.py"
+      - "tests/test_qr_cell_58x40.py"
+      - ".github/workflows/onix-qr-cell-label-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  qr-thermal-label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        run: pip install -r requirements.txt
+      - name: Compile modules
+        run: python -m compileall -q replenishment_checks.py app.py tests/test_qr_cell_58x40.py
+      - name: QR label functional tests
+        run: python -m unittest discover -s tests -p test_qr_cell_58x40.py -v
+      - name: Replenishment flow regression tests
+        run: python -m unittest discover -s tests -p test_replenishment_flow.py -v

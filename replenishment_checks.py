@@ -116,6 +116,7 @@ def replenishment_location_create():
 
 @replenishment_checks_bp.get("/manager/replenishment/label")
 def replenishment_print_label():
+    """58 × 40 mm thermal label: one QR (original code) plus small cell address."""
     ensure_db()
     if not manager_access():
         return redirect("/manager-login")
@@ -126,23 +127,56 @@ def replenishment_print_label():
     )
     if not row:
         return "Ячейка не найдена", 404
-    label = html.escape(row[0])
-    barcode = html.escape(row[1])
-    # Encoded as CODE128: compatible with HID and camera scanners. The code is
-    # random, but only registered codes are accepted by verification endpoint.
-    return """<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<title>ONIX · ШК ячейки</title>
-<script src="/static/JsBarcode.all.min.js"></script>
-<style>body{font-family:Arial,sans-serif;text-align:center;margin:16px}
-.paper{display:inline-block;border:1px solid #999;padding:20px;min-width:300px}
-h1{margin:5px 0;font-size:32px}svg{max-width:100%}button{padding:10px;margin:10px}
-@media print{button{display:none}.paper{border:0}body{margin:0}}</style>
-</head><body><button onclick="window.print()">Печать этикетки</button>
-<div class="paper"><div>ONIX WMS · ЯЧЕЙКА</div><h1>""" + label + """</h1>
-<svg id="binBarcode"></svg><div style="font-size:11px">""" + barcode + """</div></div>
-<script>JsBarcode('#binBarcode',""" + __import__("json").dumps(row[1]) + """,{format:'CODE128',
-displayValue:false,width:2,height:70,margin:6});</script></body></html>"""
 
+    # Preserve the exact previously generated ONIX-LOC barcode value. Existing
+    # verification routes accept this value independently of its symbology.
+    import base64
+    import io
+    import qrcode
+
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=16,
+        border=4,  # 4-module quiet zone required for reliable QR reading
+    )
+    qr.add_data(row[1])
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    qr_image = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    label = html.escape(str(row[0]))
+    return """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONIX · QR ячейки · 58×40 мм</title>
+<style>
+@page {size:58mm 40mm; margin:0}
+* {box-sizing:border-box}
+html,body {margin:0;padding:0;font-family:Arial,Helvetica,sans-serif}
+body {background:#edf1f4}
+.tools {padding:15px;text-align:center;font-size:13px;color:#334}
+.tools button {font:inherit;padding:10px 18px;cursor:pointer}
+.sheet {width:58mm;height:40mm;margin:12px auto;background:white;
+        display:flex;flex-direction:column;align-items:center;
+        justify-content:center;overflow:hidden}
+.qr {display:block;width:30mm;height:30mm;object-fit:contain;
+     image-rendering:pixelated;flex-shrink:0}
+.address {font-size:12pt;font-weight:700;line-height:5mm;
+          max-width:54mm;white-space:nowrap;text-overflow:ellipsis;
+          overflow:hidden;text-align:center;color:#000}
+@media print {
+  html,body {width:58mm;height:40mm;background:white;overflow:hidden}
+  .tools {display:none!important}
+  .sheet {margin:0;width:58mm;height:40mm;break-inside:avoid}
+}
+</style>
+</head><body>
+<div class="tools"><button type="button" onclick="window.print()">Печать · 58×40 мм</button>
+<div>В настройках принтера выбери 58×40 мм, масштаб 100%, поля 0, без колонтитулов.</div></div>
+<div class="sheet"><img class="qr" alt="QR-код ячейки" src="data:image/png;base64,""" + qr_image + """"/>
+<div class="address">""" + label + """</div></div>
+</body></html>"""
 
 @replenishment_checks_bp.post("/api/replenishment/verify")
 def replenishment_verify():
