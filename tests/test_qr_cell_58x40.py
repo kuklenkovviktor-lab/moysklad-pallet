@@ -33,7 +33,7 @@ class QrCellLabelTests(unittest.TestCase):
             session.clear()
             session["manager_web"] = True
         self.id = str(uuid.uuid4())
-        self.label = "А-01"
+        self.label = "А-" + uuid.uuid4().hex[:6].upper()
         self.barcode = "ONIX-LOC-" + uuid.uuid4().hex[:16].upper()
         execute("""
             INSERT INTO replenishment_locations
@@ -77,7 +77,7 @@ class QrCellLabelTests(unittest.TestCase):
         self.assertIn("@page {size:58mm 40mm; margin:0}", html)
         self.assertIn("width:58mm;height:40mm", html)
         self.assertIn("width:30mm;height:30mm", html)
-        self.assertIn('class="address">А-01</div>', html)
+        self.assertIn('class="address">' + self.label + '</div>', html)
         self.assertNotIn('JsBarcode', html)
         self.assertNotIn("ONIX WMS · ЯЧЕЙКА", html)
         self.assertNotIn(self.barcode, html)
