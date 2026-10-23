@@ -8,6 +8,7 @@ on:
       - 'replenishment_checks.py'
       - 'wms.py'
       - 'tests/test_replenishment_flow.py'
+      - 'tests/test_replenishment_scan_focus.cjs'
       - '.github/workflows/onix-replenishment-tests.yml'
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - 'replenishment_checks.py'
       - 'wms.py'
       - 'tests/test_replenishment_flow.py'
+      - 'tests/test_replenishment_scan_focus.cjs'
       - '.github/workflows/onix-replenishment-tests.yml'
   workflow_dispatch:
 
@@ -46,5 +48,7 @@ jobs:
           PY
           node --check /tmp/onix-replenishment-0.js
           node --check /tmp/onix-replenishment-1.js
+      - name: Test focus transitions for hardware scanner
+        run: node tests/test_replenishment_scan_focus.cjs
       - name: Run replenishment tests
         run: python -m unittest discover -s tests -p 'test_replenishment_flow.py' -v
