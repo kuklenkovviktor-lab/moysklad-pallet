@@ -1421,6 +1421,10 @@ async function acceptProduct(code){
 }
 async function acceptWb(code){
  const p=pendingProduct;if(!p)return false;
+ if(code===p.barcode){
+  showTsdError('❌ ДВА РАЗА ОТСКАНИРОВАН ТОВАР. Заказ не засчитан. Отсканируй стикер WB.');
+  return false;
+ }
  const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
   shift_id:shiftId,barcode:code,product_barcode:p.barcode,article:p.article,product_name:p.name,scan_type:'normal'
  })});
@@ -1864,8 +1868,8 @@ function renderEmployeeShift(x,completed){
    +'<div><b>'+formatDuration(x.picking_seconds)+'</b><div class="small">чистая сборка</div></div>'
    +'<div><b>'+formatDuration(x.replenishment_seconds)+'</b><div class="small">пополнение за смену</div></div></div>';
 }
-function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
-function deviationClass(v){return ['product_mismatch','duplicate_wb','product_not_found'].includes(v)?'danger':'warn'}
+function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',wb_same_as_product:'Товарный ШК вместо WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
+function deviationClass(v){return ['product_mismatch','duplicate_wb','wb_same_as_product','product_not_found'].includes(v)?'danger':'warn'}
 function renderHourly(rows){
  const hours=Array.from({length:24},(_,i)=>({h:i,n:0}));
  rows.forEach(x=>{const d=new Date(x.scanned_at);if(!isNaN(d))hours[d.getHours()].n++});
@@ -2235,7 +2239,7 @@ input,button{min-height:44px;border:1px solid #cbd9e2;border-radius:9px;padding:
 <script>
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleString('ru-RU')}catch(e){return ts}}
-function label(t){return ({scan:'Приёмка / скан',external_pallet:'ОСЗ / SSCC',complete:'Документ завершён',start:'Начало смены',end:'Конец смены',switch:'Смена операции',duplicate_wb:'Повторный WB',product_not_found:'Товар не найден',product_mismatch:'Не тот товар',scan_rejected:'Скан отклонён',fbs_scan:'FBS заказ'})[t]||t||'Событие'}
+function label(t){return ({scan:'Приёмка / скан',external_pallet:'ОСЗ / SSCC',complete:'Документ завершён',start:'Начало смены',end:'Конец смены',switch:'Смена операции',duplicate_wb:'Повторный WB',wb_same_as_product:'ШК товара вместо WB',product_not_found:'Товар не найден',product_mismatch:'Не тот товар',scan_rejected:'Скан отклонён',fbs_scan:'FBS заказ'})[t]||t||'Событие'}
 async function load(){
  const q=document.getElementById('q').value.trim();if(!q)return;
  const r=await fetch('/api/history?q='+encodeURIComponent(q));if(r.status===403){location.href='/manager-login';return}
@@ -3416,6 +3420,26 @@ def fbs_scan():
             product_name=product_name or None,
         )
         return jsonify(error="Сейчас включена не сборка. Переключи операцию на «Сборка»."), 409
+
+    # A second scan of the same merchandise barcode is not evidence of a WB
+    # order sticker. Reject it independently of optional WB API matching.
+    # A genuine WB label that collides with a product code needs a separately
+    # verified exception: two identical scanned strings are indistinguishable.
+    if barcode == product_barcode:
+        log_event(
+            shift[0],
+            "fbs",
+            "wb_same_as_product",
+            shift_id=shift_id,
+            object_code=barcode,
+            result="second_scan_equals_product",
+            article=article or None,
+            product_name=product_name or None,
+        )
+        return jsonify(
+            error="❌ Повторный ШК товара вместо этикетки WB! Заказ НЕ засчитан. Сканируй стикер WB.",
+            reason="wb_same_as_product",
+        ), 409
 
     wb_order_id = None
     expected = query_one(
