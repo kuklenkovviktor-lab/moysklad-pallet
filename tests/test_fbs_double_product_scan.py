@@ -22,8 +22,9 @@ class FbsDoubleProductScanTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         ensure_db()
-        execute("INSERT INTO employees (id, name, rate, target) VALUES (?, ?, ?, ?)",
-                ("anton", "Антон", 2.25, 1600))
+        if not query_one("SELECT id FROM employees WHERE id = ?", ("anton",)):
+            execute("INSERT INTO employees (id, name, rate, target) VALUES (?, ?, ?, ?)",
+                    ("anton", "Антон", 2.25, 1600))
         cls.app = Flask(__name__)
         cls.app.secret_key = "test"
         cls.app.testing = True
