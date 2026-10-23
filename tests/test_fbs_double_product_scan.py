@@ -90,8 +90,9 @@ class FbsDoubleProductScanTests(unittest.TestCase):
         self.assertEqual(self.counted(), 0)
 
     def test_real_order_duplicate_still_rejected_without_extra_count(self):
-        self.assertEqual(self.send("*DckIqDYy").status_code, 200)
-        result = self.send("*DckIqDYy")
+        code = "*TEST_" + uuid.uuid4().hex[:12]
+        self.assertEqual(self.send(code).status_code, 200)
+        result = self.send(code)
         self.assertEqual(result.status_code, 409)
         self.assertEqual(self.counted(), 1)
 
