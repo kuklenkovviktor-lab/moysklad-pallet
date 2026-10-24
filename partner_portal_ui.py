@@ -1,0 +1,221 @@
+"""Presentation-only views for the ONIX restricted partner portal."""
+from datetime import datetime, timedelta, timezone
+from html import escape
+from urllib.parse import urlencode
+
+CSS = """
+:root{--bg:#edf2f6;--paper:#fff;--ink:#1b2d3c;--muted:#718294;--navy:#446278;--line:#e1e8ee;--soft:#f5f8fa;--blue:#e9f3fb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.48 system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:#315f82;text-decoration:none}a:hover{text-decoration:underline}
+.shell{max-width:1200px;padding:22px 24px 58px;margin:0 auto}
+.topbar{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--line);border-radius:17px;box-shadow:0 4px 18px #2037480b;padding:15px 20px;gap:16px}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:43px;height:43px;display:grid;place-items:center;border-radius:12px;background:#46667e;color:#fff;font-size:13px;font-weight:900;letter-spacing:-.5px}
+.brand b{font-size:20px;letter-spacing:.1px}.brand small{display:block;color:var(--muted);font-size:12px}
+.account{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.partner-pill{border:1px solid #dce6ee;border-radius:9px;padding:8px 13px;color:#365267;background:#f5f8fa;font-weight:650}
+h1{font-size:26px;line-height:1.25;margin:23px 0 4px;letter-spacing:-.5px}h2{font-size:18px;line-height:1.3;margin:0 0 7px}
+h3{font-size:15px;margin:0 0 14px}
+.subtext,.muted{color:var(--muted)}.subtext{margin:0 0 20px}
+section,.panel{background:var(--paper);border:1px solid var(--line);border-radius:16px;box-shadow:0 4px 20px #26384a08;padding:22px;margin:18px 0}
+.panel p{margin:6px 0}.dashboard-title{margin:27px 0 20px}.dashboard-title h1{margin:0 0 5px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 17px;min-width:0}
+.kpi .number{font-size:27px;line-height:1.3;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi .kpi-label{font-size:12px;color:var(--muted);font-weight:620}
+.kpi .number.blue{color:#486e92}.kpi .number.green{color:#248467}.kpi .number.amber{color:#ad6d29}
+.forms-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;align-items:stretch;margin-top:16px}
+.forms-grid .panel{margin:0;display:flex;flex-direction:column}
+.panel-top{display:flex;align-items:center;gap:10px;margin-bottom:17px}.panel-icon{width:38px;height:38px;background:#edf3f7;color:#42647d;border-radius:10px;display:grid;place-items:center;font-size:19px}
+label{display:block;font-size:12px;color:#4c6071;font-weight:700;margin:0 0 6px}
+input,select,button{font:inherit}
+input:not([type=hidden]),select{width:100%;border:1px solid #d0dae3;border-radius:9px;background:#fff;padding:11px 12px;color:var(--ink);min-height:44px;outline:none}
+input:focus,select:focus{border-color:#597e9c;box-shadow:0 0 0 3px #537c9e1b}
+input[type=file]{font-size:13px;padding:9px;background:#f8fafb;min-width:0}
+.field{margin-bottom:13px;min-width:0}.field-note{font-size:12px;color:var(--muted);margin-top:7px;min-height:18px}
+.fields-inline{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:9px;padding:11px 15px;min-height:42px;cursor:pointer;font-weight:700;text-decoration:none;white-space:nowrap}
+.btn:hover{text-decoration:none;filter:brightness(.96)}
+.btn-primary{background:#48687f;color:#fff}.btn-primary:hover{color:#fff}
+.btn-secondary{background:#f4f7f9;color:#3d5b70;border-color:#dce5eb}
+.btn-ghost{background:#fff;color:#385d77;border-color:#dbe4eb}
+.btn:disabled,button:disabled{opacity:.6;cursor:wait}
+.form-foot{margin-top:auto;padding-top:10px}.form-foot .btn{width:100%}
+.dropzone{border:1.5px dashed #b6c9d8;border-radius:12px;background:#f7fafc;padding:21px 14px;text-align:center;margin:6px 0 14px}
+.dropzone .symbol{font-size:30px;line-height:1.3}.dropzone .filename{font-size:12px;color:#657b8e;margin-top:8px;overflow-wrap:anywhere}
+.dropzone input{width:100%;margin-top:12px}
+.notice{padding:12px 14px;border-radius:9px;margin:14px 0;background:#eaf4ef;color:#246c53;border:1px solid #cfebdc}
+.notice.error{color:#a64d4d;background:#fff1f1;border-color:#f4cdcd}
+.toolbar{display:flex;align-items:flex-end;gap:10px;margin:20px 0 15px;flex-wrap:wrap}
+.toolbar .field{flex:1;margin:0;min-width:185px}
+.toolbar .status-filter{flex:0 1 210px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;color:#788899;font-size:12px;font-weight:750;letter-spacing:.15px;padding:12px 10px;border-bottom:1px solid var(--line)}
+td{padding:13px 10px;border-bottom:1px solid #eaf0f4;vertical-align:middle;font-size:13px}
+tbody tr:nth-child(odd){background:#fafcfd}tbody tr:hover{background:#edf5fa}
+.article{font-weight:650;word-break:break-word}.pallet-num{font-weight:800;font-variant-numeric:tabular-nums;color:#334d62}
+.status{display:inline-flex;align-items:center;border-radius:50px;padding:5px 10px;font-size:12px;font-weight:750;background:#edf2f7;color:#48647b}
+.status-accepted{background:#e6f5ed;color:#22805e}.status-processing{background:#fff2df;color:#956025}
+.status-uncertain{background:#fde9e9;color:#b64b4b}
+.action-links{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.action-links a{padding:6px 8px;background:#eff5f9;border-radius:7px;font-weight:650;font-size:12px}
+.empty{text-align:center;color:var(--muted);padding:32px 15px}
+.paging{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.pages{display:flex;gap:7px}.pages a,.pages span{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#526b80}
+.pages .disabled{opacity:.45}
+.footer{color:var(--muted);font-size:12px;margin:24px 2px}
+@media(max-width:960px){.forms-grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.shell{padding:14px}}
+@media(max-width:620px){h1{font-size:23px}.topbar{align-items:flex-start;padding:13px}.brand b{font-size:16px}.account{gap:5px}.partner-pill{font-size:11px;padding:7px}.account .btn{font-size:12px;padding:7px;min-height:36px}
+  .kpi{padding:11px}.kpi .number{font-size:24px}.fields-inline{grid-template-columns:1fr;gap:0}
+  .panel,section{padding:16px;margin:12px 0}.forms-grid .panel{margin:0}
+  table,tbody,tr,td{display:block;width:100%}thead{display:none}
+  .table-wrap{overflow:visible}
+  tbody{display:grid;gap:11px}
+  tbody tr{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff!important;padding:8px 13px}
+  tbody tr:hover{background:#f8fafc!important}
+  td{border:0;padding:5px 0;display:flex;align-items:flex-start;gap:10px;justify-content:space-between}
+  td:before{content:attr(data-label);color:#81909c;font-size:12px;min-width:75px}
+  td .article{max-width:65%;text-align:right}.action-links{justify-content:flex-end}
+  .toolbar .field{flex-basis:100%}.toolbar .status-filter{flex:1}
+}
+"""
+FORM_JS = """
+<script>
+document.querySelectorAll('form[data-once]').forEach(form=>{
+  form.addEventListener('submit',event=>{
+    if(form.dataset.submitting==='1'){event.preventDefault();return}
+    if(!form.checkValidity())return;
+    form.dataset.submitting='1';
+    const submit=form.querySelector('button[type=submit]');
+    if(submit){submit.disabled=true;submit.textContent='Обрабатываем…'}
+  });
+});
+const chooser=document.querySelector('#partner-file');
+const fileName=document.querySelector('#partner-file-name');
+if(chooser&&fileName){
+  chooser.addEventListener('change',()=>{
+    fileName.textContent=chooser.files&&chooser.files.length ? chooser.files[0].name : 'Файл не выбран';
+  });
+}
+</script>
+"""
+
+def page(title, body, show_title=True):
+    header = '<h1>'+escape(title)+'</h1>' if show_title else ''
+    return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>'+escape(title)+'</title><style>'+CSS+'</style></head>'
+            '<body><main class="shell">'+header+body+'</main></body></html>')
+
+def local_date(raw):
+    try:
+        dt=datetime.fromisoformat(str(raw).replace('Z','+00:00'))
+        if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone(timedelta(hours=3))).strftime('%d.%m.%Y %H:%M')
+    except (ValueError,TypeError):
+        return str(raw)[:16]
+
+def status_html(status):
+    value={'created':('Создана',''), 'accepted':('Принята','status-accepted'),
+           'processing':('В обработке','status-processing'),
+           'uncertain':('Требует сверки','status-uncertain')}.get(status,('Неизвестно',''))
+    return '<span class="status '+value[1]+'">'+escape(value[0])+'</span>'
+
+def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget):
+    q_text=escape(q,quote=True)
+    token=escape(token,quote=True)
+    partner_text=escape(partner,quote=True)
+    options=[('','Все статусы'),('created','Создана'),('processing','В обработке'),
+             ('accepted','Принята'),('uncertain','Требует сверки')]
+    opts=''.join('<option value="'+key+'"'+(' selected' if key==status else '')+'>'+label+'</option>'
+                 for key,label in options)
+    message={'created':'Палета создана. QR доступен в истории.',
+             'uploaded':'Файл обработан, палеты добавлены в историю.',
+             'duplicate':'Эта отправка уже обработана, повторные палеты не создавались.'}.get(notice,'')
+    flash='<div class="notice" role="status">'+escape(message)+'</div>' if message else ''
+    table_rows=[]
+    for pid, code, ref, created_at, state in rows:
+        label=labels.get(pid,{})
+        sku=escape(label.get('article','Неизвестный артикул'))
+        ordinal=escape(label.get('number','1/1'))
+        actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print">QR / Печать</a>'
+        if state=='created':
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit">Изменить</a>'
+        table_rows.append('<tr><td data-label="Артикул"><span class="article">'+sku+'</span></td>'
+                          '<td data-label="Палета"><span class="pallet-num">'+ordinal+'</span></td>'
+                          '<td data-label="Статус">'+status_html(state)+'</td>'
+                          '<td data-label="Создана">'+escape(local_date(created_at))+'</td>'
+                          '<td data-label="Действия"><div class="action-links">'+actions+'</div></td></tr>')
+    if not table_rows:
+        table_rows=['<tr><td colspan="5" class="empty">Палеты не найдены. Попробуй изменить фильтры или создать новую палету.</td></tr>']
+    def page_url(n):
+        return '/partners?'+urlencode({'q':q,'status':status,'page':n})
+    back='<a href="'+escape(page_url(current_page-1),quote=True)+'">← Назад</a>' if current_page>1 else '<span class="disabled">← Назад</span>'
+    forward='<a href="'+escape(page_url(current_page+1),quote=True)+'">Дальше →</a>' if current_page<page_count else '<span class="disabled">Дальше →</span>'
+    page_nav='<div class="paging"><span>Найдено: '+str(total)+' · Страница '+str(current_page)+' из '+str(page_count)+'</span><div class="pages">'+back+forward+'</div></div>'
+    html=f"""
+    <header class="topbar">
+      <div class="brand"><span class="logo">ONX</span><div><b>ONIX WMS</b><small>Кабинет партнёра</small></div></div>
+      <div class="account"><span class="partner-pill">Партнёр: {partner_text}</span>
+      <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{token}">
+      <button class="btn btn-secondary" type="submit">Выйти</button></form></div>
+    </header>
+    <div class="dashboard-title"><h1>Палеты партнёра</h1>
+      <div class="muted">Создание, корректировка, печать и контроль палет поставки</div></div>
+    {flash}
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-label">Всего палет</div><div class="number">{stats['total']}</div></div>
+      <div class="kpi"><div class="kpi-label">Ожидают приёмки</div><div class="number blue">{stats['created']}</div></div>
+      <div class="kpi"><div class="kpi-label">Принято</div><div class="number green">{stats['accepted']}</div></div>
+      <div class="kpi"><div class="kpi-label">В работе / сверке</div><div class="number amber">{stats['pending']}</div></div>
+    </div>
+    <div class="forms-grid">
+      <section class="panel">
+        <div class="panel-top"><span class="panel-icon">📦</span><div><h2>Добавить палету</h2><div class="muted">При изменении состава машины</div></div></div>
+        <form method="post" action="/partners/pallet/new" data-once>
+          <input type="hidden" name="csrf" value="{token}">
+          <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
+          <div class="field"><label for="manual-article">Артикул товара</label>
+             <input id="manual-article" name="article" placeholder="Начни вводить артикул или название" maxlength="150" autocomplete="off" required>
+          </div>
+          <div class="fields-inline">
+            <div class="field"><label for="manual-quantity">Количество, шт.</label>
+              <input id="manual-quantity" name="quantity" type="number" min="1" max="1000000" step="1" placeholder="Количество" required></div>
+            <div class="field"><label for="manual-reason">Причина</label>
+              <input id="manual-reason" name="reason" maxlength="300" placeholder="Например: изменение погрузки" required></div>
+          </div>
+          {catalog_widget}
+          <div class="form-foot"><button class="btn btn-primary" type="submit">＋ Создать палету и QR</button></div>
+        </form>
+      </section>
+      <section class="panel">
+        <div class="panel-top"><span class="panel-icon">📄</span><div><h2>Загрузить Excel</h2><div class="muted">Создать сразу несколько палет</div></div></div>
+        <form method="post" action="/partners/upload" enctype="multipart/form-data" data-once>
+          <input type="hidden" name="csrf" value="{token}">
+          <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
+          <div class="dropzone"><div class="symbol">📁</div><b>Выбери Excel-файл заказа</b>
+            <div class="muted">Формат .xlsx · не более 2 МБ · до 5000 палет</div>
+            <input id="partner-file" type="file" name="file" accept=".xlsx" aria-label="Загрузить Excel" required>
+            <div class="filename" id="partner-file-name">Файл не выбран</div></div>
+          <div class="field-note">Поддерживаются «Артикул / Палет / Ед. в палете» и «Артикул / Количество / Палета».</div>
+          <div class="form-foot"><button class="btn btn-primary" type="submit">Создать палеты из Excel</button></div>
+        </form>
+      </section>
+    </div>
+    <section class="panel">
+      <div class="panel-top"><span class="panel-icon">🗂️</span><div><h2>История палет</h2><div class="muted">Поиск, статусы и повторная печать QR</div></div></div>
+      <form method="get" action="/partners" class="toolbar">
+        <div class="field"><label for="history-search">Поиск по артикулу</label>
+          <input id="history-search" name="q" value="{q_text}" maxlength="100" placeholder="Введите артикул" autocomplete="off"></div>
+        <div class="field status-filter"><label for="history-status">Статус</label><select id="history-status" name="status">{opts}</select></div>
+        <button class="btn btn-primary" type="submit">Найти</button>
+        <a class="btn btn-ghost" href="/partners">Сбросить</a>
+      </form>
+      <div class="table-wrap"><table><thead><tr><th>Артикул</th><th>Палета</th><th>Статус</th><th>Создана (МСК)</th><th>Действия</th></tr></thead>
+      <tbody>{''.join(table_rows)}</tbody></table></div>
+      {page_nav}
+    </section><div class="footer">ONIX WMS · Партнёр видит только свои палеты и может изменять только не принятые.</div>
+    {FORM_JS}
+    """
+    return page("ONIX WMS · Палеты партнёра",html,show_title=False)
