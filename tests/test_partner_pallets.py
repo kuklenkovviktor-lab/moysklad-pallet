@@ -65,6 +65,8 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(label.status_code, 200)
         self.assertIn(rows[0][1].encode(), label.data)
         self.assertIn(b"data:image/png;base64,", label.data)
+        self.assertIn(b"size:A4 portrait", label.data)
+        self.assertIn(b"width:210mm;height:297mm", label.data)
 
     def test_isolation_and_csrf(self):
         good = self.upload([("Артикул", "Количество"), ("SKU1", 4)])
