@@ -48,6 +48,44 @@ def db_init():
             cur.execute(statement)
         db.commit()
 
+def resolve_receiving_pallet(barcode):
+    """Read-only pallet metadata; a code is never looked up as a MoySklad pack."""
+    if not str(barcode).startswith("ONIX-PAL-"):
+        return None
+    db_init()
+    with db_connect() as db:
+        cur = db.cursor()
+        row = cur.execute(sql("""SELECT p.id, p.partner_id, a.name, p.external_ref, p.status
+            FROM partner_pallets p JOIN partner_accounts a ON a.id=p.partner_id
+            WHERE p.barcode=?"""), (barcode,)).fetchone()
+        if not row:
+            return None
+        lines = cur.execute(sql("SELECT sku, quantity FROM partner_pallet_lines WHERE pallet_id=?"),
+                            (row[0],)).fetchall()
+    return dict(id=row[0], partner_id=row[1], partner=row[2], reference=row[3],
+                status=row[4], lines=[dict(article=r[0], quantity=int(r[1])) for r in lines])
+
+
+def claim_receiving_pallet(pallet_id):
+    """Single winner for concurrent receiving scans. Rollback is explicit."""
+    with db_connect() as db:
+        cur = db.cursor()
+        cur.execute(sql("UPDATE partner_pallets SET status='processing' WHERE id=? AND status='created'"),
+                    (pallet_id,))
+        updated = cur.rowcount
+        db.commit()
+    return updated == 1
+
+
+def set_receiving_pallet_status(pallet_id, status):
+    if status not in ("accepted", "uncertain", "created"):
+        raise ValueError("Unsupported status")
+    with db_connect() as db:
+        db.cursor().execute(sql("UPDATE partner_pallets SET status=? WHERE id=? AND status='processing'"),
+                            (status, pallet_id))
+        db.commit()
+
+
 def password_hash(password):
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260000)

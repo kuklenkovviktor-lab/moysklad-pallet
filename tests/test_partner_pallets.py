@@ -112,6 +112,21 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(self.client.get("/manager/warehouse-map").status_code, 302)
         self.assertEqual(self.client.post("/api/partners/accounts", json={"name":"intruder","password":"123456789012"}).status_code, 403)
 
+    def test_partner_pallet_lookup_and_atomic_claim(self):
+        from partner_pallets import resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
+        upload = self.upload([("Артикул", "Количество"), ("SKU1", 24)])
+        self.assertEqual(upload.status_code, 302)
+        with self.client.session_transaction() as state:
+            pid = state["partner_id"]
+        code = query_one("SELECT barcode FROM partner_pallets WHERE partner_id=?", (pid,))[0]
+        pallet = resolve_receiving_pallet(code)
+        self.assertEqual(pallet["lines"], [{"article": "SKU1", "quantity": 24}])
+        self.assertEqual(pallet["status"], "created")
+        self.assertTrue(claim_receiving_pallet(pallet["id"]))
+        self.assertFalse(claim_receiving_pallet(pallet["id"]))
+        set_receiving_pallet_status(pallet["id"], "accepted")
+        self.assertEqual(resolve_receiving_pallet(code)["status"], "accepted")
+
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
         self.assertEqual(bad.status_code, 400)

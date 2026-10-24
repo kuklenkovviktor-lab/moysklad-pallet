@@ -23,7 +23,7 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
-from partner_pallets import partner_bp
+from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from warehouse_map import warehouse_map_bp
@@ -2739,6 +2739,15 @@ def cache_status():
             **WARMUP_STATE,
         )
 
+def partner_receiving_product(line):
+    """Resolve a pre-advised SKU against MoySklad without touching its inventory."""
+    article = line["article"]
+    matching = [p for p in _get_product_list() if str(p.get("article", "")).strip() == article]
+    if len(matching) != 1:
+        raise ValueError("Артикул палеты отсутствует или неоднозначен в МойСклад: " + article)
+    return matching[0], {"name": "Палета партнёра", "quantity": line["quantity"]}
+
+
 @app.post("/api/pack-info")
 def pack_info():
     try:
@@ -2747,6 +2756,18 @@ def pack_info():
         if not barcode:
             return jsonify(error="Пустой штрихкод"), 400
 
+        if barcode.startswith("ONIX-PAL-"):
+            pallet = resolve_receiving_pallet(barcode)
+            if not pallet:
+                return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
+            if pallet["status"] != "created":
+                return jsonify(error="Эта палета уже в обработке или принята: " + pallet["status"]), 409
+            if len(pallet["lines"]) != 1:
+                return jsonify(error="Многономенклатурная палета требует отдельной проверки"), 409
+            product, pack = partner_receiving_product(pallet["lines"][0])
+            return jsonify(ok=True, barcode=barcode, name=product.get("name"),
+                           article=product.get("article"), pack_name="Партнёр: "+pallet["partner"],
+                           standard_qty=pack["quantity"], source="partner")
         product, pack = find_product_pack_by_barcode(barcode)
         if not product:
             return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
@@ -2857,9 +2878,23 @@ def scan():
             return jsonify(error="Операция уже отправлена. Проверь результат в МойСклад; повторно товар не добавлялся.",
                            operation_id=operation_id, status=existing["status"]), 409
 
-        product, pack = find_product_pack_by_barcode(barcode)
-        if not product:
-            return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
+        partner_pallet = None
+        if barcode.startswith("ONIX-PAL-"):
+            partner_pallet = resolve_receiving_pallet(barcode)
+            if not partner_pallet:
+                return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
+            if partner_pallet["status"] != "created":
+                return jsonify(error="Палета уже принята или требует сверки"), 409
+            if len(partner_pallet["lines"]) != 1:
+                return jsonify(error="Палета с несколькими SKU требует отдельной приёмки"), 409
+            product, pack = partner_receiving_product(partner_pallet["lines"][0])
+            if requested_qty is not None and requested_qty != float(pack["quantity"]):
+                return jsonify(error="Количество по палете партнёра нельзя менять в этом режиме"), 409
+        else:
+            product, pack = find_product_pack_by_barcode(barcode)
+            if not product:
+                return jsonify(error=f"Упаковка со штрихкодом {barcode} не найдена"), 404
+
         # Atomic claim blocks concurrent requests, double-taps, and HTTP retries.
         claimed, record = claim_operation(
             operation_id, receipt_id, employee["id"], barcode, qty_key
@@ -2869,6 +2904,10 @@ def scan():
                 return jsonify(ok=True, operation_id=operation_id, replayed=True, **record["response"])
             return jsonify(error="Операция обрабатывается или требует сверки.",
                            operation_id=operation_id, status=record["status"]), 409
+
+        if partner_pallet and not claim_receiving_pallet(partner_pallet["id"]):
+            reject_operation(operation_id, "duplicate_partner_pallet")
+            return jsonify(error="Эта палета уже принята или обрабатывается"), 409
 
         try:
             result = add_or_increment_position(receipt_id, product, pack, requested_qty)
@@ -2884,10 +2923,16 @@ def scan():
             # Commit the idempotency result FIRST; logging must not turn a
             # successful MoySklad write into a retryable error.
             finish_operation(operation_id, response)
+            if partner_pallet:
+                set_receiving_pallet_status(partner_pallet["id"], "accepted")
         except ReceiptUnavailable as exc:
+            if partner_pallet:
+                set_receiving_pallet_status(partner_pallet["id"], "created")
             reject_operation(operation_id, exc.reason)
             raise
         except requests.HTTPError as exc:
+            if partner_pallet:
+                set_receiving_pallet_status(partner_pallet["id"], "uncertain")
             if receipt_error_is_deleted(exc):
                 reject_operation(operation_id, "deleted")
             elif exc.response is not None and exc.response.status_code in (404, 410):
@@ -2896,6 +2941,8 @@ def scan():
                 mark_uncertain(operation_id, str(exc))
             raise
         except Exception as exc:
+            if partner_pallet:
+                set_receiving_pallet_status(partner_pallet["id"], "uncertain")
             mark_uncertain(operation_id, str(exc))
             raise
 
