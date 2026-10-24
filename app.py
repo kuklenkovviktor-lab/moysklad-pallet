@@ -2739,6 +2739,24 @@ def cache_status():
             **WARMUP_STATE,
         )
 
+def partner_pallet_status_error(pallet):
+    status = pallet["status"]
+    if status == "accepted":
+        accepted_at = pallet.get("accepted_at")
+        if accepted_at:
+            try:
+                local_dt = datetime.fromisoformat(accepted_at.replace("Z", "+00:00")) + timedelta(hours=3)
+                return "Палета уже принята: " + local_dt.strftime("%d.%m.%Y в %H:%M") + " (МСК)"
+            except ValueError:
+                pass
+        return "Палета уже принята (время старой приёмки не записано)"
+    if status == "processing":
+        return "Палета сейчас в обработке"
+    if status == "uncertain":
+        return "Приёмка палеты требует сверки с МойСклад"
+    return "Палета недоступна для приёмки"
+
+
 def partner_receiving_product(line):
     """Resolve a pre-advised SKU against MoySklad without touching its inventory."""
     article = line["article"]
@@ -2761,7 +2779,7 @@ def pack_info():
             if not pallet:
                 return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
             if pallet["status"] != "created":
-                return jsonify(error="Эта палета уже в обработке или принята: " + pallet["status"]), 409
+                return jsonify(error=partner_pallet_status_error(pallet)), 409
             if len(pallet["lines"]) != 1:
                 return jsonify(error="Многономенклатурная палета требует отдельной проверки"), 409
             product, pack = partner_receiving_product(pallet["lines"][0])
@@ -2884,7 +2902,7 @@ def scan():
             if not partner_pallet:
                 return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
             if partner_pallet["status"] != "created":
-                return jsonify(error="Палета уже принята или требует сверки"), 409
+                return jsonify(error=partner_pallet_status_error(partner_pallet)), 409
             if len(partner_pallet["lines"]) != 1:
                 return jsonify(error="Палета с несколькими SKU требует отдельной приёмки"), 409
             product, pack = partner_receiving_product(partner_pallet["lines"][0])

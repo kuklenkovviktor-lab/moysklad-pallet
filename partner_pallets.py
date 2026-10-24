@@ -12,7 +12,7 @@ from html import escape
 import qrcode
 from flask import Blueprint, abort, jsonify, redirect, request, session, url_for, Response
 from openpyxl import load_workbook
-from wms import db_connect, manager_access, sql
+from wms import db_connect, manager_access, sql, DATABASE_URL
 
 partner_bp = Blueprint("partners", __name__)
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -34,7 +34,7 @@ def db_init():
         """CREATE TABLE IF NOT EXISTS partner_pallets (
             id TEXT PRIMARY KEY, partner_id TEXT NOT NULL, upload_id TEXT NOT NULL,
             external_ref TEXT NOT NULL, barcode TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'created'
+            created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'created', accepted_at TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS partner_pallet_lines (
             id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, sku TEXT NOT NULL,
@@ -46,6 +46,12 @@ def db_init():
         cur = db.cursor()
         for statement in statements:
             cur.execute(statement)
+        if DATABASE_URL:
+            cur.execute("ALTER TABLE partner_pallets ADD COLUMN IF NOT EXISTS accepted_at TEXT")
+        else:
+            columns = [row[1] for row in cur.execute("PRAGMA table_info(partner_pallets)").fetchall()]
+            if "accepted_at" not in columns:
+                cur.execute("ALTER TABLE partner_pallets ADD COLUMN accepted_at TEXT")
         db.commit()
 
 def resolve_receiving_pallet(barcode):
@@ -55,7 +61,7 @@ def resolve_receiving_pallet(barcode):
     db_init()
     with db_connect() as db:
         cur = db.cursor()
-        row = cur.execute(sql("""SELECT p.id, p.partner_id, a.name, p.external_ref, p.status
+        row = cur.execute(sql("""SELECT p.id, p.partner_id, a.name, p.external_ref, p.status, p.accepted_at
             FROM partner_pallets p JOIN partner_accounts a ON a.id=p.partner_id
             WHERE p.barcode=?"""), (barcode,)).fetchone()
         if not row:
@@ -63,7 +69,7 @@ def resolve_receiving_pallet(barcode):
         lines = cur.execute(sql("SELECT sku, quantity FROM partner_pallet_lines WHERE pallet_id=?"),
                             (row[0],)).fetchall()
     return dict(id=row[0], partner_id=row[1], partner=row[2], reference=row[3],
-                status=row[4], lines=[dict(article=r[0], quantity=int(r[1])) for r in lines])
+                status=row[4], accepted_at=row[5], lines=[dict(article=r[0], quantity=int(r[1])) for r in lines])
 
 
 def claim_receiving_pallet(pallet_id):
@@ -81,8 +87,10 @@ def set_receiving_pallet_status(pallet_id, status):
     if status not in ("accepted", "uncertain", "created"):
         raise ValueError("Unsupported status")
     with db_connect() as db:
-        db.cursor().execute(sql("UPDATE partner_pallets SET status=? WHERE id=? AND status='processing'"),
-                            (status, pallet_id))
+        db.cursor().execute(sql("""UPDATE partner_pallets SET status=?,
+            accepted_at=CASE WHEN ?='accepted' THEN COALESCE(accepted_at, ?) ELSE accepted_at END
+            WHERE id=? AND status='processing'"""),
+            (status, status, now(), pallet_id))
         db.commit()
 
 
