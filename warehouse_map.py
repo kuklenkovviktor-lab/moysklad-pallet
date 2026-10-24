@@ -212,7 +212,12 @@ function showDetails(){
  '<div><dt>Последняя проверка ячейки</dt><dd>'+esc(c.last_task?.verified_location_at?'Да':'Нет данных')+'</dd></div></dl>'+
  '<h3>Постоянная привязка товара</h3>'+(c.assignment?'<div class="info"><b>'+esc(c.assignment.article)+'</b><div class="small">'+esc(c.assignment.name||'')+'</div><div class="small">Закреплено: '+esc(fmt(c.assignment.assigned_at))+'</div></div>':'<p class="small">Не задана. Последнее пополнение не назначает SKU автоматически.</p>')+
  '<p><a href="/manager/cell-audit?location_id='+encodeURIComponent(c.id)+'">📷 Сканировать товар и привязать к ячейке →</a></p>'+
- '<h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
+ ''<div class="manage-controls"><h3>Управление ячейкой</h3>'+
+ '<p class="small">QR постоянный. Освобождение не списывает остатки в МойСклад. Удаление убирает адрес из активной карты, сохраняя историю.</p>'+
+ '<div class="actions"><button type="button" data-manage="release" '+(!c.assignment?'disabled':'')+'>Освободить от SKU</button>'+
+ '<button type="button" data-manage="rename">Изменить адрес</button>'+
+ '<button type="button" data-manage="archive">Удалить ячейку</button></div></div>'+ 
+ <h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
  '<h3>Последнее завершённое пополнение</h3>'+(c.last_task?taskCard(c.last_task):'<p class="small">В истории пока нет завершённых пополнений.</p>')+
  '<p class="small">Статус показывает работу по пополнению, а не фактический остаток товара в ячейке.</p>'+
  '<a href="/manager/replenishment">Управлять заданиями →</a>';
@@ -233,6 +238,34 @@ async function fetchData(){
  }catch(e){document.getElementById('notice').textContent=e.message}
  finally{btn.disabled=false}
 }
+document.getElementById('details').addEventListener('click',async e=>{
+ const button=e.target.closest('button[data-manage]');if(!button)return;
+ const cell=allCells.find(x=>x.id===selectedId);if(!cell)return;
+ const action=button.dataset.manage;
+ let newLabel='',confirmedEmpty=false;
+ if(action==='rename'){
+  const v=prompt('Новый адрес для '+cell.label+'. QR-код сохранится, но напечатанную этикетку нужно заменить:',cell.label);
+  if(v===null)return;newLabel=v.trim().toUpperCase();
+  if(!newLabel||newLabel===cell.label)return;
+ }else if(action==='release'){
+  if(!cell.assignment)return;
+  confirmedEmpty=confirm('Подтверждаешь, что '+cell.label+' ФИЗИЧЕСКИ ПУСТА?\\nПривязка '+cell.assignment.article+' будет снята. Это НЕ списание остатков.');
+  if(!confirmedEmpty)return;
+ }
+ if(action==='archive'&&!confirm('Убрать '+cell.label+' из активной карты? Нельзя архивировать занятую ячейку или место с открытыми задачами.'))return;
+ if(!confirm('Подтвердить операцию '+action+' для '+cell.label+'?'))return;
+ button.disabled=true;
+ try{
+  const r=await fetch('/api/manager/warehouse-map/location/manage',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({location_id:cell.id,expected_label:cell.label,action,
+    new_label:newLabel,confirmed_empty:confirmedEmpty,confirmed:true})
+  });
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось сохранить');
+  await fetchData();
+  if(d.reprint_label)alert('Адрес изменён, QR сохранён. Перепечатай этикетку 58×40 мм и замени старую на стеллаже.');
+ }catch(err){alert(err.message);button.disabled=false}
+});
 document.getElementById('zones').addEventListener('click',e=>{
  const btn=e.target.closest('button[data-id]');
  if(!btn)return;
