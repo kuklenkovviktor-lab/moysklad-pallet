@@ -135,6 +135,7 @@ class PartnerPalletTests(unittest.TestCase):
     def test_dashboard_ui_stats_statuses_mobile_and_owner_filter(self):
         one=self.upload([("Артикул","Количество"),("SKU_NEW",5)])
         self.assertEqual(one.status_code,302,one.data[:350])
+        self.assertIn("result=uploaded&count=1",one.location)
         dashboard=self.client.get("/partners")
         self.assertEqual(dashboard.status_code,200,dashboard.data[:350])
         html=dashboard.data.decode("utf-8")
@@ -163,6 +164,7 @@ class PartnerPalletTests(unittest.TestCase):
         first=self.client.post("/partners/pallet/new",data=payload)
         second=self.client.post("/partners/pallet/new",data=payload)
         self.assertEqual(first.status_code,302)
+        self.assertIn("result=created&pallet=",first.location)
         self.assertEqual(second.status_code,302)
         self.assertIn("result=duplicate",second.location)
         with self.client.session_transaction() as session:
@@ -281,7 +283,9 @@ class PartnerPalletTests(unittest.TestCase):
         pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))
         self.assertIsNotNone(pallet)
         url="/partners/pallet/"+pallet[0]+"/edit"
-        self.assertEqual(self.client.get(url).status_code,200)
+        edit_page=self.client.get(url)
+        self.assertEqual(edit_page.status_code,200)
+        self.assertIn("История корректировок",edit_page.data.decode("utf-8"))
         changed=self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"100","reason":"Фактически 100"})
         self.assertEqual(changed.status_code,302,changed.data[:500])
         self.assertEqual(query_one("SELECT quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))[0],100)
