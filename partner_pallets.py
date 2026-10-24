@@ -13,7 +13,7 @@ import qrcode
 from flask import Blueprint, abort, jsonify, redirect, request, session, url_for, Response
 from openpyxl import load_workbook
 from wms import db_connect, manager_access, sql, DATABASE_URL
-from partner_portal_ui import page as portal_page, dashboard_view
+from partner_portal_ui import page as portal_page, dashboard_view, edit_view
 
 partner_bp = Blueprint("partners", __name__)
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -374,7 +374,9 @@ def dashboard():
     labels=partner_pallet_display(p[0])
     return dashboard_view(p[1], csrf(), stats, rows, labels, q, status,
                           current_page,page_count,total,
-                          str(request.args.get("result","")),partner_catalog_widget())
+                          str(request.args.get("result","")),partner_catalog_widget(),
+                          created_pallet=str(request.args.get("pallet",""))[:48],
+                          created_count=(int(request.args.get("count",0)) if str(request.args.get("count",0)).isdigit() else 0))
 
 
 @partner_bp.get("/partners/catalog/search")
@@ -488,7 +490,7 @@ def manual_create():
         cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES (?,?,?,?)"),(str(uuid.uuid4()),pid,sku,qty))
         cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pid,p[0],"create",sku,qty,reason,now()))
         db.commit()
-    return redirect("/partners?result=created")
+    return redirect("/partners?result=created&pallet="+pid)
 
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
@@ -521,8 +523,7 @@ def manual_edit(pallet_id):
             return redirect("/partners")
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    history="".join("<li>"+escape(str(e))+"</li>" for e in entries)
-    return page("Изменить палету",'<p><a href="/partners">Назад</a></p><section><form method="post"><input type="hidden" name="csrf" value="'+csrf()+'"><input name="article" value="'+escape(lines[0][1],quote=True)+'" required><input type="number" name="quantity" min="1" step="1" value="'+str(lines[0][2])+'" required><input name="reason" placeholder="Причина изменения" required><button>Сохранить</button></form><p>QR останется прежним</p></section><section><h2>История изменений</h2><ul>'+history+'</ul></section>'+partner_catalog_widget())
+    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget())
 
 
 @partner_bp.post("/partners/upload")
@@ -553,7 +554,7 @@ def upload():
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
         db.commit()
-    return redirect("/partners?result=uploaded")
+    return redirect("/partners?result=uploaded&count="+str(len(groups)))
 
 @partner_bp.get("/partners/pallet/<pallet_id>/print")
 def print_label(pallet_id):
