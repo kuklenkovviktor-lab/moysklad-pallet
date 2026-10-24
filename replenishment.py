@@ -81,9 +81,9 @@ button:disabled{opacity:.5}.secondary{background:#dbe7ed;color:#314657}
 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:13px 0 8px">
 <a href="/manager/replenishment/labels/all" target="_blank" rel="noopener"
    id="printAllLocations" style="display:inline-block;padding:11px 16px;background:#48647a;color:white;
-    border-radius:9px;text-decoration:none;font-weight:750">🖨 Печать всех ШК на А4</a>
+    border-radius:9px;text-decoration:none;font-weight:750">🖨 Печать всех ШК на ленте 58×40</a>
 <span class="small" id="printAllCount">Загружаем количество ячеек…</span></div>
-<p class="small">На одном листе А4 размещается 18 этикеток по 58×40 мм. Индивидуальная печать остаётся доступной ниже.</p>
+<p class="small">Все зарегистрированные ячейки одним заданием на термопринтере: одна этикетка 58×40 мм на одну ячейку. Индивидуальная печать остаётся доступной ниже.</p>
 <div id="locations">Загрузка…</div></section>
 <section class="card"><h2>Открытые задачи <span id="openCount" class="small"></span></h2><div id="queue">Загрузка…</div></section>
 <section class="card"><h2>Последние завершённые и проблемные</h2><div id="history">Загрузка…</div></section>
@@ -114,7 +114,7 @@ function escLoc(x){return esc(x)}
 function paintLocations(){
  const count=document.getElementById('printAllCount');
  const bulk=document.getElementById('printAllLocations');
- if(count)count.textContent='Активных ячеек: '+locations.length+' · ориентировочно '+Math.ceil(locations.length/18)+' листов А4';
+ if(count)count.textContent='Активных ячеек: '+locations.length+' · '+locations.length+' этикеток 58×40 мм';
  if(bulk){bulk.style.pointerEvents=locations.length?'auto':'none';bulk.style.opacity=locations.length?'1':'.5'}
  const sel=document.getElementById('targetLocation'),old=sel.value;
  sel.innerHTML='<option value="">Выбери зарегистрированную ячейку</option>'+locations.map(l=>
