@@ -139,6 +139,7 @@ def create_account():
     return jsonify(ok=True, name=name), 201
 
 def parse_excel(file):
+    """Accept simple SKU/qty rows or ONIX purchase orders like the Promsiz file."""
     if not file.filename.lower().endswith(".xlsx"):
         raise ValueError("Загрузи файл .xlsx")
     raw = file.stream.read(MAX_UPLOAD + 1)
@@ -146,48 +147,69 @@ def parse_excel(file):
         raise ValueError("Размер файла не больше 2 МБ")
     wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     try:
-        sheet = wb.active
-        records = sheet.iter_rows(values_only=True)
-        headers = next(records, None)
-        if not headers:
-            raise ValueError("Excel пуст")
-        normalized = [str(c or "").strip().casefold() for c in headers]
-        synonyms = {"sku": ("артикул", "sku"), "qty": ("количество", "qty", "кол-во"),
-                    "pallet": ("палета", "паллет", "pallet")}
-        def find(key):
-            return next((normalized.index(k) for k in synonyms[key] if k in normalized), None)
-        a, q, p = find("sku"), find("qty"), find("pallet")
-        if a is None or q is None:
-            raise ValueError("Нужны столбцы: Артикул, Количество. Необязательно: Палета")
+        sheet = wb["Заказ"] if "Заказ" in wb.sheetnames else wb.active
+        records = list(sheet.iter_rows(values_only=True))
+        header_row = None
+        for idx, row in enumerate(records[:40]):
+            cells = [str(c or "").strip().casefold() for c in row]
+            if "артикул" in cells and ("количество" in cells or "количество, ед." in cells or "палет" in cells):
+                header_row = idx
+                break
+        if header_row is None:
+            raise ValueError("Нет таблицы с колонкой Артикул и количеством")
+        headings = [str(c or "").strip().casefold() for c in records[header_row]]
+        def column(*aliases):
+            return next((headings.index(key) for key in aliases if key in headings), None)
+        a = column("артикул", "sku")
+        pallets = column("палет")
+        each = column("ед. в палете")
+        quantity = column("количество", "количество, ед.", "qty", "кол-во")
+        group_column = column("палета", "паллет", "pallet")
+        if quantity is None and (pallets is None or each is None):
+            raise ValueError("Нужны количество либо столбцы Палет и Ед. в палете")
+        def positive(value, num):
+            try:
+                n = int(value)
+                if n <= 0 or float(value) != n:
+                    raise ValueError()
+                return n
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"Строка {num}: ожидается положительное целое число")
         groups = OrderedDict()
-        count = 0
-        for row_num, row in enumerate(records, start=2):
+        for num, row in enumerate(records[header_row + 1:], start=header_row + 2):
             if not any(x is not None and str(x).strip() for x in row):
                 continue
-            count += 1
-            if count > MAX_ROWS:
-                raise ValueError("Не более 5000 строк в файле")
             sku = str(row[a] if a < len(row) and row[a] is not None else "").strip()
-            qty_value = row[q] if q < len(row) else None
-            try:
-                qty = int(qty_value)
-                if qty <= 0 or float(qty_value) != qty:
-                    raise ValueError()
-            except (TypeError, ValueError, OverflowError):
-                raise ValueError(f"Строка {row_num}: некорректное количество")
-            if not sku or len(sku) > 150:
-                raise ValueError(f"Строка {row_num}: некорректный артикул")
-            pallet_ref = str(row[p]).strip() if p is not None and p < len(row) and row[p] is not None else ""
-            # No pallet column means one independent pallet per row.
-            key = pallet_ref if p is not None else f"row-{row_num}"
-            if not key or len(key) > 150:
-                raise ValueError(f"Строка {row_num}: не указана палета")
-            groups.setdefault(key, []).append((sku, qty))
+            if not sku or sku.casefold().startswith(("итого", "всего")):
+                continue
+            if len(sku) > 150:
+                raise ValueError(f"Строка {num}: артикул слишком длинный")
+            if pallets is not None and each is not None:
+                count = positive(row[pallets] if pallets < len(row) else None, num)
+                per_pallet = positive(row[each] if each < len(row) else None, num)
+                if quantity is not None and quantity < len(row) and row[quantity] is not None:
+                    total = positive(row[quantity], num)
+                    if count * per_pallet != total:
+                        raise ValueError(f"Строка {num}: количество не сходится с палетами")
+                if len(groups) + count > MAX_ROWS:
+                    raise ValueError("Не более 5000 палет в одной загрузке")
+                for index in range(1, count + 1):
+                    groups[f"{sku} · {index}/{count} · строка {num}"] = [(sku, per_pallet)]
+            else:
+                qty = positive(row[quantity] if quantity < len(row) else None, num)
+                ref = str(row[group_column]).strip() if group_column is not None and group_column < len(row) and row[group_column] is not None else ""
+                key = ref if group_column is not None else f"Строка {num}"
+                if not key:
+                    raise ValueError(f"Строка {num}: не указан номер палеты")
+                groups.setdefault(key, []).append((sku, qty))
+                if len(groups) > MAX_ROWS:
+                    raise ValueError("Не более 5000 палет в одной загрузке")
         if not groups:
             raise ValueError("Нет строк с товарами")
         return groups
     finally:
         wb.close()
+
 
 @partner_bp.route("/partners", methods=["GET"])
 def dashboard():
@@ -198,7 +220,7 @@ def dashboard():
             WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
     items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a></td></tr>" for r in rows)
     return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
-    <section><h2>Загрузить Excel</h2><p>Столбцы: <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
+    <section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
     Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
     <form method="post" action="/partners/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
