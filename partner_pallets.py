@@ -138,34 +138,36 @@ def create_account():
         return jsonify(error="Не удалось создать партнёра. Проверь уникальность имени."), 409
     return jsonify(ok=True, name=name), 201
 
-@partner_bp.get("/manager/partners")
+@partner_bp.route("/manager/partners", methods=["GET", "POST"])
 def manager_partners():
     db_init()
     if not manager_access():
         abort(403)
+    notice = ""
+    if request.method == "POST":
+        name = str(request.form.get("name", "")).strip()
+        password = str(request.form.get("password", ""))
+        if not 2 <= len(name) <= 100 or len(password) < 12:
+            notice = "Имя 2–100 символов, пароль от 12 символов"
+        else:
+            try:
+                with db_connect() as db:
+                    db.cursor().execute(sql("INSERT INTO partner_accounts(id,name,password_hash,created_at) VALUES(?,?,?,?)"),
+                                        (str(uuid.uuid4()), name, password_hash(password), now()))
+                    db.commit()
+                notice = "Партнёр создан. Передай ему логин, пароль и адрес /partners/login"
+            except Exception:
+                notice = "Логин уже занят или произошла ошибка"
     with db_connect() as db:
         partners = db.cursor().execute(sql("SELECT name, created_at, active FROM partner_accounts ORDER BY created_at DESC")).fetchall()
     rows = "".join(f"<tr><td>{escape(name)}</td><td>{escape(created[:16])}</td><td>{'Активен' if active else 'Отключён'}</td></tr>"
                    for name, created, active in partners)
     return page("ONIX · Управление партнёрами", f"""<p><a href="/manager">← Панель руководителя</a></p>
-      <section><h2>Создать ограниченный доступ партнёру</h2>
-      <p>Партнёрам доступна только загрузка Excel, история собственных палет и печать А4.</p>
-      <form id="new-partner"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
+      <section><h2>Создать ограниченный доступ партнёру</h2><p>{escape(notice)}</p>
+      <form method="post"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
         <input name="password" placeholder="Пароль (от 12 символов)" required minlength="12" autocomplete="new-password">
-        <button>Создать партнёра</button></form><p id="result"></p>
-      <script>
-      document.getElementById('new-partner').addEventListener('submit',async e=>{{
-        e.preventDefault();
-        const form=new FormData(e.target);
-        const response=await fetch('/api/partners/accounts',{method:'POST',
-          headers:{{'Content-Type':'application/json'},
-          body:JSON.stringify({{name:form.get('name'),password:form.get('password')}})}});
-        const data=await response.json();
-        document.getElementById('result').textContent=response.ok?'Создан. Ссылка для партнёра: /partners/login':(data.error||'Ошибка');
-        if(response.ok)location.reload();
-      }});
-      </script></section><section><h2>Партнёры</h2>
-      <table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
+        <button>Создать партнёра</button></form></section>
+      <section><h2>Партнёры</h2><table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
 
 
 def parse_excel(file):
