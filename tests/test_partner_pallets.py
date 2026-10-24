@@ -254,6 +254,39 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertIn("/partners/login",self.client.get("/partners").location)
         self.assertEqual(self.client.get("/partners/catalog/search?q=SKU_NEW").status_code,401)
 
+    def test_manager_login_persists_with_seven_day_lifetime(self):
+        from datetime import datetime, timezone
+        import time
+        import wms
+        with self.client.session_transaction() as state:
+            state.clear()
+        with patch.object(wms,"MANAGER_WEB_PASSWORD","example-test-password"):
+            response=self.client.post("/api/manager/login",json={"password":"example-test-password"})
+        self.assertEqual(response.status_code,200,response.json)
+        with self.client.session_transaction() as state:
+            self.assertTrue(state.permanent)
+            self.assertTrue(state["manager_web"])
+            self.assertLess(abs(time.time()-state["manager_login_at"]),30)
+        from email.utils import parsedate_to_datetime
+        cookie=[c for c in response.headers.getlist("Set-Cookie") if c.startswith("session=")][0]
+        expires=cookie.split("Expires=",1)[1].split(";",1)[0]
+        duration=(parsedate_to_datetime(expires)-datetime.now(timezone.utc)).total_seconds()
+        self.assertGreater(duration,6*86400)
+        self.assertLess(duration,8*86400)
+        self.assertEqual(self.client.get("/partners").status_code,200)
+
+    def test_expired_manager_cookie_cannot_reenter_manager(self):
+        import time
+        with self.client.session_transaction() as state:
+            state["manager_web"]=True
+            state["manager_login_at"]=time.time()-8*86400
+            state.permanent=True
+        response=self.client.get("/manager")
+        self.assertEqual(response.status_code,302)
+        self.assertIn("/manager-login",response.location)
+        # Expiring a manager session must not touch the partner.
+        self.assertEqual(self.client.get("/partners").status_code,200)
+
     def test_partner_pallet_lookup_and_atomic_claim(self):
         from partner_pallets import resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
         upload = self.upload([("Артикул", "Количество"), ("SKU1", 24)])
