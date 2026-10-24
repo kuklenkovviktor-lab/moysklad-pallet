@@ -212,6 +212,11 @@ function showDetails(){
  '<div><dt>Последняя проверка ячейки</dt><dd>'+esc(c.last_task?.verified_location_at?'Да':'Нет данных')+'</dd></div></dl>'+
  '<h3>Постоянная привязка товара</h3>'+(c.assignment?'<div class="info"><b>'+esc(c.assignment.article)+'</b><div class="small">'+esc(c.assignment.name||'')+'</div><div class="small">Закреплено: '+esc(fmt(c.assignment.assigned_at))+'</div></div>':'<p class="small">Не задана. Последнее пополнение не назначает SKU автоматически.</p>')+
  '<p><a href="/manager/cell-audit?location_id='+encodeURIComponent(c.id)+'">📷 Сканировать товар и привязать к ячейке →</a></p>'+
+ '<div class="manage-controls"><h3>Управление ячейкой</h3>'+
+ '<p class="small">QR постоянный. Освобождение не списывает остатки в МойСклад. Удаление убирает адрес из активной карты, сохраняя историю.</p>'+
+ '<div class="actions"><button type="button" data-manage="release" '+(!c.assignment?'disabled':'')+'>Освободить от SKU</button>'+
+ '<button type="button" data-manage="rename">Изменить адрес</button>'+
+ '<button type="button" data-manage="archive">Удалить ячейку</button></div></div>'+ 
  '<h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
  '<h3>Последнее завершённое пополнение</h3>'+(c.last_task?taskCard(c.last_task):'<p class="small">В истории пока нет завершённых пополнений.</p>')+
  '<p class="small">Статус показывает работу по пополнению, а не фактический остаток товара в ячейке.</p>'+
@@ -233,6 +238,34 @@ async function fetchData(){
  }catch(e){document.getElementById('notice').textContent=e.message}
  finally{btn.disabled=false}
 }
+document.getElementById('details').addEventListener('click',async e=>{
+ const button=e.target.closest('button[data-manage]');if(!button)return;
+ const cell=allCells.find(x=>x.id===selectedId);if(!cell)return;
+ const action=button.dataset.manage;
+ let newLabel='',confirmedEmpty=false;
+ if(action==='rename'){
+  const v=prompt('Новый адрес для '+cell.label+'. QR-код сохранится, но напечатанную этикетку нужно заменить:',cell.label);
+  if(v===null)return;newLabel=v.trim().toUpperCase();
+  if(!newLabel||newLabel===cell.label)return;
+ }else if(action==='release'){
+  if(!cell.assignment)return;
+  confirmedEmpty=confirm('Подтверждаешь, что '+cell.label+' ФИЗИЧЕСКИ ПУСТА?\\nПривязка '+cell.assignment.article+' будет снята. Это НЕ списание остатков.');
+  if(!confirmedEmpty)return;
+ }
+ if(action==='archive'&&!confirm('Убрать '+cell.label+' из активной карты? Нельзя архивировать занятую ячейку или место с открытыми задачами.'))return;
+ if(!confirm('Подтвердить операцию '+action+' для '+cell.label+'?'))return;
+ button.disabled=true;
+ try{
+  const r=await fetch('/api/manager/warehouse-map/location/manage',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({location_id:cell.id,expected_label:cell.label,action,
+    new_label:newLabel,confirmed_empty:confirmedEmpty,confirmed:true})
+  });
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось сохранить');
+  await fetchData();
+  if(d.reprint_label)alert('Адрес изменён, QR сохранён. Перепечатай этикетку 58×40 мм и замени старую на стеллаже.');
+ }catch(err){alert(err.message);button.disabled=false}
+});
 document.getElementById('zones').addEventListener('click',e=>{
  const btn=e.target.closest('button[data-id]');
  if(!btn)return;
@@ -382,3 +415,85 @@ def warehouse_map_bulk_locations():
         finally:
             cur.close()
     return jsonify(ok=True, created=created, existing=existing), 201
+
+
+@warehouse_map_bp.post("/api/manager/warehouse-map/location/manage")
+def warehouse_map_manage_location():
+    """Edit a real location without silently changing warehouse stock or task history."""
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
+    if not manager_access():
+        return jsonify(error="Доступ руководителю"), 403
+    body = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(body, dict):
+        return jsonify(error="Ожидается JSON"), 400
+    loc_id = str(body.get("location_id") or "").strip()
+    action = str(body.get("action") or "").strip()
+    expected = str(body.get("expected_label") or "").strip().upper()
+    if not loc_id or action not in ("rename", "release", "archive") or not expected:
+        return jsonify(error="Укажи ячейку, действие и текущий адрес"), 400
+    if body.get("confirmed") is not True:
+        return jsonify(error="Требуется подтверждение операции"), 400
+    new_label = str(body.get("new_label") or "").strip().upper()
+    if action == "rename" and not VALID_LABEL.fullmatch(new_label):
+        return jsonify(error="Некорректный новый адрес"), 400
+    if action == "release" and body.get("confirmed_empty") is not True:
+        return jsonify(error="Сначала физически проверь отсутствие товара в ячейке"), 400
+    from wms import DATABASE_URL, now_iso
+    import uuid
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            lock = " FOR UPDATE" if DATABASE_URL else ""
+            cur.execute(sql("SELECT label, barcode, active FROM replenishment_locations WHERE id=?" + lock), (loc_id,))
+            row = cur.fetchone()
+            if not row or not row[2]:
+                return jsonify(error="Активная ячейка не найдена"), 404
+            old_label, barcode = row[0], row[1]
+            if old_label != expected:
+                return jsonify(error="Адрес изменился. Обнови карту"), 409
+            cur.execute(sql("SELECT product_id, article FROM cell_sku_assignments WHERE location_id=?" + lock), (loc_id,))
+            assignment = cur.fetchone()
+            cur.execute(sql("""
+                SELECT COUNT(*) FROM replenishment_tasks
+                WHERE line_code=? AND status IN ('new','started','blocked')
+            """), (old_label,))
+            pending = cur.fetchone()[0]
+            if pending:
+                return jsonify(error="По ячейке есть незавершённые задачи пополнения. Сначала закрой или отмени их"), 409
+            if action == "rename":
+                if new_label == old_label:
+                    return jsonify(ok=True, unchanged=True, label=old_label, barcode=barcode)
+                # Tasks hold the address as text. Keep history reliable until a migration exists.
+                cur.execute(sql("SELECT COUNT(*) FROM replenishment_tasks WHERE line_code=?"), (old_label,))
+                if cur.fetchone()[0]:
+                    return jsonify(error="Есть история задач по этому адресу. Пока переименование заблокировано, чтобы не нарушить историю"), 409
+                cur.execute(sql("SELECT COUNT(*) FROM replenishment_locations WHERE label=?"), (new_label,))
+                if cur.fetchone()[0]:
+                    return jsonify(error="Такой адрес уже существует, включая архивные"), 409
+                cur.execute(sql("UPDATE replenishment_locations SET label=? WHERE id=? AND active=1"), (new_label, loc_id))
+                result = new_label
+            elif action == "release":
+                if not assignment:
+                    return jsonify(ok=True, unchanged=True, label=old_label, barcode=barcode)
+                cur.execute(sql("DELETE FROM cell_sku_assignments WHERE location_id=?"), (loc_id,))
+                cur.execute(sql("""
+                    INSERT INTO cell_sku_assignment_events
+                    (id,location_id,old_product_id,old_article,new_product_id,new_article,kind,actor,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """), (str(uuid.uuid4()), loc_id, assignment[0], assignment[1],
+                      None, None, "release", "Руководитель", now_iso()))
+                result = old_label
+            else:
+                if assignment:
+                    return jsonify(error="Сначала освободи ячейку от товара и подтверди, что она пуста"), 409
+                cur.execute(sql("UPDATE replenishment_locations SET active=0 WHERE id=? AND active=1"), (loc_id,))
+                result = old_label
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Операция не сохранена. Проверь адрес и повтори"), 409
+        finally:
+            cur.close()
+    return jsonify(ok=True, action=action, label=result, barcode=barcode,
+                   stock_changed=False, reprint_label=(action=="rename"))

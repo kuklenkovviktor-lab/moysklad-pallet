@@ -217,6 +217,67 @@ class WarehouseMapTests(unittest.TestCase):
         self.assertEqual(bad.status_code, 400, bad.json)
         self.assertIsNone(query_one("SELECT id FROM replenishment_locations WHERE label='К-123'"))
 
+    def manage(self, loc_id, label, action, **kwargs):
+        return self.client.post("/api/manager/warehouse-map/location/manage", json={
+            "location_id": loc_id, "expected_label": label,
+            "action": action, "confirmed": True, **kwargs
+        })
+
+    def test_release_preserves_location_and_qr_and_writes_history(self):
+        from cell_audit import ensure_cell_audit_db
+        ensure_cell_audit_db()
+        loc_id, label = self.loc()
+        before = query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0]
+        execute("""INSERT INTO cell_sku_assignments
+                  (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
+                  VALUES (?,?,?,?,?,?,?)""",
+                (loc_id,"p1","TEST_SKU","Товар","barcode",self.stamp.isoformat(),"test"))
+        self.assertEqual(self.manage(loc_id,label,"release").status_code,400)
+        response=self.manage(loc_id,label,"release",confirmed_empty=True)
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertIsNone(query_one("SELECT product_id FROM cell_sku_assignments WHERE location_id=?", (loc_id,)))
+        self.assertEqual(query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0],before)
+        self.assertEqual(query_one("SELECT kind FROM cell_sku_assignment_events WHERE location_id=?", (loc_id,))[0],"release")
+
+    def test_archive_rejects_assigned_or_pending_and_hides_from_map(self):
+        from cell_audit import ensure_cell_audit_db
+        ensure_cell_audit_db()
+        loc_id,label=self.loc()
+        execute("""INSERT INTO cell_sku_assignments
+                  (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
+                  VALUES (?,?,?,?,?,?,?)""",
+                (loc_id,"p2","TEST","Товар","barcode",self.stamp.isoformat(),"test"))
+        self.assertEqual(self.manage(loc_id,label,"archive").status_code,409)
+        self.assertEqual(self.manage(loc_id,label,"release",confirmed_empty=True).status_code,200)
+        self.task(label,"new")
+        self.assertEqual(self.manage(loc_id,label,"archive").status_code,409)
+        execute("UPDATE replenishment_tasks SET status='cancelled' WHERE line_code=?", (label,))
+        response=self.manage(loc_id,label,"archive")
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(query_one("SELECT active FROM replenishment_locations WHERE id=?", (loc_id,))[0],0)
+        self.assertNotIn(loc_id,[x["id"] for x in self.client.get("/api/manager/warehouse-map").json["cells"]])
+
+    def test_rename_keeps_qr_and_refuses_task_history(self):
+        loc_id,label=self.loc()
+        barcode=query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0]
+        next_label=label+"-2"
+        r=self.manage(loc_id,label,"rename",new_label=next_label)
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertTrue(r.json["reprint_label"])
+        self.assertEqual(query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0],barcode)
+        self.assertEqual(query_one("SELECT label FROM replenishment_locations WHERE id=?", (loc_id,))[0],next_label)
+        self.task(next_label,"completed")
+        self.assertEqual(self.manage(loc_id,next_label,"rename",new_label=label).status_code,409)
+
+    def test_manage_requires_manager_and_confirmed_current_label(self):
+        loc_id,label=self.loc()
+        self.assertEqual(self.client.post("/api/manager/warehouse-map/location/manage",
+            json={"location_id":loc_id,"expected_label":label,"action":"archive"}).status_code,400)
+        self.assertEqual(self.manage(loc_id,"А-999","archive").status_code,409)
+        with self.client.session_transaction() as sess:
+            sess.clear()
+        self.assertEqual(self.manage(loc_id,label,"archive").status_code,403)
+
     def test_map_contains_controls_and_no_false_stock_status(self):
         self.assertIn('id="zones"', WAREHOUSE_MAP_PAGE)
         self.assertIn("Это не карта фактических остатков", WAREHOUSE_MAP_PAGE)

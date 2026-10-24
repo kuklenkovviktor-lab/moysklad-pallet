@@ -355,6 +355,7 @@ def require_employee_login():
         "/api/manager/cell-audit/assignments",
         "/api/manager/warehouse-map",
         "/api/manager/warehouse-map/locations",
+        "/api/manager/warehouse-map/location/manage",
         "/manager/fbs-diagnostics",
         "/api/manager/fbs-diagnostics",
         "/api/manager/replenishment/tasks",
