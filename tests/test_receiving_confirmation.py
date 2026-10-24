@@ -97,6 +97,40 @@ class ReceivingConfirmationTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/scan",json=qty).status_code,409)
         add.assert_called_once()
 
+    def test_partner_pallet_confirm_once_even_with_new_uuid(self):
+        pallet = {"id": "pallet-one", "partner": "Supplier", "status": "created",
+                  "lines": [{"article": "SKU", "quantity": 144}]}
+        payload = self.payload()
+        payload["barcode"] = "ONIX-PAL-TEST001"
+        with patch.object(app, "resolve_receiving_pallet", return_value=pallet), \
+             patch.object(app, "partner_receiving_product", return_value=(self.product, self.pack)), \
+             patch.object(app, "claim_receiving_pallet", side_effect=[True, False]), \
+             patch.object(app, "set_receiving_pallet_status") as state, \
+             patch.object(app, "add_or_increment_position",
+                          return_value={"mode": "created", "added": 144, "total": 144}) as add, \
+             patch.object(app, "log_event"):
+            first = self.client.post("/api/scan", json=payload)
+            replay = self.client.post("/api/scan", json=dict(payload, operation_id=str(uuid.uuid4())))
+        self.assertEqual(first.status_code, 200, first.json)
+        self.assertEqual(replay.status_code, 409, replay.json)
+        add.assert_called_once()
+        state.assert_called_once_with("pallet-one", "accepted")
+
+    def test_partner_pallet_preview_and_quantity_guard(self):
+        pallet = {"id": "pallet-two", "partner": "Supplier", "status": "created",
+                  "lines": [{"article": "SKU", "quantity": 144}]}
+        with patch.object(app, "resolve_receiving_pallet", return_value=pallet), \
+             patch.object(app, "partner_receiving_product", return_value=(self.product, self.pack)), \
+             patch.object(app, "add_or_increment_position") as add:
+            preview = self.client.post("/api/pack-info", json={"barcode": "ONIX-PAL-TEST002"})
+            payload = self.payload(qty=12)
+            payload["barcode"] = "ONIX-PAL-TEST002"
+            bad = self.client.post("/api/scan", json=payload)
+        self.assertEqual(preview.status_code, 200, preview.json)
+        self.assertEqual(preview.json["standard_qty"], 144)
+        self.assertEqual(bad.status_code, 409, bad.json)
+        add.assert_not_called()
+
     def test_scan_requires_operation_id(self):
         p=self.payload()
         del p["operation_id"]
