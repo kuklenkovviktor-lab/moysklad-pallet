@@ -64,7 +64,7 @@ class WarehouseMapTests(unittest.TestCase):
               timestamp if status == "completed" else None))
         return id_
 
-    def test_bulk_print_all_250_cells_on_14_a4_pages_without_changing_codes(self):
+    def test_bulk_print_all_250_cells_as_250_thermal_labels_without_changing_codes(self):
         from unittest.mock import patch
         import replenishment_checks
         import replenishment
@@ -83,11 +83,14 @@ class WarehouseMapTests(unittest.TestCase):
         self.assertEqual(page.status_code,200)
         self.assertIn("no-store",page.headers.get("Cache-Control",""))
         html=page.data.decode("utf-8")
-        self.assertEqual(html.count('class="cell-label"'),250)
-        self.assertEqual(html.count('class="sheet"'),14)
+        self.assertEqual(html.count('class="sheet"'),250)
+        self.assertEqual(html.count('class="qr"'),250)
         self.assertIn("Активных ячеек: 250",html)
-        self.assertIn("Листов А4: 14",html)
-        self.assertIn("size:A4 portrait",html)
+        self.assertIn("Этикеток 58×40 мм: 250",html)
+        self.assertIn("size:58mm 40mm",html)
+        self.assertNotIn("size:A4",html)
+        self.assertIn("page-break-after:always",html)
+        self.assertIn(".sheet:last-child{break-after:auto",html)
         self.assertIn("58mm",html)
         self.assertIn("40mm",html)
         self.assertIn("А-001",html)
@@ -97,6 +100,8 @@ class WarehouseMapTests(unittest.TestCase):
         read.assert_called_once()
         self.assertIn("WHERE active = 1",read.call_args[0][0])
         self.assertIn('id="printAllLocations"',replenishment.MANAGER_PAGE)
+        self.assertIn("Печать всех ШК на ленте 58×40",replenishment.MANAGER_PAGE)
+        self.assertNotIn("Печать всех ШК на А4",replenishment.MANAGER_PAGE)
 
     def test_bulk_print_manager_only_and_empty_or_excess_cells(self):
         from unittest.mock import patch
