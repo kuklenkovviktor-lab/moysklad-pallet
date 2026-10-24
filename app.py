@@ -75,6 +75,13 @@ class ONIXScopedSessionInterface(SecureCookieSessionInterface):
             return "onix_partner_session"
         return super().get_cookie_name(app)
 
+    def get_expiration_time(self, app, session):
+        # Manager logins persist across browser restarts for at most 7 days.
+        # Employee TSD sessions keep their existing separate policy.
+        if session.permanent and session.get("manager_web") is True:
+            return datetime.now(timezone.utc) + timedelta(days=7)
+        return super().get_expiration_time(app, session)
+
 app.session_interface = ONIXScopedSessionInterface()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -271,6 +278,17 @@ def require_employee_login():
     # serving worker so its in-memory readiness flag belongs to this process.
     _start_wms_initializer()
     path = request.path
+
+    # Enforce the manager's absolute 7-day login age even if the client
+    # retains or manually replays a signed cookie after browser expiry.
+    if session.get("manager_web") is True and session.get("manager_login_at") is not None:
+        try:
+            age = time.time() - float(session["manager_login_at"])
+        except (ValueError, TypeError):
+            age = float("inf")
+        if age < -300 or age > 7 * 86400:
+            session.pop("manager_web", None)
+            session.pop("manager_login_at", None)
 
     # Liveness must stay reachable so Render keeps the process alive while
     # Object Storage restore retries in the background.
