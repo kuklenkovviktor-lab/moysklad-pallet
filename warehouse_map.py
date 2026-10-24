@@ -382,3 +382,85 @@ def warehouse_map_bulk_locations():
         finally:
             cur.close()
     return jsonify(ok=True, created=created, existing=existing), 201
+
+
+@warehouse_map_bp.post("/api/manager/warehouse-map/location/manage")
+def warehouse_map_manage_location():
+    """Edit a real location without silently changing warehouse stock or task history."""
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
+    if not manager_access():
+        return jsonify(error="Доступ руководителю"), 403
+    body = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(body, dict):
+        return jsonify(error="Ожидается JSON"), 400
+    loc_id = str(body.get("location_id") or "").strip()
+    action = str(body.get("action") or "").strip()
+    expected = str(body.get("expected_label") or "").strip().upper()
+    if not loc_id or action not in ("rename", "release", "archive") or not expected:
+        return jsonify(error="Укажи ячейку, действие и текущий адрес"), 400
+    if body.get("confirmed") is not True:
+        return jsonify(error="Требуется подтверждение операции"), 400
+    new_label = str(body.get("new_label") or "").strip().upper()
+    if action == "rename" and not VALID_LABEL.fullmatch(new_label):
+        return jsonify(error="Некорректный новый адрес"), 400
+    if action == "release" and body.get("confirmed_empty") is not True:
+        return jsonify(error="Сначала физически проверь отсутствие товара в ячейке"), 400
+    from wms import DATABASE_URL, now_iso
+    import uuid
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            lock = " FOR UPDATE" if DATABASE_URL else ""
+            cur.execute(sql("SELECT label, barcode, active FROM replenishment_locations WHERE id=?" + lock), (loc_id,))
+            row = cur.fetchone()
+            if not row or not row[2]:
+                return jsonify(error="Активная ячейка не найдена"), 404
+            old_label, barcode = row[0], row[1]
+            if old_label != expected:
+                return jsonify(error="Адрес изменился. Обнови карту"), 409
+            cur.execute(sql("SELECT product_id, article FROM cell_sku_assignments WHERE location_id=?" + lock), (loc_id,))
+            assignment = cur.fetchone()
+            cur.execute(sql("""
+                SELECT COUNT(*) FROM replenishment_tasks
+                WHERE line_code=? AND status IN ('new','started','blocked')
+            """), (old_label,))
+            pending = cur.fetchone()[0]
+            if pending:
+                return jsonify(error="По ячейке есть незавершённые задачи пополнения. Сначала закрой или отмени их"), 409
+            if action == "rename":
+                if new_label == old_label:
+                    return jsonify(ok=True, unchanged=True, label=old_label, barcode=barcode)
+                # Tasks hold the address as text. Keep history reliable until a migration exists.
+                cur.execute(sql("SELECT COUNT(*) FROM replenishment_tasks WHERE line_code=?"), (old_label,))
+                if cur.fetchone()[0]:
+                    return jsonify(error="Есть история задач по этому адресу. Пока переименование заблокировано, чтобы не нарушить историю"), 409
+                cur.execute(sql("SELECT COUNT(*) FROM replenishment_locations WHERE label=?"), (new_label,))
+                if cur.fetchone()[0]:
+                    return jsonify(error="Такой адрес уже существует, включая архивные"), 409
+                cur.execute(sql("UPDATE replenishment_locations SET label=? WHERE id=? AND active=1"), (new_label, loc_id))
+                result = new_label
+            elif action == "release":
+                if not assignment:
+                    return jsonify(ok=True, unchanged=True, label=old_label, barcode=barcode)
+                cur.execute(sql("DELETE FROM cell_sku_assignments WHERE location_id=?"), (loc_id,))
+                cur.execute(sql("""
+                    INSERT INTO cell_sku_assignment_events
+                    (id,location_id,old_product_id,old_article,new_product_id,new_article,kind,actor,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """), (str(uuid.uuid4()), loc_id, assignment[0], assignment[1],
+                      None, None, "release", "Руководитель", now_iso()))
+                result = old_label
+            else:
+                if assignment:
+                    return jsonify(error="Сначала освободи ячейку от товара и подтверди, что она пуста"), 409
+                cur.execute(sql("UPDATE replenishment_locations SET active=0 WHERE id=? AND active=1"), (loc_id,))
+                result = old_label
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Операция не сохранена. Проверь адрес и повтори"), 409
+        finally:
+            cur.close()
+    return jsonify(ok=True, action=action, label=result, barcode=barcode,
+                   stock_changed=False, reprint_label=(action=="rename"))
