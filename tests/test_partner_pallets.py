@@ -83,6 +83,30 @@ class PartnerPalletTests(unittest.TestCase):
                                content_type="multipart/form-data")
         self.assertEqual(bad.status_code, 403)
 
+    def test_purchase_order_expands_66_pallets(self):
+        rows = [
+            ("Проект заказа", None, None, None, None),
+            (None, None, None, None, None),
+            ("Раздел", "Артикул", "Палет", "Ед. в палете", "Количество, ед."),
+            ("Г/Н", "1256_BOROCCO", 6, 150, 900),
+            ("Гладье", "8020_NONE", 14, 60, 840),
+            ("Г/Н", "1649_BOROCCO", 46, 144, 6624),
+            (None, "Всего", 66, None, 8364),
+        ]
+        result = self.upload(rows, "заказ.xlsx")
+        self.assertEqual(result.status_code, 302)
+        with self.client.session_transaction() as state:
+            pid = state["partner_id"]
+        self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?", (pid,))[0], 66)
+        self.assertEqual(query_one("""SELECT SUM(l.quantity) FROM partner_pallet_lines l
+          JOIN partner_pallets p ON l.pallet_id=p.id WHERE p.partner_id=?""", (pid,))[0], 8364)
+
+    def test_purchase_order_bad_totals_rejected(self):
+        rows = [("Артикул", "Палет", "Ед. в палете", "Количество, ед."),
+                ("SKU1", 3, 100, 299)]
+        response = self.upload(rows)
+        self.assertEqual(response.status_code, 400)
+
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
         self.assertEqual(bad.status_code, 400)
