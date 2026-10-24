@@ -10,6 +10,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify, session, redirect, Response, after_this_request
+from flask.sessions import SecureCookieSessionInterface
 from wms import (
     wms_bp,
     init_wms_db,
@@ -61,6 +62,27 @@ SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY is required in the environment")
 app.secret_key = SECRET_KEY
+
+class ONIXScopedSessionInterface(SecureCookieSessionInterface):
+    """Same Flask service and database, but independent partner browser cookie.
+
+    A partner login/logout must never clear a manager or employee session.
+    All partner pages and their catalog API are served under /partners.
+    Manager administration (/manager/partners) retains the manager cookie.
+    """
+    def get_cookie_name(self, app):
+        if request.path == "/partners" or request.path.startswith("/partners/"):
+            return "onix_partner_session"
+        return super().get_cookie_name(app)
+
+    def get_expiration_time(self, app, session):
+        # Manager logins persist across browser restarts for at most 7 days.
+        # Employee TSD sessions keep their existing separate policy.
+        if session.permanent and session.get("manager_web") is True:
+            return datetime.now(timezone.utc) + timedelta(days=7)
+        return super().get_expiration_time(app, session)
+
+app.session_interface = ONIXScopedSessionInterface()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=True,
@@ -256,6 +278,17 @@ def require_employee_login():
     # serving worker so its in-memory readiness flag belongs to this process.
     _start_wms_initializer()
     path = request.path
+
+    # Enforce the manager's absolute 7-day login age even if the client
+    # retains or manually replays a signed cookie after browser expiry.
+    if session.get("manager_web") is True and session.get("manager_login_at") is not None:
+        try:
+            age = time.time() - float(session["manager_login_at"])
+        except (ValueError, TypeError):
+            age = float("inf")
+        if age < -300 or age > 7 * 86400:
+            session.pop("manager_web", None)
+            session.pop("manager_login_at", None)
 
     # Liveness must stay reachable so Render keeps the process alive while
     # Object Storage restore retries in the background.

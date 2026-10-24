@@ -52,7 +52,7 @@ class PartnerPalletTests(unittest.TestCase):
         response = self.client.post("/api/partners/accounts", json={"name": self.name, "password": "some-super-secure-password"})
         self.assertEqual(response.status_code, 201, response.json)
         self.client.post("/partners/login", data={"name": self.name, "password": "some-super-secure-password"})
-        with self.client.session_transaction() as s:
+        with self.client.session_transaction(path="/partners") as s:
             self.token = s["partner_csrf"]
 
     def upload(self, rows, name="pallets.xlsx"):
@@ -63,7 +63,7 @@ class PartnerPalletTests(unittest.TestCase):
         r = self.upload([("Палета", "Артикул", "Количество"), ("P1", "SKU1", 10),
                          ("P1", "SKU2", 3), ("P2", "SKU3", 8)])
         self.assertEqual(r.status_code, 302)
-        with self.client.session_transaction() as s:
+        with self.client.session_transaction(path="/partners") as s:
             partner_id = s["partner_id"]
         rows = __import__("wms").query_all(
             "SELECT id,barcode FROM partner_pallets WHERE partner_id=?", (partner_id,))
@@ -85,7 +85,7 @@ class PartnerPalletTests(unittest.TestCase):
         from partner_pallets import partner_pallet_display
         self.assertEqual(self.upload([("Артикул", "Палет", "Ед. в палете", "Количество, ед."),
             ("VIVA_96393", 2, 144, 288)]).status_code,302)
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             partner_id=state["partner_id"]
         from wms import query_all
         pallets=query_all("SELECT id,barcode FROM partner_pallets WHERE partner_id=? ORDER BY created_at,id",(partner_id,))
@@ -114,7 +114,7 @@ class PartnerPalletTests(unittest.TestCase):
             result=self.client.post("/partners/pallet/new",data={
                 "csrf":self.token,"article":"SKU_NEW","quantity":qty,"reason":"Корректировка погрузки"})
             self.assertEqual(result.status_code,302,result.data[:500])
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             partner_id=state["partner_id"]
         pallets=query_all("SELECT id,barcode FROM partner_pallets WHERE partner_id=? ORDER BY created_at,id",(partner_id,))
         labels=partner_pallet_display(partner_id)
@@ -167,7 +167,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertIn("result=created&pallet=",first.location)
         self.assertEqual(second.status_code,302)
         self.assertIn("result=duplicate",second.location)
-        with self.client.session_transaction() as session:
+        with self.client.session_transaction(path="/partners") as session:
             pid=session["partner_id"]
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?",(pid,))[0],1)
 
@@ -184,20 +184,20 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertIn("result=uploaded",first.location)
         self.assertEqual(again.status_code,302)
         self.assertIn("result=duplicate",again.location)
-        with self.client.session_transaction() as session:
+        with self.client.session_transaction(path="/partners") as session:
             pid=session["partner_id"]
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?",(pid,))[0],1)
 
     def test_isolation_and_csrf(self):
         good = self.upload([("Артикул", "Количество"), ("SKU1", 4)])
         self.assertEqual(good.status_code, 302)
-        with self.client.session_transaction() as s:
+        with self.client.session_transaction(path="/partners") as s:
             pid = s["partner_id"]
         pallet_id = query_one("SELECT id FROM partner_pallets WHERE partner_id=?", (pid,))[0]
-        with self.client.session_transaction() as s:
+        with self.client.session_transaction(path="/partners") as s:
             s["partner_id"] = "not-my-id"
-        self.assertEqual(self.client.get(f"/partners/pallet/{pallet_id}/print").status_code, 401)
-        with self.client.session_transaction() as s:
+        self.assertEqual(self.client.get(f"/partners/pallet/{pallet_id}/print").status_code, 302)
+        with self.client.session_transaction(path="/partners") as s:
             s["partner_id"] = pid
         bad = self.client.post("/partners/upload", data={"file": (workbook([("Артикул","Количество"),("SKU",1)]), "x.xlsx")},
                                content_type="multipart/form-data")
@@ -215,7 +215,7 @@ class PartnerPalletTests(unittest.TestCase):
         ]
         result = self.upload(rows, "заказ.xlsx")
         self.assertEqual(result.status_code, 302)
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             pid = state["partner_id"]
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?", (pid,))[0], 66)
         self.assertEqual(query_one("""SELECT SUM(l.quantity) FROM partner_pallet_lines l
@@ -228,15 +228,70 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_partner_cannot_open_manager_modules(self):
-        self.assertEqual(self.client.get("/manager/partners").status_code, 302)
-        self.assertEqual(self.client.get("/manager/warehouse-map").status_code, 302)
-        self.assertEqual(self.client.post("/api/partners/accounts", json={"name":"intruder","password":"123456789012"}).status_code, 403)
+        # A partner-only browser has no manager cookie. Its own partner
+        # cookie must not create or impersonate manager access.
+        partner_only = app.app.test_client()
+        login = partner_only.post("/partners/login",data={
+            "name":self.name,"password":"some-super-secure-password"})
+        self.assertEqual(login.status_code,302)
+        self.assertEqual(partner_only.get("/manager/partners").status_code,302)
+        self.assertEqual(partner_only.get("/manager/warehouse-map").status_code,302)
+        self.assertEqual(partner_only.post("/api/partners/accounts",json={
+            "name":"intruder","password":"123456789012"}).status_code,403)
+
+    def test_independent_partner_and_manager_cookies(self):
+        with self.client.session_transaction() as state:
+            self.assertTrue(state.get("manager_web"))
+            self.assertIsNone(state.get("partner_id"))
+        with self.client.session_transaction(path="/partners") as state:
+            self.assertTrue(state.get("partner_id"))
+            self.assertIsNone(state.get("manager_web"))
+        # Logging out the partner does NOT close the manager's PC panel.
+        result=self.client.post("/partners/logout",data={"csrf":self.token})
+        self.assertEqual(result.status_code,302)
+        self.assertEqual(self.client.get("/manager").status_code,200)
+        self.assertEqual(self.client.get("/partners").status_code,302)
+        self.assertIn("/partners/login",self.client.get("/partners").location)
+        self.assertEqual(self.client.get("/partners/catalog/search?q=SKU_NEW").status_code,401)
+
+    def test_manager_login_persists_with_seven_day_lifetime(self):
+        from datetime import datetime, timezone
+        import time
+        import wms
+        with self.client.session_transaction() as state:
+            state.clear()
+        with patch.object(wms,"MANAGER_WEB_PASSWORD","example-test-password"):
+            response=self.client.post("/api/manager/login",json={"password":"example-test-password"})
+        self.assertEqual(response.status_code,200,response.json)
+        with self.client.session_transaction() as state:
+            self.assertTrue(state.permanent)
+            self.assertTrue(state["manager_web"])
+            self.assertLess(abs(time.time()-state["manager_login_at"]),30)
+        from email.utils import parsedate_to_datetime
+        cookie=[c for c in response.headers.getlist("Set-Cookie") if c.startswith("session=")][0]
+        expires=cookie.split("Expires=",1)[1].split(";",1)[0]
+        duration=(parsedate_to_datetime(expires)-datetime.now(timezone.utc)).total_seconds()
+        self.assertGreater(duration,6*86400)
+        self.assertLess(duration,8*86400)
+        self.assertEqual(self.client.get("/partners").status_code,200)
+
+    def test_expired_manager_cookie_cannot_reenter_manager(self):
+        import time
+        with self.client.session_transaction() as state:
+            state["manager_web"]=True
+            state["manager_login_at"]=time.time()-8*86400
+            state.permanent=True
+        response=self.client.get("/manager")
+        self.assertEqual(response.status_code,302)
+        self.assertIn("/manager-login",response.location)
+        # Expiring a manager session must not touch the partner.
+        self.assertEqual(self.client.get("/partners").status_code,200)
 
     def test_partner_pallet_lookup_and_atomic_claim(self):
         from partner_pallets import resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
         upload = self.upload([("Артикул", "Количество"), ("SKU1", 24)])
         self.assertEqual(upload.status_code, 302)
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             pid = state["partner_id"]
         code = query_one("SELECT barcode FROM partner_pallets WHERE partner_id=?", (pid,))[0]
         pallet = resolve_receiving_pallet(code)
@@ -270,7 +325,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertTrue(any(x["article"]=="SKU_NEW" for x in response.json["items"]))
         response=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"UNKNOWN_SKU","quantity":"3","reason":"test"})
         self.assertEqual(response.status_code,400)
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             state.pop("partner_id",None)
         self.assertEqual(self.client.get("/partners/catalog/search?q=SKU_NEW").status_code,401)
 
@@ -278,7 +333,7 @@ class PartnerPalletTests(unittest.TestCase):
         from wms import query_all
         r=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU_NEW","quantity":"120","reason":"Добавили при погрузке"})
         self.assertEqual(r.status_code,302,r.data[:500])
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             pid=state["partner_id"]
         pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))
         self.assertIsNotNone(pallet)
@@ -297,18 +352,18 @@ class PartnerPalletTests(unittest.TestCase):
     def test_manual_create_rejects_invalid_and_wrong_owner(self):
         bad=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU","quantity":"-3","reason":"Ошибка"})
         self.assertEqual(bad.status_code,400)
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             pid=state["partner_id"]
         self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU","quantity":"3","reason":"Добавлена"})
         pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))[0]
-        with self.client.session_transaction() as state:
+        with self.client.session_transaction(path="/partners") as state:
             state["partner_id"]="another-partner"
-        self.assertEqual(self.client.get("/partners/pallet/"+pallet+"/edit").status_code,401)
+        self.assertEqual(self.client.get("/partners/pallet/"+pallet+"/edit").status_code,302)
 
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
         self.assertEqual(bad.status_code, 400)
-        with self.client.session_transaction() as s:
+        with self.client.session_transaction(path="/partners") as s:
             pid = s["partner_id"]
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?", (pid,))[0], 0)
 

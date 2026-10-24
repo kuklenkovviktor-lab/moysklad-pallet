@@ -2620,12 +2620,15 @@ def manager_login_api():
     _manager_clear_failed_logins(ip)
     session.clear()
     session["manager_web"] = True
+    session["manager_login_at"] = time.time()
+    session.permanent = True
     return jsonify(ok=True)
 
 
 @wms_bp.post("/api/manager/logout")
 def manager_logout_api():
     session.pop("manager_web", None)
+    session.pop("manager_login_at", None)
     return jsonify(ok=True)
 
 
