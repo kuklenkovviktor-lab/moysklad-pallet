@@ -72,10 +72,65 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallet_lines WHERE pallet_id=?", (rows[0][0],))[0] in (1, 2), True)
         label = self.client.get(f"/partners/pallet/{rows[0][0]}/print")
         self.assertEqual(label.status_code, 200)
-        self.assertIn(rows[0][1].encode(), label.data)
+        self.assertNotIn(rows[0][1].encode(), label.data)
+        self.assertNotIn("Добавлена вручную".encode(), label.data)
+        self.assertIn(b"1/1", label.data)
+        self.assertNotIn(b"class=\"code\"", label.data)
         self.assertIn(b"data:image/png;base64,", label.data)
         self.assertIn(b"size:A4 portrait", label.data)
         self.assertIn(b"width:210mm;height:297mm", label.data)
+
+
+    def test_excel_labels_show_article_and_fraction_only(self):
+        from partner_pallets import partner_pallet_display
+        self.assertEqual(self.upload([("Артикул", "Палет", "Ед. в палете", "Количество, ед."),
+            ("VIVA_96393", 2, 144, 288)]).status_code,302)
+        with self.client.session_transaction() as state:
+            partner_id=state["partner_id"]
+        from wms import query_all
+        pallets=query_all("SELECT id,barcode FROM partner_pallets WHERE partner_id=? ORDER BY created_at,id",(partner_id,))
+        labels=partner_pallet_display(partner_id)
+        self.assertEqual([labels[pid]["number"] for pid,_ in pallets],["1/2","2/2"])
+        self.assertEqual({labels[pid]["article"] for pid,_ in pallets},{"VIVA_96393"})
+        html=self.client.get("/partners").data.decode("utf-8")
+        self.assertNotIn("· строка",html)
+        self.assertNotIn("Добавлена вручную",html)
+        self.assertIn("VIVA_96393",html)
+        for pid,code in pallets:
+            with patch("partner_pallets.qrcode.make", wraps=__import__("qrcode").make) as qr:
+                result=self.client.get("/partners/pallet/"+pid+"/print")
+            self.assertEqual(result.status_code,200)
+            qr.assert_called_once_with(code)
+            self.assertIn(labels[pid]["number"].encode(),result.data)
+            self.assertIn(b"VIVA_96393",result.data)
+            self.assertNotIn(code.encode(),result.data)
+            self.assertNotIn("строка".encode(),result.data)
+            self.assertNotIn("Добавлена вручную".encode(),result.data)
+
+    def test_manual_pallets_clean_label_and_grouping(self):
+        from partner_pallets import partner_pallet_display
+        from wms import query_all
+        for qty in ("144","100"):
+            result=self.client.post("/partners/pallet/new",data={
+                "csrf":self.token,"article":"SKU_NEW","quantity":qty,"reason":"Корректировка погрузки"})
+            self.assertEqual(result.status_code,302,result.data[:500])
+        with self.client.session_transaction() as state:
+            partner_id=state["partner_id"]
+        pallets=query_all("SELECT id,barcode FROM partner_pallets WHERE partner_id=? ORDER BY created_at,id",(partner_id,))
+        labels=partner_pallet_display(partner_id)
+        self.assertEqual([labels[pid]["number"] for pid,_ in pallets],["1/2","2/2"])
+        html=self.client.get("/partners").data.decode("utf-8")
+        self.assertNotIn("Добавлена вручную",html)
+        self.assertNotIn(pallets[0][1],html)
+        label=self.client.get("/partners/pallet/"+pallets[0][0]+"/print")
+        self.assertEqual(label.status_code,200)
+        self.assertIn(b"SKU_NEW",label.data)
+        self.assertIn(b"1/2",label.data)
+        self.assertNotIn("Добавлена вручную".encode(),label.data)
+        self.assertNotIn(pallets[0][1].encode(),label.data)
+        # Receiving identity and data remain unchanged.
+        from partner_pallets import resolve_receiving_pallet
+        self.assertEqual(resolve_receiving_pallet(pallets[0][1])["lines"][0]["quantity"],144)
 
     def test_isolation_and_csrf(self):
         good = self.upload([("Артикул", "Количество"), ("SKU1", 4)])
