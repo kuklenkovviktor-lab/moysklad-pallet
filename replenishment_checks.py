@@ -178,6 +178,100 @@ body {background:#edf1f4}
 <div class="address">""" + label + """</div></div>
 </body></html>"""
 
+
+@replenishment_checks_bp.get("/manager/replenishment/labels/all")
+def replenishment_print_all_labels():
+    """One A4 print job for all active ONIX cell codes.
+
+    No new locations or codes are generated; the payloads are identical to
+    /manager/replenishment/label?id=... and remain valid for replenishment.
+    """
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    rows = query_all("""
+        SELECT label, barcode FROM replenishment_locations
+        WHERE active = 1 ORDER BY label LIMIT 1001
+    """)
+    if not rows:
+        return "Пока нет активных ячеек для печати", 404
+    if len(rows) > 1000:
+        return "Слишком много ячеек для одной печати (более 1000)", 413
+
+    from warehouse_map import line_of, location_sort_key
+    from flask import Response
+    import base64
+    import io
+    import qrcode
+
+    rows = sorted(rows, key=lambda r: location_sort_key(
+        {"label": str(r[0]), "line": line_of(r[0])}))
+
+    def one_label(label, code):
+        qr = qrcode.QRCode(
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=4,
+        )
+        qr.add_data(code)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return ('<div class="cell-label"><img alt="QR ячейки" src="data:image/png;base64,'
+                + encoded + '"><div class="address">' + html.escape(str(label)) + '</div></div>')
+
+    # A4: 3 columns x 6 rows, exactly 18 individual 58x40 mm labels per sheet.
+    pages = []
+    for offset in range(0, len(rows), 18):
+        chunk = rows[offset:offset + 18]
+        pages.append('<section class="sheet">' +
+                     ''.join(one_label(label, barcode) for label, barcode in chunk) +
+                     '</section>')
+    doc = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ONIX · Все QR ячеек · А4</title>
+<style>
+@page{size:A4 portrait;margin:0}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#111}
+body{background:#e9eef3}
+.tools{max-width:850px;margin:16px auto;padding:15px;background:white;
+       border-radius:12px;text-align:center;line-height:1.5}
+.tools button{padding:11px 20px;border:0;border-radius:9px;background:#48647a;
+              color:white;font:bold 15px Arial;cursor:pointer}
+.tools small{display:block;color:#52616e;margin-top:8px}
+.sheet{width:210mm;height:297mm;padding:18.5mm 13mm;margin:14px auto;background:white;
+       display:grid;grid-template-columns:repeat(3,58mm);grid-template-rows:repeat(6,40mm);
+       column-gap:5mm;row-gap:4mm;break-after:page;page-break-after:always;
+       box-shadow:0 4px 20px #1f32401c}
+.sheet:last-child{break-after:auto;page-break-after:auto}
+.cell-label{width:58mm;height:40mm;display:flex;flex-direction:column;
+            align-items:center;justify-content:center;overflow:hidden;
+            border:0.2mm dashed #c6c6c6;break-inside:avoid}
+.cell-label img{display:block;width:30mm;height:30mm;object-fit:contain;
+                image-rendering:pixelated;flex-shrink:0}
+.address{font-weight:800;font-size:12pt;line-height:5mm;color:#000;
+         max-width:54mm;text-align:center;white-space:nowrap;
+         overflow:hidden;text-overflow:ellipsis}
+@media print{
+  html,body{background:#fff}
+  .tools{display:none!important}
+  .sheet{margin:0;box-shadow:none}
+}
+@media screen and (max-width:850px){
+ .sheet{transform-origin:top center}
+}
+</style></head><body>
+<div class="tools"><button onclick="window.print()">🖨 Распечатать все ячейки</button>
+<div>Активных ячеек: """ + str(len(rows)) + """ · Листов А4: """ + str(len(pages)) + """</div>
+<small>Лист А4, масштаб 100%, без полей и колонтитулов.
+Каждая этикетка 58×40 мм. ШК в базе не меняются.</small></div>
+""" + ''.join(pages) + "</body></html>"
+    return Response(doc, mimetype="text/html", headers={"Cache-Control": "no-store"})
+
+
 @replenishment_checks_bp.post("/api/replenishment/verify")
 def replenishment_verify():
     ensure_db()
