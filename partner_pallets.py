@@ -40,6 +40,7 @@ def db_init():
             id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, sku TEXT NOT NULL,
             quantity INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS partner_pallet_changes (id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, partner_id TEXT NOT NULL, action TEXT NOT NULL, old_sku TEXT, old_quantity INTEGER, new_sku TEXT, new_quantity INTEGER, reason TEXT NOT NULL, changed_at TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_partner_pallet_owner ON partner_pallets(partner_id, created_at)",
     ]
     with db_connect() as db:
@@ -299,7 +300,7 @@ def dashboard():
             WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
     items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a></td></tr>" for r in rows)
     return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
-    <section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
+    <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form></section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
     Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
     <form method="post" action="/partners/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
