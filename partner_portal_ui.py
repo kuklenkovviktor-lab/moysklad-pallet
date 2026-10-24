@@ -88,7 +88,7 @@ document.querySelectorAll('form[data-once]').forEach(form=>{
     if(!form.checkValidity())return;
     form.dataset.submitting='1';
     const submit=form.querySelector('button[type=submit]');
-    if(submit){submit.disabled=true;submit.textContent='Обрабатываем…'}
+    if(submit){submit.textContent='Обрабатываем…';setTimeout(()=>{submit.disabled=true},0)}
   });
 });
 const chooser=document.querySelector('#partner-file');
@@ -122,7 +122,7 @@ def status_html(status):
            'uncertain':('Требует сверки','status-uncertain')}.get(status,('Неизвестно',''))
     return '<span class="status '+value[1]+'">'+escape(value[0])+'</span>'
 
-def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget):
+def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget, created_pallet="", created_count=0):
     q_text=escape(q,quote=True)
     token=escape(token,quote=True)
     partner_text=escape(partner,quote=True)
@@ -133,7 +133,11 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     message={'created':'Палета создана. QR доступен в истории.',
              'uploaded':'Файл обработан, палеты добавлены в историю.',
              'duplicate':'Эта отправка уже обработана, повторные палеты не создавались.'}.get(notice,'')
-    flash='<div class="notice" role="status">'+escape(message)+'</div>' if message else ''
+    if notice=='uploaded' and created_count>0:
+        message='Excel обработан: создано палет '+str(created_count)+'.'
+    print_link=('<a href="/partners/pallet/'+escape(created_pallet,quote=True)+'/print">Распечатать QR →</a>'
+                if notice=='created' and created_pallet else '')
+    flash='<div class="notice" role="status">'+escape(message)+' '+print_link+'</div>' if message else ''
     table_rows=[]
     for pid, code, ref, created_at, state in rows:
         label=labels.get(pid,{})
@@ -219,3 +223,33 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     {FORM_JS}
     """
     return page("ONIX WMS · Палеты партнёра",html,show_title=False)
+
+
+def edit_view(token, article, quantity, history_rows, widget):
+    """Restricted partner edit page with the same design as the main portal."""
+    history=[]
+    for before, oldqty, after, newqty, reason, changed_at in history_rows:
+        prev=escape((str(before or '')+' · '+str(oldqty or '')) if before else 'Создание палеты')
+        curr=escape(str(after or '')+' · '+str(newqty or ''))
+        history.append('<li style="padding:10px 0;border-bottom:1px solid var(--line)">'
+            '<small class="muted">'+escape(local_date(changed_at))+'</small><br>'
+            '<b>'+prev+'</b> → <b>'+curr+'</b><br>'
+            '<span class="muted">'+escape(str(reason or ''))+'</span></li>')
+    inner=('<div class="topbar"><div class="brand"><span class="logo">ONX</span>'
+        '<div><b>ONIX WMS</b><small>Корректировка палеты</small></div></div>'
+        '<a class="btn btn-ghost" href="/partners">← К палетам</a></div>'
+        '<div class="dashboard-title"><h1>Изменить палету</h1>'
+        '<div class="muted">Редактировать можно только до начала приёмки. QR сохранится прежним.</div></div>'
+        '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'
+        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'
+        '<div class="field"><label for="edit-article">Артикул товара</label>'
+        '<input id="edit-article" name="article" maxlength="150" required value="'+escape(article,quote=True)+'"></div>'
+        '<div class="fields-inline"><div class="field"><label for="edit-qty">Количество, шт.</label>'
+        '<input id="edit-qty" type="number" name="quantity" min="1" max="1000000" step="1" required value="'+escape(str(quantity),quote=True)+'"></div>'
+        '<div class="field"><label for="edit-reason">Причина корректировки</label>'
+        '<input id="edit-reason" name="reason" required maxlength="300" placeholder="Что изменилось при погрузке?"></div></div>'
+        +widget+'<button type="submit" class="btn btn-primary">Сохранить изменения</button></form></section>'
+        '<section class="panel" style="max-width:700px"><h2>История корректировок</h2><ul style="list-style:none;padding:0;margin:0">'
+        +(''.join(history) if history else '<li class="muted">Пока изменений не было</li>')
+        +'</ul></section>'+FORM_JS)
+    return page("ONIX WMS · Изменить палету",inner,show_title=False)
