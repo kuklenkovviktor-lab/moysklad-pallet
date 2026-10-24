@@ -212,12 +212,12 @@ function showDetails(){
  '<div><dt>Последняя проверка ячейки</dt><dd>'+esc(c.last_task?.verified_location_at?'Да':'Нет данных')+'</dd></div></dl>'+
  '<h3>Постоянная привязка товара</h3>'+(c.assignment?'<div class="info"><b>'+esc(c.assignment.article)+'</b><div class="small">'+esc(c.assignment.name||'')+'</div><div class="small">Закреплено: '+esc(fmt(c.assignment.assigned_at))+'</div></div>':'<p class="small">Не задана. Последнее пополнение не назначает SKU автоматически.</p>')+
  '<p><a href="/manager/cell-audit?location_id='+encodeURIComponent(c.id)+'">📷 Сканировать товар и привязать к ячейке →</a></p>'+
- ''<div class="manage-controls"><h3>Управление ячейкой</h3>'+
+ '<div class="manage-controls"><h3>Управление ячейкой</h3>'+
  '<p class="small">QR постоянный. Освобождение не списывает остатки в МойСклад. Удаление убирает адрес из активной карты, сохраняя историю.</p>'+
  '<div class="actions"><button type="button" data-manage="release" '+(!c.assignment?'disabled':'')+'>Освободить от SKU</button>'+
  '<button type="button" data-manage="rename">Изменить адрес</button>'+
  '<button type="button" data-manage="archive">Удалить ячейку</button></div></div>'+ 
- <h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
+ '<h3>Текущие задачи</h3>'+(c.tasks.length?c.tasks.map(taskCard).join(''):'<p class="small">Нет открытых задач.</p>')+
  '<h3>Последнее завершённое пополнение</h3>'+(c.last_task?taskCard(c.last_task):'<p class="small">В истории пока нет завершённых пополнений.</p>')+
  '<p class="small">Статус показывает работу по пополнению, а не фактический остаток товара в ячейке.</p>'+
  '<a href="/manager/replenishment">Управлять заданиями →</a>';
