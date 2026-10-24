@@ -145,6 +145,7 @@ def manager_partners():
         abort(403)
     notice = ""
     if request.method == "POST":
+        require_csrf()
         name = str(request.form.get("name", "")).strip()
         password = str(request.form.get("password", ""))
         if not 2 <= len(name) <= 100 or len(password) < 12:
@@ -164,7 +165,7 @@ def manager_partners():
                    for name, created, active in partners)
     return page("ONIX · Управление партнёрами", f"""<p><a href="/manager">← Панель руководителя</a></p>
       <section><h2>Создать ограниченный доступ партнёру</h2><p>{escape(notice)}</p>
-      <form method="post"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
+      <form method="post"><input type="hidden" name="csrf" value="{csrf()}"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
         <input name="password" placeholder="Пароль (от 12 символов)" required minlength="12" autocomplete="new-password">
         <button>Создать партнёра</button></form></section>
       <section><h2>Партнёры</h2><table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
