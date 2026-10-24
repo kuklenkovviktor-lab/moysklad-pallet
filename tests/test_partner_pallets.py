@@ -132,6 +132,62 @@ class PartnerPalletTests(unittest.TestCase):
         from partner_pallets import resolve_receiving_pallet
         self.assertEqual(resolve_receiving_pallet(pallets[0][1])["lines"][0]["quantity"],144)
 
+    def test_dashboard_ui_stats_statuses_mobile_and_owner_filter(self):
+        one=self.upload([("Артикул","Количество"),("SKU_NEW",5)])
+        self.assertEqual(one.status_code,302,one.data[:350])
+        self.assertIn("result=uploaded&count=1",one.location)
+        dashboard=self.client.get("/partners")
+        self.assertEqual(dashboard.status_code,200,dashboard.data[:350])
+        html=dashboard.data.decode("utf-8")
+        for marker in ('class="topbar"','class="kpis"','class="forms-grid"',
+                       'name="submission_key"','id="history-search"',
+                       'class="table-wrap"','@media(max-width:620px)',
+                       'Статус','Создана','Создать палету и QR'):
+            self.assertIn(marker,html)
+        self.assertIn('Партнёр: '+self.name,html)
+        self.assertIn("SKU_NEW",html)
+        searched=self.client.get("/partners?q=SKU_NEW&status=created")
+        self.assertEqual(searched.status_code,200)
+        self.assertIn("SKU_NEW",searched.data.decode("utf-8"))
+        missing=self.client.get("/partners?q=NON_EXISTENT")
+        self.assertEqual(missing.status_code,200)
+        self.assertIn("Палеты не найдены",missing.data.decode("utf-8"))
+        # A partner must never see another partner's pallet.
+        another=self.client.get("/partners?q=FOREIGN")
+        self.assertNotIn("FOREIGN",another.data.decode("utf-8").split("<tbody>")[1].split("</tbody>")[0])
+
+    def test_manual_duplicate_form_token_is_idempotent(self):
+        from wms import query_one
+        token="unique-browser-submit-"+uuid.uuid4().hex
+        payload={"csrf":self.token,"article":"SKU_NEW","quantity":"18",
+                 "reason":"Добавлено при погрузке","submission_key":token}
+        first=self.client.post("/partners/pallet/new",data=payload)
+        second=self.client.post("/partners/pallet/new",data=payload)
+        self.assertEqual(first.status_code,302)
+        self.assertIn("result=created&pallet=",first.location)
+        self.assertEqual(second.status_code,302)
+        self.assertIn("result=duplicate",second.location)
+        with self.client.session_transaction() as session:
+            pid=session["partner_id"]
+        self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?",(pid,))[0],1)
+
+    def test_excel_duplicate_form_token_is_idempotent(self):
+        rows=[("Артикул","Количество"),("SKU_NEW",18)]
+        token="upload-submit-"+uuid.uuid4().hex
+        def send():
+            return self.client.post("/partners/upload",
+                data={"csrf":self.token,"submission_key":token,
+                      "file":(workbook(rows),"shipment.xlsx")},
+                content_type="multipart/form-data")
+        first,again=send(),send()
+        self.assertEqual(first.status_code,302)
+        self.assertIn("result=uploaded",first.location)
+        self.assertEqual(again.status_code,302)
+        self.assertIn("result=duplicate",again.location)
+        with self.client.session_transaction() as session:
+            pid=session["partner_id"]
+        self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallets WHERE partner_id=?",(pid,))[0],1)
+
     def test_isolation_and_csrf(self):
         good = self.upload([("Артикул", "Количество"), ("SKU1", 4)])
         self.assertEqual(good.status_code, 302)
@@ -227,7 +283,9 @@ class PartnerPalletTests(unittest.TestCase):
         pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))
         self.assertIsNotNone(pallet)
         url="/partners/pallet/"+pallet[0]+"/edit"
-        self.assertEqual(self.client.get(url).status_code,200)
+        edit_page=self.client.get(url)
+        self.assertEqual(edit_page.status_code,200)
+        self.assertIn("История корректировок",edit_page.data.decode("utf-8"))
         changed=self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"100","reason":"Фактически 100"})
         self.assertEqual(changed.status_code,302,changed.data[:500])
         self.assertEqual(query_one("SELECT quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))[0],100)

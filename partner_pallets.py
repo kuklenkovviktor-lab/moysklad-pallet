@@ -13,6 +13,7 @@ import qrcode
 from flask import Blueprint, abort, jsonify, redirect, request, session, url_for, Response
 from openpyxl import load_workbook
 from wms import db_connect, manager_access, sql, DATABASE_URL
+from partner_portal_ui import page as portal_page, dashboard_view, edit_view
 
 partner_bp = Blueprint("partners", __name__)
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -39,6 +40,10 @@ def db_init():
         """CREATE TABLE IF NOT EXISTS partner_pallet_lines (
             id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, sku TEXT NOT NULL,
             quantity INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS partner_submission_tokens (
+            partner_id TEXT NOT NULL, token TEXT NOT NULL, upload_id TEXT NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY(partner_id, token)
         )""",
         """CREATE TABLE IF NOT EXISTS partner_pallet_changes (id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, partner_id TEXT NOT NULL, action TEXT NOT NULL, old_sku TEXT, old_quantity INTEGER, new_sku TEXT, new_quantity INTEGER, reason TEXT NOT NULL, changed_at TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_partner_pallet_owner ON partner_pallets(partner_id, created_at)",
@@ -132,11 +137,7 @@ def require_csrf():
         abort(403)
 
 def page(title, body):
-    return f"""<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>{escape(title)}</title><style>body{{font:16px system-ui;max-width:920px;margin:2rem auto;padding:1rem;background:#f1f5f9;color:#223}}
-    section{{background:white;border-radius:14px;padding:20px;margin:15px 0}}input,button{{font:inherit;padding:10px;margin:5px}}
-    table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:9px;text-align:left}}
-    a{{color:#2563eb}}.error{{color:#b91c1c}}</style><h1>{escape(title)}</h1>{body}</html>"""
+    return portal_page(title,body)
 
 @partner_bp.route("/partners/login", methods=["GET", "POST"])
 def login():
@@ -331,28 +332,51 @@ def partner_pallet_display(partner_id):
 def dashboard():
     db_init()
     p = require_partner()
+    q = str(request.args.get("q","")).strip()[:100]
+    status = str(request.args.get("status","")).strip()
+    if status not in ("created","accepted","processing","uncertain"):
+        status = ""
+    try:
+        requested_page = max(1, int(request.args.get("page",1)))
+    except (TypeError, ValueError):
+        requested_page = 1
+    per_page=25
+    conditions = "p.partner_id=?"
+    params = [p[0]]
+    if status:
+        conditions += " AND p.status=?"
+        params.append(status)
+    if q:
+        # Escape LIKE metacharacters so a searched article is literal.
+        search = "%" + q.lower().replace("\\","\\\\").replace("%","\\%").replace("_","\\_") + "%"
+        conditions += """ AND EXISTS(SELECT 1 FROM partner_pallet_lines l
+            WHERE l.pallet_id=p.id AND LOWER(l.sku) LIKE ? ESCAPE '\\')"""
+        params.append(search)
     with db_connect() as db:
-        rows = db.cursor().execute(sql("""SELECT id, barcode, external_ref, created_at, status FROM partner_pallets
-            WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
-    labels = partner_pallet_display(p[0])
-    items = "".join(
-        "<tr><td>"+escape(labels.get(r[0], {}).get("article", "Артикул не указан"))+"</td>"
-        "<td><b>"+escape(labels.get(r[0], {}).get("number", "1/1"))+"</b></td>"
-        "<td>"+escape(r[4])+"</td><td>"+escape(r[3][:16])+"</td>"
-        "<td><a href='/partners/pallet/"+escape(r[0], quote=True)+"/print'>QR / Печать</a>"
-        + (" · <a href='/partners/pallet/"+escape(r[0], quote=True)+"/edit'>Изменить</a>"
-           if r[4] == "created" else "") + "</td></tr>"
-        for r in rows
-    )
-    return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
-    <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form>{partner_catalog_widget()}</section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
-    Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
-    <form method="post" action="/partners/upload" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
-    <button>Создать палеты и ШК</button></form></section><section><h2>История: последние 200 палет</h2>
-    <table><tr><th>Артикул</th><th>Палета</th><th>Статус</th><th>Создана (UTC)</th><th></th></tr>{items}</table></section>
-    <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{csrf()}"><button>Выйти</button></form>""")
-
+        cursor = db.cursor()
+        stats_row = cursor.execute(sql("""SELECT COUNT(*),
+             SUM(CASE WHEN status='created' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN status IN ('processing','uncertain') THEN 1 ELSE 0 END)
+             FROM partner_pallets WHERE partner_id=?"""),(p[0],)).fetchone()
+        count_row = cursor.execute(sql("SELECT COUNT(*) FROM partner_pallets p WHERE "+conditions),
+                                   params).fetchone()
+        total=int(count_row[0] or 0)
+        page_count=max(1,(total+per_page-1)//per_page)
+        current_page=min(requested_page,page_count)
+        offset=(current_page-1)*per_page
+        rows = cursor.execute(sql("""SELECT p.id,p.barcode,p.external_ref,p.created_at,p.status
+            FROM partner_pallets p WHERE """ + conditions +
+            " ORDER BY p.created_at DESC,p.id DESC LIMIT ? OFFSET ?"),
+            [*params,per_page,offset]).fetchall()
+    stats=dict(total=int(stats_row[0] or 0),created=int(stats_row[1] or 0),
+               accepted=int(stats_row[2] or 0),pending=int(stats_row[3] or 0))
+    labels=partner_pallet_display(p[0])
+    return dashboard_view(p[1], csrf(), stats, rows, labels, q, status,
+                          current_page,page_count,total,
+                          str(request.args.get("result","")),partner_catalog_widget(),
+                          created_pallet=str(request.args.get("pallet",""))[:48],
+                          created_count=(int(request.args.get("count",0)) if str(request.args.get("count",0)).isdigit() else 0))
 
 
 @partner_bp.get("/partners/catalog/search")
@@ -433,6 +457,20 @@ def _manual_fields(form):
     return sku,int(raw),reason
 
 
+def claim_partner_submission(cur, partner_id, upload_id):
+    """Atomic dedupe for browser forms; legacy clients without token remain compatible."""
+    token=str(request.form.get("submission_key","")).strip()
+    if not token:
+        return True
+    if len(token)>128:
+        raise ValueError("Неверный ключ операции")
+    cur.execute(sql("""INSERT INTO partner_submission_tokens
+        (partner_id,token,upload_id,created_at) VALUES (?,?,?,?)
+        ON CONFLICT(partner_id,token) DO NOTHING"""),
+        (partner_id,token,upload_id,now()))
+    return cur.rowcount == 1
+
+
 @partner_bp.post("/partners/pallet/new")
 def manual_create():
     db_init()
@@ -445,12 +483,14 @@ def manual_create():
     pid,uid=str(uuid.uuid4()),str(uuid.uuid4())
     with db_connect() as db:
         cur=db.cursor()
+        if not claim_partner_submission(cur,p[0],uid):
+            return redirect("/partners?result=duplicate")
         cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES (?,?,?,?,?)"),(uid,p[0],"вручную",now(),1))
         cur.execute(sql("INSERT INTO partner_pallets(id,partner_id,upload_id,external_ref,barcode,created_at) VALUES (?,?,?,?,?,?)"),(pid,p[0],uid,"Добавлена вручную","ONIX-PAL-"+uuid.uuid4().hex.upper(),now()))
         cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES (?,?,?,?)"),(str(uuid.uuid4()),pid,sku,qty))
         cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pid,p[0],"create",sku,qty,reason,now()))
         db.commit()
-    return redirect("/partners")
+    return redirect("/partners?result=created&pallet="+pid)
 
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
@@ -483,8 +523,7 @@ def manual_edit(pallet_id):
             return redirect("/partners")
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    history="".join("<li>"+escape(str(e))+"</li>" for e in entries)
-    return page("Изменить палету",'<p><a href="/partners">Назад</a></p><section><form method="post"><input type="hidden" name="csrf" value="'+csrf()+'"><input name="article" value="'+escape(lines[0][1],quote=True)+'" required><input type="number" name="quantity" min="1" step="1" value="'+str(lines[0][2])+'" required><input name="reason" placeholder="Причина изменения" required><button>Сохранить</button></form><p>QR останется прежним</p></section><section><h2>История изменений</h2><ul>'+history+'</ul></section>'+partner_catalog_widget())
+    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget())
 
 
 @partner_bp.post("/partners/upload")
@@ -502,6 +541,8 @@ def upload():
     upload_id = str(uuid.uuid4())
     with db_connect() as db:
         cur = db.cursor()
+        if not claim_partner_submission(cur,p[0],upload_id):
+            return redirect("/partners?result=duplicate")
         cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES(?,?,?,?,?)"),
                     (upload_id, p[0], file.filename[:255], now(), len(groups)))
         for ref, lines in groups.items():
@@ -513,7 +554,7 @@ def upload():
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
         db.commit()
-    return redirect("/partners")
+    return redirect("/partners?result=uploaded&count="+str(len(groups)))
 
 @partner_bp.get("/partners/pallet/<pallet_id>/print")
 def print_label(pallet_id):
