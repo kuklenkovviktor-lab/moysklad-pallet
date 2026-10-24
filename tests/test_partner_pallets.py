@@ -107,6 +107,11 @@ class PartnerPalletTests(unittest.TestCase):
         response = self.upload(rows)
         self.assertEqual(response.status_code, 400)
 
+    def test_partner_cannot_open_manager_modules(self):
+        self.assertEqual(self.client.get("/manager/partners").status_code, 302)
+        self.assertEqual(self.client.get("/manager/warehouse-map").status_code, 302)
+        self.assertEqual(self.client.post("/api/partners/accounts", json={"name":"intruder","password":"123456789012"}).status_code, 403)
+
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
         self.assertEqual(bad.status_code, 400)
