@@ -1765,6 +1765,7 @@ STATS_PAGE = """<!doctype html>
    <a href="/manager/cell-audit">📷 Обход ячеек</a>
    <a href="/manager/fbs-diagnostics">📶 Скорость сканирования</a>
   <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
+  <a href="/manager/partners">🤝 Партнёры</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
