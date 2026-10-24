@@ -10,6 +10,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify, session, redirect, Response, after_this_request
+from flask.sessions import SecureCookieSessionInterface
 from wms import (
     wms_bp,
     init_wms_db,
@@ -61,6 +62,20 @@ SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY is required in the environment")
 app.secret_key = SECRET_KEY
+
+class ONIXScopedSessionInterface(SecureCookieSessionInterface):
+    """Same Flask service and database, but independent partner browser cookie.
+
+    A partner login/logout must never clear a manager or employee session.
+    All partner pages and their catalog API are served under /partners.
+    Manager administration (/manager/partners) retains the manager cookie.
+    """
+    def get_cookie_name(self, app):
+        if request.path == "/partners" or request.path.startswith("/partners/"):
+            return "onix_partner_session"
+        return super().get_cookie_name(app)
+
+app.session_interface = ONIXScopedSessionInterface()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SECURE=True,
