@@ -154,16 +154,16 @@ def manager_partners():
         <input name="password" placeholder="Пароль (от 12 символов)" required minlength="12" autocomplete="new-password">
         <button>Создать партнёра</button></form><p id="result"></p>
       <script>
-      document.getElementById('new-partner').addEventListener('submit',async e=>{
+      document.getElementById('new-partner').addEventListener('submit',async e=>{{
         e.preventDefault();
         const form=new FormData(e.target);
         const response=await fetch('/api/partners/accounts',{method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({name:form.get('name'),password:form.get('password')})});
+          headers:{{'Content-Type':'application/json'},
+          body:JSON.stringify({{name:form.get('name'),password:form.get('password')}})}});
         const data=await response.json();
         document.getElementById('result').textContent=response.ok?'Создан. Ссылка для партнёра: /partners/login':(data.error||'Ошибка');
         if(response.ok)location.reload();
-      });
+      }});
       </script></section><section><h2>Партнёры</h2>
       <table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
 
