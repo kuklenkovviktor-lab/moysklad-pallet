@@ -23,6 +23,7 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
+from partner_pallets import partner_bp
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from warehouse_map import warehouse_map_bp
@@ -70,6 +71,7 @@ app.config.update(
     SESSION_REFRESH_EACH_REQUEST=True,
 )
 app.register_blueprint(wms_bp)
+app.register_blueprint(partner_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
 app.register_blueprint(warehouse_map_bp)
@@ -294,12 +296,19 @@ def require_employee_login():
         "/manager-login",
         "/api/manager/login",
     }
-    if path in public_paths or path.startswith("/static/"):
+    if path in public_paths or path == "/partners/login" or path.startswith("/static/"):
+        return None
+
+    # Partner routes use their own scoped session; no employee badge required.
+    # Authentication and CSRF are enforced by the partner blueprint.
+    if path.startswith("/partners/") or path == "/partners":
         return None
 
     # Отдельная браузерная сессия руководителя для ПК.
     # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
     manager_paths = {
+        "/manager/partners",
+        "/api/partners/accounts",
         "/manager",
         "/manager/shifts",
         "/api/manager/shifts/actions",

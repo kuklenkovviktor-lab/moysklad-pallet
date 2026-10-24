@@ -1,0 +1,22 @@
+name: ONIX partner pallet tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'partner_pallets.py'
+      - 'tests/test_partner_pallets.py'
+      - 'app.py'
+      - 'requirements.txt'
+      - '.github/workflows/partner-pallets-tests.yml'
+  workflow_dispatch:
+jobs:
+  partners:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q partner_pallets.py app.py tests/test_partner_pallets.py
+      - run: python -m unittest discover -s tests -p 'test_partner_pallets.py' -v
