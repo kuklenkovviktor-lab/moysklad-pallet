@@ -291,6 +291,42 @@ def parse_excel(file):
         wb.close()
 
 
+
+def partner_pallet_display(partner_id):
+    """Public label fields, independently of internal create/upload reference.
+
+    An Excel upload is numbered within that upload per article.
+    Manually created pallets are numbered by article and creation day.
+    Changing visual numbering never changes a QR identifier.
+    """
+    with db_connect() as db:
+        rows = db.cursor().execute(sql("""SELECT p.id,p.upload_id,p.created_at,u.filename,l.sku
+            FROM partner_pallets p
+            JOIN partner_uploads u ON u.id=p.upload_id
+            LEFT JOIN partner_pallet_lines l ON l.pallet_id=p.id
+            WHERE p.partner_id=?
+            ORDER BY p.created_at,p.id,l.sku"""), (partner_id,)).fetchall()
+    pallets = OrderedDict()
+    for pid, upload_id, created_at, filename, sku in rows:
+        if pid not in pallets:
+            pallets[pid] = dict(upload_id=upload_id, created_at=created_at,
+                                manual=(filename == "вручную"), skus=[])
+        if sku and sku not in pallets[pid]["skus"]:
+            pallets[pid]["skus"].append(sku)
+    groups = OrderedDict()
+    for pid, pallet in pallets.items():
+        article = " / ".join(pallet["skus"]) or "Артикул не указан"
+        group = ("manual", pallet["created_at"][:10], article) if pallet["manual"] else (
+            "upload", pallet["upload_id"], article)
+        groups.setdefault(group, []).append(pid)
+    result = {}
+    for group, ids in groups.items():
+        article = group[2]
+        for index, pid in enumerate(ids, 1):
+            result[pid] = dict(article=article, number=str(index)+"/"+str(len(ids)))
+    return result
+
+
 @partner_bp.route("/partners", methods=["GET"])
 def dashboard():
     db_init()
@@ -298,14 +334,23 @@ def dashboard():
     with db_connect() as db:
         rows = db.cursor().execute(sql("""SELECT id, barcode, external_ref, created_at, status FROM partner_pallets
             WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
-    items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a>"+(f" · <a href='/partners/pallet/{r[0]}/edit'>Изменить</a>" if r[4]=='created' else '')+"</td></tr>" for r in rows)
+    labels = partner_pallet_display(p[0])
+    items = "".join(
+        "<tr><td>"+escape(labels.get(r[0], {}).get("article", "Артикул не указан"))+"</td>"
+        "<td><b>"+escape(labels.get(r[0], {}).get("number", "1/1"))+"</b></td>"
+        "<td>"+escape(r[4])+"</td><td>"+escape(r[3][:16])+"</td>"
+        "<td><a href='/partners/pallet/"+escape(r[0], quote=True)+"/print'>QR / Печать</a>"
+        + (" · <a href='/partners/pallet/"+escape(r[0], quote=True)+"/edit'>Изменить</a>"
+           if r[4] == "created" else "") + "</td></tr>"
+        for r in rows
+    )
     return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
     <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form>{partner_catalog_widget()}</section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
     Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
     <form method="post" action="/partners/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
     <button>Создать палеты и ШК</button></form></section><section><h2>История: последние 200 палет</h2>
-    <table><tr><th>Палета</th><th>ШК</th><th>Статус</th><th>Дата UTC</th><th></th></tr>{items}</table></section>
+    <table><tr><th>Артикул</th><th>Палета</th><th>Статус</th><th>Создана (UTC)</th><th></th></tr>{items}</table></section>
     <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{csrf()}"><button>Выйти</button></form>""")
 
 
@@ -475,28 +520,40 @@ def print_label(pallet_id):
     db_init()
     p = require_partner()
     with db_connect() as db:
-        row = db.cursor().execute(sql("""SELECT barcode,external_ref FROM partner_pallets
+        row = db.cursor().execute(sql("""SELECT barcode FROM partner_pallets
             WHERE id=? AND partner_id=?"""), (pallet_id, p[0])).fetchone()
     if not row:
         abort(404)
+    label = partner_pallet_display(p[0]).get(pallet_id)
+    if not label:
+        abort(404)
+    # Preserve barcode content for the receiving scanner; don't display it as text.
     qr = qrcode.make(row[0])
     out = io.BytesIO()
     qr.save(out, format="PNG")
     encoded = base64.b64encode(out.getvalue()).decode()
-    return f"""<!doctype html><html lang="ru"><meta charset="utf-8"><title>ONIX · Палета {escape(row[1])}</title>
+    article = escape(label["article"])
+    number = escape(label["number"])
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>ONIX · Палета {article} · {number}</title>
     <style>
     @page{{size:A4 portrait;margin:0}}
     *{{box-sizing:border-box}}
-    body{{margin:0;font-family:Arial,sans-serif;color:#111}}
-    .sheet{{width:210mm;height:297mm;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:15mm;text-align:center;break-after:page}}
-    .heading{{font-size:32pt;font-weight:800;margin:0 0 15mm}}
-    .ref{{font-size:25pt;font-weight:700;overflow-wrap:anywhere;max-width:175mm;margin-bottom:10mm}}
-    img{{width:145mm;height:145mm;image-rendering:pixelated}}
-    .code{{font-size:13pt;font-weight:700;overflow-wrap:anywhere;max-width:180mm;margin-top:10mm}}
-    button{{font:18px Arial;padding:12px 20px;margin:16px}}
+    body{{margin:0;font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff}}
+    .sheet{{width:210mm;height:297mm;max-height:297mm;overflow:hidden;display:flex;
+      flex-direction:column;align-items:center;justify-content:center;
+      padding:16mm 14mm;text-align:center;break-after:page}}
+    .heading{{font-size:27pt;font-weight:800;letter-spacing:.5pt;margin:0 0 14mm}}
+    .article{{font-size:32pt;font-weight:800;line-height:1.16;overflow-wrap:anywhere;
+      max-width:180mm;margin:0 0 8mm}}
+    .number{{font-size:28pt;font-weight:750;line-height:1.15;margin:0 0 13mm}}
+    img{{width:142mm;height:142mm;object-fit:contain;image-rendering:pixelated}}
+    button{{font:17px Arial;padding:12px 20px;margin:15px}}
     @media print{{button{{display:none}}}}
-    </style>
-    <button onclick="window.print()">Печать A4</button>
-    <div class="sheet"><h1 class="heading">ONIX · ПАЛЕТА</h1><div class="ref">{escape(row[1])}</div>
-    <img alt="QR палеты" src="data:image/png;base64,{encoded}">
-    <div class="code">{escape(row[0])}</div></div></html>"""
+    </style></head><body>
+    <button onclick="window.print()">Печать А4</button>
+    <div class="sheet"><h1 class="heading">ONIX · ПАЛЕТА</h1>
+      <div class="article">{article}</div><div class="number">{number}</div>
+      <img alt="QR палеты" src="data:image/png;base64,{encoded}">
+    </div></body></html>"""
