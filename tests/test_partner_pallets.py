@@ -128,6 +128,36 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(resolve_receiving_pallet(code)["status"], "accepted")
         self.assertIsNotNone(resolve_receiving_pallet(code)["accepted_at"])
 
+
+    def test_manual_create_edit_and_audit(self):
+        from wms import query_all
+        r=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU_NEW","quantity":"120","reason":"Добавили при погрузке"})
+        self.assertEqual(r.status_code,302,r.data[:500])
+        with self.client.session_transaction() as state:
+            pid=state["partner_id"]
+        pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))
+        self.assertIsNotNone(pallet)
+        url="/partners/pallet/"+pallet[0]+"/edit"
+        self.assertEqual(self.client.get(url).status_code,200)
+        changed=self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"100","reason":"Фактически 100"})
+        self.assertEqual(changed.status_code,302,changed.data[:500])
+        self.assertEqual(query_one("SELECT quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))[0],100)
+        self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallet_changes WHERE pallet_id=?",(pallet[0],))[0],2)
+        __import__("partner_pallets").claim_receiving_pallet(pallet[0])
+        self.assertEqual(self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"99","reason":"Поздно"}).status_code,409)
+        self.assertEqual(query_one("SELECT quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))[0],100)
+
+    def test_manual_create_rejects_invalid_and_wrong_owner(self):
+        bad=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU","quantity":"-3","reason":"Ошибка"})
+        self.assertEqual(bad.status_code,400)
+        with self.client.session_transaction() as state:
+            pid=state["partner_id"]
+        self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"SKU","quantity":"3","reason":"Добавлена"})
+        pallet=query_one("SELECT id FROM partner_pallets WHERE partner_id=?",(pid,))[0]
+        with self.client.session_transaction() as state:
+            state["partner_id"]="another-partner"
+        self.assertEqual(self.client.get("/partners/pallet/"+pallet+"/edit").status_code,401)
+
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
         self.assertEqual(bad.status_code, 400)

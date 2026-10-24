@@ -40,6 +40,7 @@ def db_init():
             id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, sku TEXT NOT NULL,
             quantity INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS partner_pallet_changes (id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, partner_id TEXT NOT NULL, action TEXT NOT NULL, old_sku TEXT, old_quantity INTEGER, new_sku TEXT, new_quantity INTEGER, reason TEXT NOT NULL, changed_at TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_partner_pallet_owner ON partner_pallets(partner_id, created_at)",
     ]
     with db_connect() as db:
@@ -297,15 +298,81 @@ def dashboard():
     with db_connect() as db:
         rows = db.cursor().execute(sql("""SELECT id, barcode, external_ref, created_at, status FROM partner_pallets
             WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
-    items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a></td></tr>" for r in rows)
+    items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a>"+(f" · <a href='/partners/pallet/{r[0]}/edit'>Изменить</a>" if r[4]=='created' else '')+"</td></tr>" for r in rows)
     return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
-    <section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
+    <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form></section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
     Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
     <form method="post" action="/partners/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
     <button>Создать палеты и ШК</button></form></section><section><h2>История: последние 200 палет</h2>
     <table><tr><th>Палета</th><th>ШК</th><th>Статус</th><th>Дата UTC</th><th></th></tr>{items}</table></section>
     <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{csrf()}"><button>Выйти</button></form>""")
+
+
+def _manual_fields(form):
+    sku=str(form.get("article","")).strip()
+    raw=str(form.get("quantity","")).strip()
+    reason=str(form.get("reason","")).strip()
+    if not sku or len(sku)>150 or not raw.isascii() or not raw.isdecimal() or not 1<=int(raw)<=1000000:
+        raise ValueError("Укажи артикул и положительное целое количество")
+    if not reason or len(reason)>300:
+        raise ValueError("Укажи причину изменения")
+    return sku,int(raw),reason
+
+
+@partner_bp.post("/partners/pallet/new")
+def manual_create():
+    db_init()
+    p=require_partner()
+    require_csrf()
+    try:
+        sku,qty,reason=_manual_fields(request.form)
+    except ValueError as exc:
+        return page("Ошибка",escape(str(exc))),400
+    pid,uid=str(uuid.uuid4()),str(uuid.uuid4())
+    with db_connect() as db:
+        cur=db.cursor()
+        cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES (?,?,?,?,?)"),(uid,p[0],"вручную",now(),1))
+        cur.execute(sql("INSERT INTO partner_pallets(id,partner_id,upload_id,external_ref,barcode,created_at) VALUES (?,?,?,?,?,?)"),(pid,p[0],uid,"Добавлена вручную","ONIX-PAL-"+uuid.uuid4().hex.upper(),now()))
+        cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES (?,?,?,?)"),(str(uuid.uuid4()),pid,sku,qty))
+        cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pid,p[0],"create",sku,qty,reason,now()))
+        db.commit()
+    return redirect("/partners")
+
+
+@partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
+def manual_edit(pallet_id):
+    db_init()
+    p=require_partner()
+    if request.method=="POST":
+        require_csrf()
+    with db_connect() as db:
+        cur=db.cursor()
+        row=cur.execute(sql("SELECT id,status FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
+        if not row:
+            abort(404)
+        if row[1]!="created":
+            return page("Изменение запрещено","Палета в обработке или уже принята"),409
+        lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=?"),(pallet_id,)).fetchall()
+        if len(lines)!=1:
+            return page("Изменение запрещено","Редактирование смешанной палеты пока недоступно"),409
+        if request.method=="POST":
+            try:
+                sku,qty,reason=_manual_fields(request.form)
+            except ValueError as exc:
+                return page("Ошибка",escape(str(exc))),400
+            cur.execute(sql("UPDATE partner_pallets SET external_ref=external_ref WHERE id=? AND partner_id=? AND status='created'"),(pallet_id,p[0]))
+            if cur.rowcount!=1:
+                return page("Изменение запрещено","Палета уже в обработке"),409
+            cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=?"),(sku,qty,lines[0][0]))
+            cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pallet_id,p[0],"edit",lines[0][1],lines[0][2],sku,qty,reason,now()))
+            db.commit()
+            return redirect("/partners")
+    with db_connect() as db:
+        entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
+    history="".join("<li>"+escape(str(e))+"</li>" for e in entries)
+    return page("Изменить палету",'<p><a href="/partners">Назад</a></p><section><form method="post"><input type="hidden" name="csrf" value="'+csrf()+'"><input name="article" value="'+escape(lines[0][1],quote=True)+'" required><input type="number" name="quantity" min="1" step="1" value="'+str(lines[0][2])+'" required><input name="reason" placeholder="Причина изменения" required><button>Сохранить</button></form><p>QR останется прежним</p></section><section><h2>История изменений</h2><ul>'+history+'</ul></section>')
+
 
 @partner_bp.post("/partners/upload")
 def upload():
