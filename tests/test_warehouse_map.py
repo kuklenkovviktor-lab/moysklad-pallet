@@ -251,7 +251,6 @@ class WarehouseMapTests(unittest.TestCase):
         self.assertEqual(self.manage(loc_id,label,"release",confirmed_empty=True).status_code,200)
         self.task(label,"new")
         self.assertEqual(self.manage(loc_id,label,"archive").status_code,409)
-        from wms import execute
         execute("UPDATE replenishment_tasks SET status='cancelled' WHERE line_code=?", (label,))
         response=self.manage(loc_id,label,"archive")
         self.assertEqual(response.status_code,200,response.json)
