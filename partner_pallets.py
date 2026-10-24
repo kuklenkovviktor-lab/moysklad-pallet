@@ -320,11 +320,14 @@ def partner_catalog_search():
         return jsonify(error="Слишком длинный запрос"),400
     # Read-only snapshot, already refreshed from MoySklad by ONIX.
     with db_connect() as db:
-        rows=db.cursor().execute(sql("""SELECT article,MAX(name) FROM fbs_catalog_barcodes
+        rows=db.cursor().execute(sql("""SELECT article, MAX(name),
+                COUNT(DISTINCT CASE WHEN is_pack=1 AND quantity>1 AND quantity=CAST(quantity AS INTEGER) THEN CAST(quantity AS INTEGER) END),
+                MAX(CASE WHEN is_pack=1 AND quantity>1 AND quantity=CAST(quantity AS INTEGER) THEN CAST(quantity AS INTEGER) END)
+            FROM fbs_catalog_barcodes
             WHERE article<>'' AND (LOWER(article) LIKE ? OR LOWER(name) LIKE ?)
             GROUP BY article ORDER BY article LIMIT 20"""),
             ("%"+q.lower()+"%","%"+q.lower()+"%")).fetchall()
-    return jsonify(items=[{"article":row[0],"name":row[1]} for row in rows])
+    return jsonify(items=[{"article":row[0],"name":row[1], "pack_qty":int(row[3]) if row[2]==1 and row[3] else None} for row in rows])
 
 
 def partner_catalog_widget():
@@ -335,12 +338,14 @@ def partner_catalog_widget():
         const field=document.querySelector('input[name="article"]');
         const results=document.getElementById('partner-sku-results');
         const info=document.getElementById('partner-sku-name');
+        const quantity=document.querySelector('input[name="quantity"]');
+        let lastSelected='';
         if(!field||!results)return;
         field.setAttribute('list','partner-sku-results');
         let seq=0;
         async function search(){
           const q=field.value.trim(),current=++seq;
-          if(q.length<2){results.replaceChildren();info.textContent='Введите минимум 2 символа артикула или названия';return}
+          if(q.length<2){results.replaceChildren();info.textContent='Введите минимум 2 символа артикула или названия';lastSelected='';return}
           try{
             const response=await fetch('/partners/catalog/search?q='+encodeURIComponent(q),{cache:'no-store'});
             if(!response.ok)throw Error();
@@ -354,7 +359,11 @@ def partner_catalog_widget():
               results.appendChild(option);
             }
             const exact=data.items.find(x=>x.article===field.value.trim());
-            info.textContent=exact?exact.name:(data.items.length?'Выбери артикул из списка':'Товар в каталоге не найден');
+            info.textContent=exact?(exact.name+(exact.pack_qty?' · квант '+exact.pack_qty+' шт.':' · квант не определён')):(data.items.length?'Выбери артикул из списка':'Товар в каталоге не найден');
+            if(exact && exact.article!==lastSelected){
+              lastSelected=exact.article;
+              if(quantity && exact.pack_qty)quantity.value=String(exact.pack_qty);
+            }else if(!exact){lastSelected='';}
           }catch(e){if(current===seq)info.textContent='Каталог временно недоступен'}
         }
         field.addEventListener('input',search);

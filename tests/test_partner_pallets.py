@@ -138,6 +138,21 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertIsNotNone(resolve_receiving_pallet(code)["accepted_at"])
 
 
+    def test_catalog_pack_quantity_unique_and_ambiguous(self):
+        from wms import db_connect, sql
+        with db_connect() as db:
+            for suffix,sku,qty in (("A","PACK_ONE",144),("B","PACK_MIX",100),("C","PACK_MIX",120)):
+                db.cursor().execute(sql("INSERT INTO fbs_catalog_barcodes(barcode,product_id,article,name,quantity,is_pack,synced_at) VALUES (?,?,?,?,?,?,?)"),
+                    ("PACK-"+suffix,sku,sku,"Тест "+sku,qty,1,"2026-10-24"))
+            db.commit()
+        one=self.client.get("/partners/catalog/search?q=PACK_ONE")
+        self.assertEqual(one.status_code,200,one.json)
+        self.assertEqual(one.json["items"][0]["pack_qty"],144)
+        mixed=self.client.get("/partners/catalog/search?q=PACK_MIX")
+        self.assertIsNone(mixed.json["items"][0]["pack_qty"])
+        html=self.client.get("/partners").data
+        self.assertIn(b"exact.pack_qty",html)
+
     def test_partner_catalog_search_is_scoped_and_read_only(self):
         response=self.client.get("/partners/catalog/search?q=SKU_NEW")
         self.assertEqual(response.status_code,200,response.json)
