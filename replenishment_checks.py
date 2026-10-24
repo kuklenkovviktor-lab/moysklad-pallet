@@ -181,10 +181,10 @@ body {background:#edf1f4}
 
 @replenishment_checks_bp.get("/manager/replenishment/labels/all")
 def replenishment_print_all_labels():
-    """One A4 print job for all active ONIX cell codes.
+    """Print all current cell QR codes as 58x40 mm thermal labels, one per page.
 
-    No new locations or codes are generated; the payloads are identical to
-    /manager/replenishment/label?id=... and remain valid for replenishment.
+    Only reads active locations. Does not regenerate barcodes, alter
+    inventory, or change the existing single-label print endpoint.
     """
     ensure_db()
     if not manager_access():
@@ -208,9 +208,10 @@ def replenishment_print_all_labels():
         {"label": str(r[0]), "line": line_of(r[0])}))
 
     def one_label(label, code):
+        # Same QR payload/error correction/quiet zone as the single cell label.
         qr = qrcode.QRCode(
             error_correction=qrcode.constants.ERROR_CORRECT_M,
-            box_size=8,
+            box_size=16,
             border=4,
         )
         qr.add_data(code)
@@ -219,56 +220,48 @@ def replenishment_print_all_labels():
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return ('<div class="cell-label"><img alt="QR ячейки" src="data:image/png;base64,'
-                + encoded + '"><div class="address">' + html.escape(str(label)) + '</div></div>')
+        return ('<section class="sheet"><img class="qr" alt="QR ячейки" '
+                'src="data:image/png;base64,' + encoded + '">'
+                '<div class="address">' + html.escape(str(label))
+                + '</div></section>')
 
-    # A4: 3 columns x 6 rows, exactly 18 individual 58x40 mm labels per sheet.
-    pages = []
-    for offset in range(0, len(rows), 18):
-        chunk = rows[offset:offset + 18]
-        pages.append('<section class="sheet">' +
-                     ''.join(one_label(label, barcode) for label, barcode in chunk) +
-                     '</section>')
+    # A continuous roll is represented as 1 print job with N pages:
+    # each page is EXACTLY one 58 × 40 mm physical thermal label.
     doc = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Все QR ячеек · А4</title>
+<title>ONIX · Все QR ячеек · 58×40 мм</title>
 <style>
-@page{size:A4 portrait;margin:0}
+@page{size:58mm 40mm;margin:0}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#111}
-body{background:#e9eef3}
-.tools{max-width:850px;margin:16px auto;padding:15px;background:white;
-       border-radius:12px;text-align:center;line-height:1.5}
+html,body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#000}
+body{background:#edf1f4}
+.tools{max-width:650px;margin:16px auto;padding:15px;background:white;
+       border-radius:12px;text-align:center;line-height:1.5;font-size:13px}
 .tools button{padding:11px 20px;border:0;border-radius:9px;background:#48647a;
               color:white;font:bold 15px Arial;cursor:pointer}
 .tools small{display:block;color:#52616e;margin-top:8px}
-.sheet{width:210mm;height:297mm;padding:18.5mm 13mm;margin:14px auto;background:white;
-       display:grid;grid-template-columns:repeat(3,58mm);grid-template-rows:repeat(6,40mm);
-       column-gap:5mm;row-gap:4mm;break-after:page;page-break-after:always;
-       box-shadow:0 4px 20px #1f32401c}
+.sheet{width:58mm;height:40mm;margin:12px auto;background:white;
+       display:flex;flex-direction:column;align-items:center;justify-content:center;
+       overflow:hidden;break-after:page;page-break-after:always;break-inside:avoid}
 .sheet:last-child{break-after:auto;page-break-after:auto}
-.cell-label{width:58mm;height:40mm;display:flex;flex-direction:column;
-            align-items:center;justify-content:center;overflow:hidden;
-            border:0.2mm dashed #c6c6c6;break-inside:avoid}
-.cell-label img{display:block;width:30mm;height:30mm;object-fit:contain;
-                image-rendering:pixelated;flex-shrink:0}
-.address{font-weight:800;font-size:12pt;line-height:5mm;color:#000;
-         max-width:54mm;text-align:center;white-space:nowrap;
-         overflow:hidden;text-overflow:ellipsis}
+.qr{display:block;width:30mm;height:30mm;object-fit:contain;
+    image-rendering:pixelated;flex-shrink:0}
+.address{font-size:12pt;font-weight:700;line-height:5mm;max-width:54mm;
+         white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-align:center}
 @media print{
-  html,body{background:#fff}
+  html,body{width:58mm;margin:0;padding:0;background:white}
   .tools{display:none!important}
-  .sheet{margin:0;box-shadow:none}
-}
-@media screen and (max-width:850px){
- .sheet{transform-origin:top center}
+  .sheet{width:58mm;height:40mm;margin:0;padding:0;
+         break-after:page;page-break-after:always;break-inside:avoid}
+  .sheet:last-child{break-after:auto;page-break-after:auto}
 }
 </style></head><body>
-<div class="tools"><button onclick="window.print()">🖨 Распечатать все ячейки</button>
-<div>Активных ячеек: """ + str(len(rows)) + """ · Листов А4: """ + str(len(pages)) + """</div>
-<small>Лист А4, масштаб 100%, без полей и колонтитулов.
-Каждая этикетка 58×40 мм. ШК в базе не меняются.</small></div>
-""" + ''.join(pages) + "</body></html>"
+<div class="tools"><button type="button" onclick="window.print()">🖨 Напечатать все на ленте</button>
+<div>Активных ячеек: """ + str(len(rows)) + """ · Этикеток 58×40 мм: """ + str(len(rows)) + """</div>
+<small>Выбери термопринтер, размер бумаги 58×40 мм, масштаб 100%, поля 0.
+Одна ячейка = одна этикетка; все этикетки отправляются одним заданием.
+Коды ONIX-LOC не меняются.</small></div>
+""" + ''.join(one_label(label, barcode) for label, barcode in rows) + "</body></html>"
     return Response(doc, mimetype="text/html", headers={"Cache-Control": "no-store"})
 
 
