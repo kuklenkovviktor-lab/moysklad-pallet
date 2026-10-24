@@ -296,12 +296,18 @@ def require_employee_login():
         "/manager-login",
         "/api/manager/login",
     }
-    if path in public_paths or path.startswith("/static/"):
+    if path in public_paths or path == "/partners/login" or path.startswith("/static/"):
+        return None
+
+    # Partner routes use their own scoped session; no employee badge required.
+    # Authentication and CSRF are enforced by the partner blueprint.
+    if path.startswith("/partners/") or path == "/partners":
         return None
 
     # Отдельная браузерная сессия руководителя для ПК.
     # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
     manager_paths = {
+        "/api/partners/accounts",
         "/manager",
         "/manager/shifts",
         "/api/manager/shifts/actions",
