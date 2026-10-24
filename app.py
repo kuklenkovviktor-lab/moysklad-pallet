@@ -363,6 +363,7 @@ def require_employee_login():
         "/api/manager/replenishment/catalog",
         "/api/manager/replenishment/locations",
         "/manager/replenishment/label",
+        "/manager/replenishment/labels/all",
         "/manager/ozon-fbo",
         "/manager/ozon-fbo/picking",
         "/api/manager/ozon-fbo/preview",

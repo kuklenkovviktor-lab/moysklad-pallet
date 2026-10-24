@@ -64,6 +64,75 @@ class WarehouseMapTests(unittest.TestCase):
               timestamp if status == "completed" else None))
         return id_
 
+    def test_bulk_print_all_250_cells_on_14_a4_pages_without_changing_codes(self):
+        from unittest.mock import patch
+        import replenishment_checks
+        import replenishment
+        import qrcode
+        entries = [("А-"+str(n).zfill(3),"ONIX-LOC-TEST"+str(n).zfill(5))
+                   for n in range(1,251)]
+        generated=[]
+        qr_type=qrcode.QRCode
+        def record_qr(*args,**kwargs):
+            qr=qr_type(*args,**kwargs)
+            generated.append(qr)
+            return qr
+        with patch.object(replenishment_checks,"query_all",return_value=entries) as read, \
+             patch.object(qrcode,"QRCode",side_effect=record_qr):
+            page=self.client.get("/manager/replenishment/labels/all")
+        self.assertEqual(page.status_code,200)
+        self.assertIn("no-store",page.headers.get("Cache-Control",""))
+        html=page.data.decode("utf-8")
+        self.assertEqual(html.count('class="cell-label"'),250)
+        self.assertEqual(html.count('class="sheet"'),14)
+        self.assertIn("Активных ячеек: 250",html)
+        self.assertIn("Листов А4: 14",html)
+        self.assertIn("size:A4 portrait",html)
+        self.assertIn("58mm",html)
+        self.assertIn("40mm",html)
+        self.assertIn("А-001",html)
+        self.assertIn("А-250",html)
+        self.assertEqual([x.data_list[0].data.decode("utf-8") for x in generated],
+                         [code for _,code in entries])
+        read.assert_called_once()
+        self.assertIn("WHERE active = 1",read.call_args[0][0])
+        self.assertIn('id="printAllLocations"',replenishment.MANAGER_PAGE)
+
+    def test_bulk_print_manager_only_and_empty_or_excess_cells(self):
+        from unittest.mock import patch
+        import replenishment_checks
+        with self.client.session_transaction() as sess:
+            sess.clear()
+        denied=self.client.get("/manager/replenishment/labels/all")
+        self.assertEqual(denied.status_code,302)
+        self.assertIn("/manager-login",denied.location)
+        with self.client.session_transaction() as sess:
+            sess["manager_web"]=True
+        with patch.object(replenishment_checks,"query_all",return_value=[]):
+            self.assertEqual(self.client.get("/manager/replenishment/labels/all").status_code,404)
+        too_many=[("А-"+str(i),"ONIX-LOC-TEST"+str(i)) for i in range(1001)]
+        with patch.object(replenishment_checks,"query_all",return_value=too_many):
+            self.assertEqual(self.client.get("/manager/replenishment/labels/all").status_code,413)
+
+    def test_bulk_print_uses_existing_active_codes_and_natural_order(self):
+        from unittest.mock import patch
+        import replenishment_checks
+        import qrcode
+        entries=[("А-10","ONIX-LOC-EXIST10"),("А-02","ONIX-LOC-EXIST02"),
+                 ("Ж-01","ONIX-LOC-EXIST03")]
+        qr_type=qrcode.QRCode
+        captured=[]
+        def spy_qr(*args,**kw):
+            result=qr_type(*args,**kw)
+            captured.append(result)
+            return result
+        with patch.object(replenishment_checks,"query_all",return_value=entries), \
+             patch.object(qrcode,"QRCode",side_effect=spy_qr):
+            result=self.client.get("/manager/replenishment/labels/all")
+        self.assertEqual(result.status_code,200)
+        self.assertEqual([x.data_list[0].data.decode() for x in captured],
+                         ["ONIX-LOC-EXIST02","ONIX-LOC-EXIST10","ONIX-LOC-EXIST03"])
+
     def test_line_and_natural_sort_match_existing_addresses(self):
         self.assertEqual(line_of("К-07"), "К")
         self.assertEqual(line_of("Ж-01"), "Ж")
