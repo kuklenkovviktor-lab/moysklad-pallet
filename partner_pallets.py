@@ -247,11 +247,20 @@ def print_label(pallet_id):
     out = io.BytesIO()
     qr.save(out, format="PNG")
     encoded = base64.b64encode(out.getvalue()).decode()
-    return f"""<!doctype html><html lang="ru"><meta charset="utf-8"><style>
-    @page{{size:58mm 40mm;margin:0}}body{{margin:0;font:9px Arial}}
-    .label{{width:58mm;height:40mm;display:flex;align-items:center;justify-content:center;gap:2mm}}
-    img{{width:35mm;height:35mm}}small{{overflow-wrap:anywhere;max-width:19mm}}
-    @media print{{button{{display:none}}}}</style>
-    <button onclick="window.print()">Печать 58×40</button><div class="label">
+    return f"""<!doctype html><html lang="ru"><meta charset="utf-8"><title>ONIX · Палета {escape(row[1])}</title>
+    <style>
+    @page{{size:A4 portrait;margin:0}}
+    *{{box-sizing:border-box}}
+    body{{margin:0;font-family:Arial,sans-serif;color:#111}}
+    .sheet{{width:210mm;height:297mm;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:15mm;text-align:center;break-after:page}}
+    .heading{{font-size:32pt;font-weight:800;margin:0 0 15mm}}
+    .ref{{font-size:25pt;font-weight:700;overflow-wrap:anywhere;max-width:175mm;margin-bottom:10mm}}
+    img{{width:145mm;height:145mm;image-rendering:pixelated}}
+    .code{{font-size:13pt;font-weight:700;overflow-wrap:anywhere;max-width:180mm;margin-top:10mm}}
+    button{{font:18px Arial;padding:12px 20px;margin:16px}}
+    @media print{{button{{display:none}}}}
+    </style>
+    <button onclick="window.print()">Печать A4</button>
+    <div class="sheet"><h1 class="heading">ONIX · ПАЛЕТА</h1><div class="ref">{escape(row[1])}</div>
     <img alt="QR палеты" src="data:image/png;base64,{encoded}">
-    <small>{escape(row[1])}<hr>{escape(row[0])}</small></div></html>"""
+    <div class="code">{escape(row[0])}</div></div></html>"""
