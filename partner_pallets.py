@@ -41,6 +41,10 @@ def db_init():
             id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, sku TEXT NOT NULL,
             quantity INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS partner_submission_tokens (
+            partner_id TEXT NOT NULL, token TEXT NOT NULL, upload_id TEXT NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY(partner_id, token)
+        )""",
         """CREATE TABLE IF NOT EXISTS partner_pallet_changes (id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, partner_id TEXT NOT NULL, action TEXT NOT NULL, old_sku TEXT, old_quantity INTEGER, new_sku TEXT, new_quantity INTEGER, reason TEXT NOT NULL, changed_at TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_partner_pallet_owner ON partner_pallets(partner_id, created_at)",
     ]
@@ -451,6 +455,20 @@ def _manual_fields(form):
     return sku,int(raw),reason
 
 
+def claim_partner_submission(cur, partner_id, upload_id):
+    """Atomic dedupe for browser forms; legacy clients without token remain compatible."""
+    token=str(request.form.get("submission_key","")).strip()
+    if not token:
+        return True
+    if len(token)>128:
+        raise ValueError("Неверный ключ операции")
+    cur.execute(sql("""INSERT INTO partner_submission_tokens
+        (partner_id,token,upload_id,created_at) VALUES (?,?,?,?)
+        ON CONFLICT(partner_id,token) DO NOTHING"""),
+        (partner_id,token,upload_id,now()))
+    return cur.rowcount == 1
+
+
 @partner_bp.post("/partners/pallet/new")
 def manual_create():
     db_init()
@@ -463,12 +481,14 @@ def manual_create():
     pid,uid=str(uuid.uuid4()),str(uuid.uuid4())
     with db_connect() as db:
         cur=db.cursor()
+        if not claim_partner_submission(cur,p[0],uid):
+            return redirect("/partners?result=duplicate")
         cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES (?,?,?,?,?)"),(uid,p[0],"вручную",now(),1))
         cur.execute(sql("INSERT INTO partner_pallets(id,partner_id,upload_id,external_ref,barcode,created_at) VALUES (?,?,?,?,?,?)"),(pid,p[0],uid,"Добавлена вручную","ONIX-PAL-"+uuid.uuid4().hex.upper(),now()))
         cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES (?,?,?,?)"),(str(uuid.uuid4()),pid,sku,qty))
         cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pid,p[0],"create",sku,qty,reason,now()))
         db.commit()
-    return redirect("/partners")
+    return redirect("/partners?result=created")
 
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
@@ -520,6 +540,8 @@ def upload():
     upload_id = str(uuid.uuid4())
     with db_connect() as db:
         cur = db.cursor()
+        if not claim_partner_submission(cur,p[0],upload_id):
+            return redirect("/partners?result=duplicate")
         cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES(?,?,?,?,?)"),
                     (upload_id, p[0], file.filename[:255], now(), len(groups)))
         for ref, lines in groups.items():
@@ -531,7 +553,7 @@ def upload():
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
         db.commit()
-    return redirect("/partners")
+    return redirect("/partners?result=uploaded")
 
 @partner_bp.get("/partners/pallet/<pallet_id>/print")
 def print_label(pallet_id):
