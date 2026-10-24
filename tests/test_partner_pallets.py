@@ -126,6 +126,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertFalse(claim_receiving_pallet(pallet["id"]))
         set_receiving_pallet_status(pallet["id"], "accepted")
         self.assertEqual(resolve_receiving_pallet(code)["status"], "accepted")
+        self.assertIsNotNone(resolve_receiving_pallet(code)["accepted_at"])
 
     def test_invalid_quantities_are_atomic(self):
         bad = self.upload([("Артикул", "Количество"), ("SKU1", 3), ("SKU2", -1)])
