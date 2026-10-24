@@ -139,6 +139,15 @@ def require_csrf():
 def page(title, body):
     return portal_page(title,body)
 
+@partner_bp.errorhandler(401)
+def partner_login_required(error):
+    # Browser GET should open sign-in instead of showing a raw 401 page.
+    # JSON/POST requests remain unauthorized and never mutate warehouse data.
+    if request.method == "GET" and request.path.startswith("/partners") and request.path != "/partners/catalog/search":
+        return redirect("/partners/login")
+    return jsonify(error="Требуется вход партнёра"), 401
+
+
 @partner_bp.route("/partners/login", methods=["GET", "POST"])
 def login():
     db_init()
