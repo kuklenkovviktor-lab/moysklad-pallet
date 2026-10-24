@@ -300,13 +300,68 @@ def dashboard():
             WHERE partner_id=? ORDER BY created_at DESC LIMIT 200"""), (p[0],)).fetchall()
     items = "".join(f"<tr><td>{escape(str(r[2]))}</td><td>{escape(r[1])}</td><td>{escape(r[4])}</td><td>{escape(r[3][:16])}</td><td><a href='/partners/pallet/{r[0]}/print'>Печать</a>"+(f" · <a href='/partners/pallet/{r[0]}/edit'>Изменить</a>" if r[4]=='created' else '')+"</td></tr>" for r in rows)
     return page("ONIX · Палеты партнёра", f"""<p>Партнёр: {escape(p[1])}</p>
-    <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form></section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
+    <section><h2>Добавить палету вручную</h2><form method="post" action="/partners/pallet/new"><input type="hidden" name="csrf" value="{csrf()}"><input name="article" placeholder="Артикул" required><input name="quantity" type="number" min="1" step="1" required><input name="reason" placeholder="Причина" required><button>Создать палету</button></form>{partner_catalog_widget()}</section><section><h2>Загрузить Excel</h2><p>Поддерживается файл заказа с колонками <b>Артикул</b>, <b>Палет</b>, <b>Ед. в палете</b> и простой файл с <b>Артикул</b>, <b>Количество</b>, <b>Палета</b> (необязательно).
     Одинаковая «Палета» объединяет строки в одну палету. Без этого столбца каждая строка создаёт отдельную палету.</p>
     <form method="post" action="/partners/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{csrf()}"><input type="file" name="file" accept=".xlsx" required>
     <button>Создать палеты и ШК</button></form></section><section><h2>История: последние 200 палет</h2>
     <table><tr><th>Палета</th><th>ШК</th><th>Статус</th><th>Дата UTC</th><th></th></tr>{items}</table></section>
     <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{csrf()}"><button>Выйти</button></form>""")
+
+
+
+@partner_bp.get("/partners/catalog/search")
+def partner_catalog_search():
+    require_partner()
+    q=str(request.args.get("q","")).strip()
+    if len(q)<2:
+        return jsonify(items=[])
+    if len(q)>100:
+        return jsonify(error="Слишком длинный запрос"),400
+    # Read-only snapshot, already refreshed from MoySklad by ONIX.
+    with db_connect() as db:
+        rows=db.cursor().execute(sql("""SELECT article,MAX(name) FROM fbs_catalog_barcodes
+            WHERE article<>'' AND (LOWER(article) LIKE ? OR LOWER(name) LIKE ?)
+            GROUP BY article ORDER BY article LIMIT 20"""),
+            ("%"+q.lower()+"%","%"+q.lower()+"%")).fetchall()
+    return jsonify(items=[{"article":row[0],"name":row[1]} for row in rows])
+
+
+def partner_catalog_widget():
+    return """<datalist id="partner-sku-results"></datalist>
+      <p id="partner-sku-name" style="font-size:14px;color:#52647a"></p>
+      <script>
+      (()=>{
+        const field=document.querySelector('input[name="article"]');
+        const results=document.getElementById('partner-sku-results');
+        const info=document.getElementById('partner-sku-name');
+        if(!field||!results)return;
+        field.setAttribute('list','partner-sku-results');
+        let seq=0;
+        async function search(){
+          const q=field.value.trim(),current=++seq;
+          if(q.length<2){results.replaceChildren();info.textContent='Введите минимум 2 символа артикула или названия';return}
+          try{
+            const response=await fetch('/partners/catalog/search?q='+encodeURIComponent(q),{cache:'no-store'});
+            if(!response.ok)throw Error();
+            const data=await response.json();
+            if(current!==seq)return;
+            results.replaceChildren();
+            for(const entry of data.items){
+              const option=document.createElement('option');
+              option.value=entry.article;
+              option.label=entry.name;
+              results.appendChild(option);
+            }
+            const exact=data.items.find(x=>x.article===field.value.trim());
+            info.textContent=exact?exact.name:(data.items.length?'Выбери артикул из списка':'Товар в каталоге не найден');
+          }catch(e){if(current===seq)info.textContent='Каталог временно недоступен'}
+        }
+        field.addEventListener('input',search);
+        field.addEventListener('change',search);
+        if(field.value)search();
+      })();
+      </script>"""
 
 
 def _manual_fields(form):
@@ -317,6 +372,10 @@ def _manual_fields(form):
         raise ValueError("Укажи артикул и положительное целое количество")
     if not reason or len(reason)>300:
         raise ValueError("Укажи причину изменения")
+    with db_connect() as db:
+        found=db.cursor().execute(sql("SELECT 1 FROM fbs_catalog_barcodes WHERE article=? LIMIT 1"),(sku,)).fetchone()
+    if not found:
+        raise ValueError("Артикул не найден в каталоге ONIX. Выбери товар из подсказок.")
     return sku,int(raw),reason
 
 
@@ -371,7 +430,7 @@ def manual_edit(pallet_id):
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
     history="".join("<li>"+escape(str(e))+"</li>" for e in entries)
-    return page("Изменить палету",'<p><a href="/partners">Назад</a></p><section><form method="post"><input type="hidden" name="csrf" value="'+csrf()+'"><input name="article" value="'+escape(lines[0][1],quote=True)+'" required><input type="number" name="quantity" min="1" step="1" value="'+str(lines[0][2])+'" required><input name="reason" placeholder="Причина изменения" required><button>Сохранить</button></form><p>QR останется прежним</p></section><section><h2>История изменений</h2><ul>'+history+'</ul></section>')
+    return page("Изменить палету",'<p><a href="/partners">Назад</a></p><section><form method="post"><input type="hidden" name="csrf" value="'+csrf()+'"><input name="article" value="'+escape(lines[0][1],quote=True)+'" required><input type="number" name="quantity" min="1" step="1" value="'+str(lines[0][2])+'" required><input name="reason" placeholder="Причина изменения" required><button>Сохранить</button></form><p>QR останется прежним</p></section><section><h2>История изменений</h2><ul>'+history+'</ul></section>'+partner_catalog_widget())
 
 
 @partner_bp.post("/partners/upload")

@@ -33,6 +33,15 @@ class PartnerPalletTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         db_init()
+        from fbs_catalog import init_fbs_catalog_db
+        from wms import db_connect, sql
+        init_fbs_catalog_db()
+        with db_connect() as db:
+            cur=db.cursor()
+            for sku in ("SKU_NEW","SKU"):
+                cur.execute(sql("INSERT INTO fbs_catalog_barcodes(barcode,product_id,article,name,quantity,is_pack,synced_at) VALUES(?,?,?,?,?,?,?)"),
+                    ("TEST-"+sku,sku,sku,"Тестовый товар "+sku,1,0,"2026-10-24"))
+            db.commit()
         app._WMS_READY.set()
 
     def setUp(self):
@@ -128,6 +137,16 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(resolve_receiving_pallet(code)["status"], "accepted")
         self.assertIsNotNone(resolve_receiving_pallet(code)["accepted_at"])
 
+
+    def test_partner_catalog_search_is_scoped_and_read_only(self):
+        response=self.client.get("/partners/catalog/search?q=SKU_NEW")
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertTrue(any(x["article"]=="SKU_NEW" for x in response.json["items"]))
+        response=self.client.post("/partners/pallet/new",data={"csrf":self.token,"article":"UNKNOWN_SKU","quantity":"3","reason":"test"})
+        self.assertEqual(response.status_code,400)
+        with self.client.session_transaction() as state:
+            state.pop("partner_id",None)
+        self.assertEqual(self.client.get("/partners/catalog/search?q=SKU_NEW").status_code,401)
 
     def test_manual_create_edit_and_audit(self):
         from wms import query_all
