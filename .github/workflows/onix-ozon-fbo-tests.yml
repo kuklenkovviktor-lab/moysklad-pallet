@@ -8,7 +8,14 @@ on:
       - 'wms.py'
       - 'app.py'
       - 'tests/test_ozon_fbo_picking.py'
+      - 'tests/test_ozon_fbo_parser.py'
       - 'tests/test_wms_operation_times.py'
+      - '.github/workflows/onix-ozon-fbo-tests.yml'
+  pull_request:
+    paths:
+      - 'ozon_fbo*.py'
+      - 'tests/test_ozon_fbo_picking.py'
+      - 'tests/test_ozon_fbo_parser.py'
       - '.github/workflows/onix-ozon-fbo-tests.yml'
   workflow_dispatch:
 
