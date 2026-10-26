@@ -6,3 +6,4 @@ boto3==1.40.61
 qrcode[pil]==8.2
 
 openpyxl==3.1.5
+PyMuPDF==1.26.5

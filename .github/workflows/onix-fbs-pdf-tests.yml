@@ -1,0 +1,38 @@
+name: ONIX FBS PDF import tests
+
+on:
+  pull_request:
+    paths:
+      - 'fbs_pdf_import*.py'
+      - 'app.py'
+      - 'wms.py'
+      - 'requirements.txt'
+      - 'tests/test_fbs_pdf_upload.py'
+      - '.github/workflows/onix-fbs-pdf-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'fbs_pdf_import*.py'
+      - 'app.py'
+      - 'wms.py'
+      - 'requirements.txt'
+      - 'tests/test_fbs_pdf_upload.py'
+      - '.github/workflows/onix-fbs-pdf-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  pdf-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q fbs_pdf_import.py fbs_pdf_import_ui.py app.py wms.py
+      - name: Test PDF intake
+        run: python -m unittest discover -s tests -p 'test_fbs_pdf_upload.py' -v
+      - name: Full regression suite
+        run: python -m unittest discover -s tests -p 'test_*.py' -v

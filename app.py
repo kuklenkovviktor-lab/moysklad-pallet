@@ -31,6 +31,7 @@ from warehouse_map import warehouse_map_bp
 from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
+from fbs_pdf_import import fbs_pdf_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
 from receiving_idempotency import (
@@ -101,6 +102,7 @@ app.register_blueprint(warehouse_map_bp)
 app.register_blueprint(cell_audit_bp)
 app.register_blueprint(diag_bp)
 app.register_blueprint(shift_history_bp)
+app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
 
@@ -347,6 +349,8 @@ def require_employee_login():
         "/manager",
         "/manager/shifts",
         "/manager/shift-history",
+        "/manager/fbs-pdf",
+        "/api/manager/fbs-pdf/preview",
         "/api/manager/shift-history",
         "/api/manager/shifts/actions",
         "/api/manager/shifts/force-close",
