@@ -52,7 +52,7 @@ class PdfUploadTests(unittest.TestCase):
         )
 
     def test_manager_can_upload_and_preview_but_never_create_orders(self):
-        sample=build_pdf(["Артикул: SKU_1349  ШК: 1234567890123", "Товар: Кружка, 2 шт."])
+        sample=build_pdf(["seller sku: SKU_1349  barcode: 1234567890123", "Товар: Кружка, 2 шт."])
         before = query_one("SELECT COUNT(*) FROM wb_orders")[0]
         response=self.upload(sample, "orders.pdf")
         self.assertEqual(response.status_code, 200, response.json)
