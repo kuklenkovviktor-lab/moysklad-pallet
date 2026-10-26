@@ -18,7 +18,7 @@ import app
 from fbs_pdf_import import (
     MAX_BYTES, MAX_PAGES, _sample_indices, inspect_pdf,
 )
-from wms import query_one
+from wms import query_one, ensure_db
 
 
 def build_pdf(texts):
@@ -35,6 +35,7 @@ def build_pdf(texts):
 class PdfUploadTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        ensure_db()
         app._WMS_READY.set()
 
     def setUp(self):
@@ -53,7 +54,7 @@ class PdfUploadTests(unittest.TestCase):
     def test_manager_can_upload_and_preview_but_never_create_orders(self):
         sample=build_pdf(["Артикул: SKU_1349  ШК: 1234567890123", "Товар: Кружка, 2 шт."])
         before = query_one("SELECT COUNT(*) FROM wb_orders")[0]
-        response=self.upload(sample, r"C:\warehouse\orders.pdf")
+        response=self.upload(sample, "orders.pdf")
         self.assertEqual(response.status_code, 200, response.json)
         data=response.json
         self.assertEqual(data["filename"], "orders.pdf")
