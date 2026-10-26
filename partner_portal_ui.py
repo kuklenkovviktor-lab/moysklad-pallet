@@ -122,7 +122,7 @@ def status_html(status):
            'uncertain':('Требует сверки','status-uncertain')}.get(status,('Неизвестно',''))
     return '<span class="status '+value[1]+'">'+escape(value[0])+'</span>'
 
-def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget, created_pallet="", created_count=0):
+def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget, created_pallet="", created_count=0, shipments=()):
     q_text=escape(q,quote=True)
     token=escape(token,quote=True)
     partner_text=escape(partner,quote=True)
@@ -158,6 +158,9 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     back='<a href="'+escape(page_url(current_page-1),quote=True)+'">← Назад</a>' if current_page>1 else '<span class="disabled">← Назад</span>'
     forward='<a href="'+escape(page_url(current_page+1),quote=True)+'">Дальше →</a>' if current_page<page_count else '<span class="disabled">Дальше →</span>'
     page_nav='<div class="paging"><span>Найдено: '+str(total)+' · Страница '+str(current_page)+' из '+str(page_count)+'</span><div class="pages">'+back+forward+'</div></div>'
+    shipment_select='<option value="">Без поставки</option>'+''.join(
+        '<option value="'+escape(str(s[0]),quote=True)+'">Поставка '+escape(str(s[1]))+' ('+str(s[2])+' палет)</option>'
+        for s in shipments)
     html=f"""
     <header class="topbar">
       <div class="brand"><span class="logo">ONX</span><div><b>ONIX WMS</b><small>Кабинет партнёра</small></div></div>
@@ -165,7 +168,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
       <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{token}">
       <button class="btn btn-secondary" type="submit">Выйти</button></form></div>
     </header>
-    <div class="dashboard-title"><h1>Палеты партнёра</h1>
+    <div class="dashboard-title"><h1>Палеты партнёра</h1><a class="btn btn-secondary" href="/partners/shipments">📦 Поставки</a>
       <div class="muted">Создание, корректировка, печать и контроль палет поставки</div></div>
     {flash}
     <div class="kpis">
@@ -180,6 +183,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
         <form method="post" action="/partners/pallet/new" data-once>
           <input type="hidden" name="csrf" value="{token}">
           <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
+          <div class="field"><label>Поставка (необязательно)</label><select name="shipment_id">{shipment_select}</select></div>
           <div class="field"><label for="manual-article">Артикул товара</label>
              <input id="manual-article" name="article" placeholder="Начни вводить артикул или название" maxlength="150" autocomplete="off" required>
           </div>
@@ -198,6 +202,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
         <form method="post" action="/partners/upload" enctype="multipart/form-data" data-once>
           <input type="hidden" name="csrf" value="{token}">
           <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
+          <div class="field"><label>Поставка (необязательно)</label><select name="shipment_id">{shipment_select}</select></div>
           <div class="dropzone"><div class="symbol">📁</div><b>Выбери Excel-файл заказа</b>
             <div class="muted">Формат .xlsx · не более 2 МБ · до 5000 палет</div>
             <input id="partner-file" type="file" name="file" accept=".xlsx" aria-label="Загрузить Excel" required>
@@ -253,3 +258,61 @@ def edit_view(token, article, quantity, history_rows, widget):
         +(''.join(history) if history else '<li class="muted">Пока изменений не было</li>')
         +'</ul></section>'+FORM_JS)
     return page("ONIX WMS · Изменить палету",inner,show_title=False)
+
+
+def shipment_list_view(partner, token, shipments):
+    token=escape(token,quote=True)
+    rows=''.join(
+        '<div class="panel"><b>Поставка на '+escape(str(day))+'</b> · '+str(count)+' палет'
+        ' <a class="btn btn-secondary" href="/partners/shipments/'+escape(str(sid),quote=True)+'">Открыть</a></div>'
+        for sid,day,count in shipments)
+    return page("ONIX · Поставки",'''
+      <div class="dashboard-title"><a href="/partners">← Палеты партнёра</a><h1>Поставки</h1>
+      <p class="muted">Каждая поставка объединяет несколько палет. Печать всех QR одним заданием А4.</p></div>
+      <section class="panel"><h2>Новая поставка</h2>
+      <form method="post" action="/partners/shipments/new" data-once>
+      <input type="hidden" name="csrf" value="'''+token+'''">
+      <div class="field"><label>Дата поставки</label><input type="date" name="planned_date" required></div>
+      <div class="form-foot"><button class="btn btn-primary" type="submit">Создать поставку</button></div>
+      </form></section>'''+(rows or '<div class="panel">Пока нет поставок</div>')+FORM_JS)
+
+
+def shipment_detail_view(token, day, shipment_id, rows, labels, widget):
+    safe_id=escape(shipment_id,quote=True)
+    table=[]
+    for pid, barcode, status, created, article in rows:
+        d=labels.get(pid,{})
+        actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print">QR / Печать</a>'
+        if status=='created':
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit">Изменить</a>'
+        table.append('<tr><td>'+escape(d.get("article") or article)+'</td><td>'+
+          escape(d.get("number") or "1/1")+'</td><td>'+status_html(status)+'</td><td class="action-links">'+actions+'</td></tr>')
+    safe_token=escape(token,quote=True)
+    return page("ONIX · Поставка",f'''
+    <div class="dashboard-title"><a href="/partners/shipments">← Все поставки</a>
+    <h1>Поставка на {escape(str(day))}</h1><p class="muted">Палет: {len(rows)}</p></div>
+    <section class="panel">
+    <a class="btn btn-primary" target="_blank" rel="noopener" href="/partners/shipments/{safe_id}/print">🖨 Печать всех палет А4</a>
+    <a class="btn btn-secondary" target="_blank" rel="noopener" href="/partners/shipments/{safe_id}/print?only=created">Только ожидающие</a>
+    </section>
+    <div class="forms-grid">
+    <section class="panel"><h2>Добавить палету</h2>
+    <form action="/partners/pallet/new" method="post" data-once>
+    <input type="hidden" name="csrf" value="{safe_token}">
+    <input type="hidden" name="shipment_id" value="{safe_id}">
+    <div class="field"><label>Артикул</label><input name="article" required maxlength="150" placeholder="Артикул или название"></div>
+    <div class="field"><label>Количество, шт.</label><input name="quantity" type="number" min="1" max="1000000" required></div>
+    <div class="field"><label>Причина</label><input name="reason" required maxlength="300" value="Дополнение поставки"></div>
+    {widget}<div class="form-foot"><button class="btn btn-primary">Добавить палету</button></div></form></section>
+    <section class="panel"><h2>Загрузить Excel</h2>
+    <form action="/partners/upload" method="post" enctype="multipart/form-data" data-once>
+    <input type="hidden" name="csrf" value="{safe_token}">
+    <input type="hidden" name="shipment_id" value="{safe_id}">
+    <div class="field"><label>Excel-файл</label><input type="file" name="file" accept=".xlsx" required></div>
+    <div class="form-foot"><button class="btn btn-primary">Добавить из Excel</button></div></form></section>
+    </div>
+    <section class="panel"><h2>Палеты поставки</h2>
+    <div class="table-wrap"><table><thead><tr><th>Артикул</th><th>Палета</th><th>Статус</th><th>Действия</th></tr></thead>
+    <tbody>{''.join(table) or '<tr><td colspan="4">Пока нет палет</td></tr>'}</tbody></table></div></section>
+    {FORM_JS}
+    ''')
