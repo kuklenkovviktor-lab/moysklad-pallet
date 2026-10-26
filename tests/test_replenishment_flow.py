@@ -134,6 +134,100 @@ class ReplenishmentFlowTests(unittest.TestCase):
             "SELECT status, planned_qty, verify_required FROM replenishment_tasks WHERE id=?",
             (created.json["task_id"],)), ("new", 18, 1))
 
+    def assign_sku_to_location(self, product_id, article):
+        from cell_audit import ensure_cell_audit_db
+        ensure_cell_audit_db()
+        location_id = query_one(
+            "SELECT id FROM replenishment_locations WHERE label=?", (self.location,)
+        )[0]
+        execute("""
+            INSERT INTO cell_sku_assignments
+                (location_id, product_id, article, product_name, assigned_at, assigned_by)
+            VALUES (?,?,?,?,?,?)
+        """, (location_id, product_id, article, "Товар на карте",
+              "2026-10-26T00:00:00+00:00", "Руководитель"))
+
+    def test_self_create_rejects_wrong_sku_for_mapped_cell(self):
+        self.assign_sku_to_location("other-product-id", "WRONG_SKU")
+        response, _ = self.self_create()
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertIn("НЕ ТОТ ТОВАР", response.json["error"])
+        self.assertEqual(query_one(
+            "SELECT COUNT(*) FROM replenishment_tasks WHERE line_code=?",
+            (self.location,),
+        )[0], 0)
+
+    def test_manager_cannot_create_wrong_sku_task_in_mapped_cell(self):
+        self.assign_sku_to_location("other-product-id", "WRONG_SKU")
+        with self.client.session_transaction() as ses:
+            ses.clear()
+            ses["manager_web"] = True
+        with patch.object(app, "_get_product_list", return_value=[self.product]):
+            response = self.client.post(
+                "/api/manager/replenishment/create",
+                json={"product_id": self.product["id"], "article": self.product["article"],
+                      "line": self.location, "priority": "normal"},
+            )
+        self.assertEqual(response.status_code, 409, response.json)
+        self.assertIn("НЕ ТОТ ТОВАР", response.json["error"])
+
+    def test_existing_task_rejected_if_mapping_changed_before_start(self):
+        with self.client.session_transaction() as ses:
+            ses.clear()
+            ses["manager_web"] = True
+        with patch.object(app, "_get_product_list", return_value=[self.product]):
+            created = self.client.post(
+                "/api/manager/replenishment/create",
+                json={"product_id": self.product["id"], "article": self.product["article"],
+                      "line": self.location, "priority": "normal"},
+            )
+        self.assertEqual(created.status_code, 201, created.json)
+        self.assign_sku_to_location("other-product-id", "WRONG_SKU")
+        self.as_employee("anton")
+        result = self.client.post(
+            "/api/replenishment/action",
+            json={"task_id": created.json["task_id"], "action": "start"},
+        )
+        self.assertEqual(result.status_code, 409, result.json)
+        self.assertIn("НЕ ТОТ ТОВАР", result.json["error"])
+        self.assertEqual(query_one(
+            "SELECT status FROM replenishment_tasks WHERE id=?",
+            (created.json["task_id"],),
+        )[0], "new")
+
+    def test_two_active_tasks_cannot_target_same_cell(self):
+        first, _ = self.self_create()
+        self.assertEqual(first.status_code, 201, first.json)
+        with patch.object(app, "find_product_by_any_barcode",
+                          return_value=({"id": "other-id", "article": "OTHER_SKU",
+                                         "name": "Other Product"}, None)):
+            second = self.client.post(
+                "/api/replenishment/self-create",
+                json={"barcode": "4601234999999", "line": self.location},
+            )
+        self.assertEqual(second.status_code, 409, second.json)
+        self.assertIn("уже есть", second.json["error"])
+        self.assertEqual(query_one(
+            "SELECT COUNT(*) FROM replenishment_tasks WHERE line_code=?",
+            (self.location,),
+        )[0], 1)
+
+    def test_matching_mapping_allows_normal_workflow(self):
+        self.assign_sku_to_location(self.product["id"], self.product["article"])
+        first, _ = self.self_create()
+        self.assertEqual(first.status_code, 201, first.json)
+        verified = self.client.post(
+            "/api/replenishment/verify",
+            json={"task_id":first.json["task_id"],"stage":"location",
+                  "barcode":self.location_code},
+        )
+        self.assertEqual(verified.status_code, 200, verified.json)
+        completed = self.client.post(
+            "/api/replenishment/action",
+            json={"task_id":first.json["task_id"],"action":"complete","quantity":12},
+        )
+        self.assertEqual(completed.status_code, 200, completed.json)
+
     def test_worker_page_has_self_create_and_safe_json_handling(self):
         from replenishment import MANAGER_PAGE, WORKER_PAGE
         self.assertIn("/api/replenishment/self-create", WORKER_PAGE)
