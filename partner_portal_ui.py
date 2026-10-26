@@ -145,7 +145,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
         ordinal=escape(label.get('number','1/1'))
         actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print">QR / Печать</a>'
         if state=='created':
-            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit">Изменить</a>'
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit?back='+safe_id+'">Изменить</a>'
         table_rows.append('<tr><td data-label="Артикул"><span class="article">'+sku+'</span></td>'
                           '<td data-label="Палета"><span class="pallet-num">'+ordinal+'</span></td>'
                           '<td data-label="Статус">'+status_html(state)+'</td>'
@@ -230,7 +230,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     return page("ONIX WMS · Палеты партнёра",html,show_title=False)
 
 
-def edit_view(token, article, quantity, history_rows, widget):
+def edit_view(token, article, quantity, history_rows, widget, back=""):
     """Restricted partner edit page with the same design as the main portal."""
     history=[]
     for before, oldqty, after, newqty, reason, changed_at in history_rows:
@@ -240,13 +240,14 @@ def edit_view(token, article, quantity, history_rows, widget):
             '<small class="muted">'+escape(local_date(changed_at))+'</small><br>'
             '<b>'+prev+'</b> → <b>'+curr+'</b><br>'
             '<span class="muted">'+escape(str(reason or ''))+'</span></li>')
+    back_path='/partners/shipments/'+escape(back,quote=True) if back else '/partners'
     inner=('<div class="topbar"><div class="brand"><span class="logo">ONX</span>'
         '<div><b>ONIX WMS</b><small>Корректировка палеты</small></div></div>'
-        '<a class="btn btn-ghost" href="/partners">← К палетам</a></div>'
+        '<a class="btn btn-ghost" href="'+back_path+'">← Назад</a></div>'
         '<div class="dashboard-title"><h1>Изменить палету</h1>'
         '<div class="muted">Редактировать можно только до начала приёмки. QR сохранится прежним.</div></div>'
         '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'
-        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'
+        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'+'<input type="hidden" name="back" value="'+escape(back,quote=True)+'">'
         '<div class="field"><label for="edit-article">Артикул товара</label>'
         '<input id="edit-article" name="article" maxlength="150" required value="'+escape(article,quote=True)+'"></div>'
         '<div class="fields-inline"><div class="field"><label for="edit-qty">Количество, шт.</label>'
