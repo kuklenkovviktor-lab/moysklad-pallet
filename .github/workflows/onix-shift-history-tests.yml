@@ -1,0 +1,36 @@
+name: ONIX Shift History tests
+
+on:
+  pull_request:
+    paths:
+      - 'shift_history*.py'
+      - 'app.py'
+      - 'wms.py'
+      - 'tests/test_shift_history.py'
+      - '.github/workflows/onix-shift-history-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'shift_history*.py'
+      - 'app.py'
+      - 'wms.py'
+      - 'tests/test_shift_history.py'
+      - '.github/workflows/onix-shift-history-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install application dependencies
+        run: pip install -r requirements.txt
+      - name: Compile modules
+        run: python -m compileall -q shift_history.py shift_history_ui.py app.py wms.py
+      - name: Test history and productivity
+        run: python -m unittest discover -s tests -p 'test_shift_history.py' -v
+      - name: Run full regression suite
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
