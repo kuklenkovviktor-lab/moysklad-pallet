@@ -733,8 +733,8 @@ def worker_replenishment_self_create():
                 existing = _open_location_task(cur, line)
                 if existing:
                     return jsonify(
-                        error="Ячейка уже пополняется: " + str(existing[1])
-                        + ". Закончи или отмени действующее задание."
+                        error="По ячейке уже есть открытая задача: " + str(existing[1])
+                        + ". Заверши или отмени её перед новым пополнением."
                     ), 409
                 cur.execute(sql("""
                     INSERT INTO replenishment_tasks
