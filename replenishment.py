@@ -43,6 +43,50 @@ def _event(cur, task_id, actor_id, actor, kind, note="", qty=None):
     """), (str(uuid.uuid4()), task_id, actor_id, actor, kind, note, qty, now_iso()))
 
 
+def _check_destination(cur, line, product_id, article):
+    """Prevent replenishing a mapped cell with another SKU.
+
+    An unassigned physical cell is still valid: registration and stock are
+    distinct concepts. Binding stays a separate manager action.
+    The caller must initialize cell_audit tables before entering a DB tx.
+    """
+    cur.execute(sql("""
+        SELECT l.id, a.product_id, a.article
+        FROM replenishment_locations l
+        LEFT JOIN cell_sku_assignments a ON a.location_id = l.id
+        WHERE l.label = ? AND l.active = 1
+    """), (line,))
+    found = cur.fetchone()
+    if not found:
+        return "Ячейка не зарегистрирована или выведена из эксплуатации"
+    mapped_id, mapped_article = found[1], found[2]
+    if mapped_id and (
+        (product_id and str(mapped_id) != str(product_id))
+        or str(mapped_article or "").strip().casefold() != str(article or "").strip().casefold()
+    ):
+        return (
+            "НЕ ТОТ ТОВАР ДЛЯ ЯЧЕЙКИ: " + line
+            + " закреплена за " + str(mapped_article)
+            + ", выбран " + str(article)
+            + ". Проверь карту склада и привязку артикула."
+        )
+    return None
+
+
+def _open_location_task(cur, line, exclude_id=None):
+    statement = """
+        SELECT id, article FROM replenishment_tasks
+        WHERE line_code = ? AND status IN ('new','started')
+    """
+    parameters = (line,)
+    if exclude_id:
+        statement += " AND id <> ?"
+        parameters += (exclude_id,)
+    statement += " ORDER BY created_at LIMIT 1"
+    cur.execute(sql(statement), parameters)
+    return cur.fetchone()
+
+
 MANAGER_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ONIX · Пополнение: руководитель</title><style>
@@ -533,8 +577,8 @@ def manager_replenishment_create():
         return jsonify(error="МойСклад временно недоступен; непроверенная задача не создана"), 502
     if not product or str(product.get("article") or "").strip().casefold() != article.casefold():
         return jsonify(error="Товар и артикул не соответствуют МойСклад"), 409
-    if not query_one("SELECT id FROM replenishment_locations WHERE label = ? AND active = 1", (line,)):
-        return jsonify(error="Зарегистрируй ячейку назначения и распечатай этикетку"), 409
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
     actor = get_session_employee()
     admin_name = actor["name"] if actor and actor["role"] == "manager" else "Руководитель (ПК)"
     task_id = str(uuid.uuid4())
@@ -542,9 +586,15 @@ def manager_replenishment_create():
     with db_connect() as conn:
         cur = conn.cursor()
         try:
-            cur.execute(sql("SELECT id FROM replenishment_tasks WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1"), (article, line))
-            if cur.fetchone():
-                return jsonify(error="По этому артикулу и ячейке уже есть открытая задача"), 409
+            conflict = _check_destination(cur, line, product_id, article)
+            if conflict:
+                return jsonify(error=conflict), 409
+            existing = _open_location_task(cur, line)
+            if existing:
+                return jsonify(
+                    error="По ячейке уже есть открытое пополнение: "
+                    + str(existing[1]) + ". Заверши или отмени его перед новым заданием."
+                ), 409
             cur.execute(sql("""
                 INSERT INTO replenishment_tasks
                 (id, article, line_code, planned_qty, priority, note, status, created_at, created_by,
@@ -574,6 +624,8 @@ def manager_replenishment_action():
         return jsonify(error="Укажи действие и причину от 5 до 500 символов"), 400
     employee = get_session_employee()
     actor = employee["name"] if employee and employee["role"] == "manager" else "Руководитель (ПК)"
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
     with db_connect() as conn:
         cur = conn.cursor()
         try:
@@ -587,9 +639,14 @@ def manager_replenishment_action():
             elif action == "reopen":
                 from_status = ("blocked",)
                 new_status = "new"
-                cur.execute(sql("SELECT id FROM replenishment_tasks WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1"), (row[1], row[2]))
-                if cur.fetchone():
-                    return jsonify(error="Уже есть другая открытая задача по этому артикулу и ячейке"), 409
+                existing = _open_location_task(cur, row[2], exclude_id=task_id)
+                if existing:
+                    return jsonify(error="По ячейке уже есть другая открытая задача: "+str(existing[1])), 409
+                cur.execute(sql("SELECT product_id FROM replenishment_tasks WHERE id=?", (task_id,))
+                product_id = cur.fetchone()[0]
+                conflict = _check_destination(cur, row[2], product_id, row[1])
+                if conflict:
+                    return jsonify(error=conflict), 409
             else:
                 from_status = ("new",)
                 new_status = "new"
@@ -651,6 +708,8 @@ def worker_replenishment_self_create():
     line = str(data.get("line") or "").strip().upper()
     if not 3 <= len(barcode) <= 160 or not 1 <= len(line) <= 80:
         return jsonify(error="Сканируй ШК товара и выбери зарегистрированную ячейку"), 400
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
     if not query_one("SELECT id FROM replenishment_locations WHERE label = ? AND active = 1", (line,)):
         return jsonify(error="Ячейка не зарегистрирована руководителем"), 409
     try:
@@ -668,12 +727,15 @@ def worker_replenishment_self_create():
         with db_connect() as conn:
             cur = conn.cursor()
             try:
-                cur.execute(sql("""
-                    SELECT id FROM replenishment_tasks
-                    WHERE article = ? AND line_code = ? AND status IN ('new','started') LIMIT 1
-                """), (article, line))
-                if cur.fetchone():
-                    return jsonify(error="Задача по этому артикулу и ячейке уже есть. Выбери её ниже."), 409
+                conflict = _check_destination(cur, line, product_id, article)
+                if conflict:
+                    return jsonify(error=conflict), 409
+                existing = _open_location_task(cur, line)
+                if existing:
+                    return jsonify(
+                        error="Ячейка уже пополняется: " + str(existing[1])
+                        + ". Закончи или отмени действующее задание."
+                    ), 409
                 cur.execute(sql("""
                     INSERT INTO replenishment_tasks
                     (id, article, line_code, planned_qty, priority, note, status,
@@ -718,10 +780,34 @@ def worker_replenishment_action():
         return jsonify(error="Фактическое количество должно быть целым положительным числом"), 400
     if action == "block" and not 5 <= len(note) <= 500:
         return jsonify(error="Укажи причину проблемы от 5 до 500 символов"), 400
+    from cell_audit import ensure_cell_audit_db
+    ensure_cell_audit_db()
     with db_connect() as conn:
         cur = conn.cursor()
         try:
+            if action in ("start", "complete"):
+                cur.execute(sql("""
+                    SELECT article, line_code, product_id FROM replenishment_tasks
+                    WHERE id = ?
+                """), (task_id,))
+                current = cur.fetchone()
+                if not current:
+                    return jsonify(error="Задача не найдена"), 404
+                article, line, product_id = current
+                conflict = _check_destination(cur, line, product_id, article)
+                if conflict:
+                    return jsonify(error=conflict), 409
             if action == "start":
+                existing = _open_location_task(cur, line, exclude_id=task_id)
+                if existing and existing[0] != task_id:
+                    # An existing queued item may be valid legacy data. Do not
+                    # take a second task into work while another is started.
+                    cur.execute(sql("""
+                        SELECT 1 FROM replenishment_tasks
+                        WHERE line_code=? AND status='started' AND id<>? LIMIT 1
+                    """), (line, task_id))
+                    if cur.fetchone():
+                        return jsonify(error="Ячейка уже пополняется другим заданием"), 409
                 cur.execute(sql("""
                     UPDATE replenishment_tasks
                     SET status = 'started', assigned_employee_id = ?, started_at = ?
