@@ -22,10 +22,10 @@ MAX_LINES_PER_PAGE = 50
 
 # These are display-only hints, never authoritative data for stock or picking.
 ARTICLE_HINT = re.compile(
-    r"(?iu)(?:артикул|арт\\.|seller\\s*sku|vendor\\s*code)\\s*"
-    r"[:№#\\-]?\\s*([a-zа-я0-9][a-zа-я0-9._/-]{1,85})"
+    r"(?iu)(?:артикул|арт\.|seller\s*sku|vendor\s*code)\s*"
+    r"[:№#\-]?\s*([a-zа-я0-9][a-zа-я0-9._/-]{1,85})"
 )
-NUMBER_HINT = re.compile(r"(?<!\\d)\\d{8,20}(?!\\d)")
+NUMBER_HINT = re.compile(r"(?<!\d)\d{8,20}(?!\d)")
 
 
 def _sample_indices(count):
@@ -51,7 +51,7 @@ def inspect_pdf(content):
         raise ValueError("PDF-файл пустой")
     if len(content) > MAX_BYTES:
         raise ValueError("PDF слишком большой. Максимум 25 МБ")
-    if not content.lstrip(b"\\xef\\xbb\\xbf\\x00\\x09\\x0a\\x0d\\x20").startswith(b"%PDF-"):
+    if not content.lstrip(b"\xef\xbb\xbf\x00\x09\x0a\x0d\x20").startswith(b"%PDF-"):
         raise ValueError("Это не PDF-файл: неверный формат содержимого")
 
     import fitz  # PyMuPDF
@@ -88,11 +88,11 @@ def inspect_pdf(content):
                 image_only += 1
 
             lines = [
-                re.sub(r"\\s+", " ", line).strip()[:MAX_LINE_CHARS]
+                re.sub(r"\s+", " ", line).strip()[:MAX_LINE_CHARS]
                 for line in raw.splitlines()
                 if line.strip()
             ][:MAX_LINES_PER_PAGE]
-            shown_text = "\\n".join(lines)
+            shown_text = "\n".join(lines)
             if len(shown_text) > MAX_TEXT_PER_PAGE:
                 shown_text = shown_text[:MAX_TEXT_PER_PAGE] + "…"
 
@@ -179,5 +179,5 @@ def fbs_pdf_preview():
     except Exception:
         # Do not leak library exception details or server file paths.
         return jsonify(error="Ошибка обработки PDF. Файл не импортирован"), 422
-    filename = Path((upload.filename or "").replace("\\\\", "/")).name[:160]
+    filename = Path((upload.filename or "").replace("\\", "/")).name[:160]
     return jsonify(filename=filename, **result)
