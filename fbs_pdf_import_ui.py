@@ -27,6 +27,12 @@ details{border:1px solid #dce5ec;border-radius:10px;background:#fff;margin:10px 
 summary{padding:13px;cursor:pointer;font-weight:750}
 .sample{padding:0 13px 14px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,Consolas,monospace;color:#26394a;background:#eef3f6;padding:12px;border-radius:8px;max-height:280px;overflow:auto}
+.tablewrap{overflow:auto;max-height:650px;border:1px solid #dce5ec;border-radius:9px}
+table{border-collapse:collapse;min-width:940px;width:100%;font-size:12px;background:white}
+th,td{padding:9px;border-bottom:1px solid #e1e8ed;text-align:left;vertical-align:top}
+th{position:sticky;top:0;background:#eaf0f4;z-index:1}
+.pass{color:#206744;font-weight:800}.fail{color:#a23c3c;font-weight:800}
+.hint{color:#8c611b;font-size:12px}.printcode{font:11px ui-monospace,Consolas,monospace}
 .chip{display:inline-block;background:#e0ebf1;border-radius:8px;font-size:12px;padding:6px 8px;margin:3px}
 ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 @media(max-width:640px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:10px}}
@@ -49,6 +55,18 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 <p class="small" id="fileInfo"></p>
 <div id="hints"></div>
 </section>
+<section class="card" id="wb" hidden>
+<h2>WB FBS · Проверка всех стикеров</h2>
+<p id="wbStatus" class="notice"></p>
+<div class="summary" id="wbMetrics"></div>
+<p class="small" id="wbRule"></p>
+<div id="wbErrors"></div>
+<h2>Артикулы и закреплённые ячейки</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Товарный листок, стр.</th><th>Артикул</th><th>ШК товара</th><th>Заявлено</th><th>Стикеров WB</th><th>Проверка</th><th>Ячейки</th><th>Стикеры</th></tr></thead>
+<tbody id="wbProducts"></tbody></table></div>
+<p class="small">Точные адреса берутся из карты ONIX. Если SKU закреплён за несколькими ячейками, выбрать адрес автоматически нельзя. Данные остаются только в ответе текущей загрузки.</p>
+</section>
 <section class="card" id="results" hidden>
 <h2>Предпросмотр содержимого</h2>
 <p class="small">ONIX показывает текст и размеры выбранных страниц. Найденные числа и артикулы пока не считаются подтверждёнными заказами. Для сканированных этикеток без текстового слоя понадобится отдельный этап распознавания.</p>
@@ -58,13 +76,48 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 </main><script>
 const form=document.getElementById('form'),button=document.getElementById('submit');
 const msg=document.getElementById('message'),summary=document.getElementById('summary');
-const results=document.getElementById('results');
+const results=document.getElementById('results'),wbEl=document.getElementById('wb');
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function metric(label,value){return '<div class="metric"><div class="l">'+esc(label)+'</div><div class="v">'+esc(value)+'</div></div>'}
+function renderWB(d){
+ const w=d.wb_report;
+ if(!w){wbEl.hidden=true;return}
+ wbEl.hidden=false;
+ const good=w.valid_structure;
+ document.getElementById('wbStatus').className='notice'+(good?' good':' error');
+ document.getElementById('wbStatus').textContent=good?
+  '✓ Весь файл согласован: количество уникальных ШК WB равно заявленным количествам по SKU. Это ещё не подтверждение от WB API.':
+  '⚠ В документе есть ошибки структуры или количества! Автоматические действия запрещены.';
+ document.getElementById('wbMetrics').innerHTML=[
+  metric('Проверено страниц',w.pages_checked),
+  metric('Стикеров WB',w.sticker_pages),
+  metric('Артикулов',w.unique_articles),
+  metric('Повторов листка',w.repeat_product_sheets),
+  metric('Ячейка найдена',w.locations_available?w.one_location_articles:'н/д'),
+  metric('Без адреса',w.locations_available?w.without_location_articles:'н/д'),
+  metric('Несколько адресов',w.locations_available?w.multi_location_articles:'н/д'),
+  metric('Структурных ошибок',w.errors.length)
+ ].join('');
+ document.getElementById('wbRule').textContent=w.counting_rule+' '+w.barcode_verification;
+ const errors=(w.errors||[]).map(e=>'<div class="notice error">Стр. '+e.page+': '+esc(e.message)+'</div>').join('');
+ document.getElementById('wbErrors').innerHTML=
+  (w.locations_error?'<div class="notice">'+esc(w.locations_error)+'</div>':'')+errors;
+ document.getElementById('wbProducts').innerHTML=(w.products||[]).map(p=>{
+  const sheet=p.sheet_pages.join(', ');
+  const locations=w.locations_available?(p.locations.length?p.locations.join(', '):'Не привязан'):'Нет доступа к карте';
+  const stickers=(p.stickers||[]).map(x=>'<div class="printcode">'+x.page+': '+esc(x.barcode)+'</div>').join('');
+  return '<tr><td>'+esc(sheet)+'</td><td><b>'+esc(p.article)+'</b></td>'+
+   '<td class="printcode">'+esc(p.product_barcode)+'</td>'+
+   '<td>'+p.declared_qty+'</td><td>'+p.sticker_count+'</td>'+
+   '<td class="'+(p.quantity_matches?'pass':'fail')+'">'+(p.quantity_matches?'✓':'Ошибка')+'</td>'+
+   '<td>'+esc(locations)+'</td>'+
+   '<td><details><summary>Показать ('+p.sticker_count+')</summary><div class="sample">'+stickers+'</div></details></td></tr>';
+ }).join('');
+}
 function render(d){
- const sampled=d.sampled_pages||0;
+ const sampled=d.sampled_pages||0;renderWB(d);
  document.getElementById('metrics').innerHTML=[
-  metric('Страниц PDF',d.pages),metric('Просмотрено',sampled),
+  metric('Страниц PDF',d.pages),metric('Текст: выборка',sampled),
   metric('Текст найден',d.text_pages_in_sample),metric('Создано заданий',d.tasks_created)
  ].join('');
  document.getElementById('fileInfo').textContent='Файл: '+d.filename+' · '+(d.file_bytes/1048576).toFixed(2)+
@@ -89,7 +142,7 @@ form.addEventListener('submit',async e=>{
  const file=document.getElementById('pdf').files[0];
  if(!file){msg.textContent='Выбери PDF';return}
  if(file.size>25*1024*1024){msg.className='error';msg.textContent='PDF больше 25 МБ';return}
- button.disabled=true;summary.hidden=true;results.hidden=true;
+ button.disabled=true;summary.hidden=true;results.hidden=true;wbEl.hidden=true;
  msg.className='';msg.textContent='Проверяю PDF…';
  try{
   const formData=new FormData();formData.append('file',file);
