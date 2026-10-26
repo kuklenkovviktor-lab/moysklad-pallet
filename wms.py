@@ -1757,6 +1757,7 @@ STATS_PAGE = """<!doctype html>
  <div class="brand"><b>📦 ONIX WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
+  <a href="/manager/shift-history">📊 История смен</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
