@@ -145,7 +145,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
         ordinal=escape(label.get('number','1/1'))
         actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print">QR / Печать</a>'
         if state=='created':
-            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit?back='+safe_id+'">Изменить</a>'
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit">Изменить</a>'
         table_rows.append('<tr><td data-label="Артикул"><span class="article">'+sku+'</span></td>'
                           '<td data-label="Палета"><span class="pallet-num">'+ordinal+'</span></td>'
                           '<td data-label="Статус">'+status_html(state)+'</td>'
@@ -285,7 +285,7 @@ def shipment_detail_view(token, day, shipment_id, rows, labels, widget):
         d=labels.get(pid,{})
         actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print">QR / Печать</a>'
         if status=='created':
-            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit">Изменить</a>'
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit?back='+safe_id+'">Изменить</a>'
         table.append('<tr><td>'+escape(d.get("article") or article)+'</td><td>'+
           escape(d.get("number") or "1/1")+'</td><td>'+status_html(status)+'</td><td class="action-links">'+actions+'</td></tr>')
     safe_token=escape(token,quote=True)
