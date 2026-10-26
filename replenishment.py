@@ -647,7 +647,7 @@ def manager_replenishment_action():
                 existing = _open_location_task(cur, row[2], exclude_id=task_id)
                 if existing:
                     return jsonify(error="По ячейке уже есть другая открытая задача: "+str(existing[1])), 409
-                cur.execute(sql("SELECT product_id FROM replenishment_tasks WHERE id=?", (task_id,))
+                cur.execute(sql("SELECT product_id FROM replenishment_tasks WHERE id=?"), (task_id,))
                 product_id = cur.fetchone()[0]
                 conflict = _check_destination(cur, row[2], product_id, row[1])
                 if conflict:
