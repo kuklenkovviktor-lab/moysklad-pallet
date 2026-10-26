@@ -13,7 +13,7 @@ import qrcode
 from flask import Blueprint, abort, jsonify, redirect, request, session, url_for, Response
 from openpyxl import load_workbook
 from wms import db_connect, manager_access, sql, DATABASE_URL
-from partner_portal_ui import page as portal_page, dashboard_view, edit_view
+from partner_portal_ui import page as portal_page, dashboard_view, edit_view, shipment_list_view, shipment_detail_view
 
 partner_bp = Blueprint("partners", __name__)
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -58,6 +58,12 @@ def db_init():
             columns = [row[1] for row in cur.execute("PRAGMA table_info(partner_pallets)").fetchall()]
             if "accepted_at" not in columns:
                 cur.execute("ALTER TABLE partner_pallets ADD COLUMN accepted_at TEXT")
+        if DATABASE_URL:
+            cur.execute("ALTER TABLE partner_uploads ADD COLUMN IF NOT EXISTS planned_date TEXT")
+        else:
+            columns = [r[1] for r in cur.execute("PRAGMA table_info(partner_uploads)").fetchall()]
+            if "planned_date" not in columns:
+                cur.execute("ALTER TABLE partner_uploads ADD COLUMN planned_date TEXT")
         db.commit()
 
 def resolve_receiving_pallet(barcode):
@@ -337,6 +343,127 @@ def partner_pallet_display(partner_id):
     return result
 
 
+
+def _shipment_choices(partner_id):
+    with db_connect() as db:
+        return db.cursor().execute(sql("""
+            SELECT u.id, u.planned_date, COUNT(p.id)
+            FROM partner_uploads u LEFT JOIN partner_pallets p
+              ON p.upload_id=u.id AND p.partner_id=u.partner_id
+            WHERE u.partner_id=? AND u.planned_date IS NOT NULL
+            GROUP BY u.id,u.planned_date ORDER BY u.planned_date DESC,u.created_at DESC
+            LIMIT 100
+        """), (partner_id,)).fetchall()
+
+
+def _selected_shipment(cur, partner_id, shipment_id):
+    if not shipment_id:
+        return None
+    row = cur.execute(sql("""
+        SELECT id FROM partner_uploads WHERE id=? AND partner_id=?
+        AND planned_date IS NOT NULL
+    """), (shipment_id,partner_id)).fetchone()
+    if not row:
+        abort(404)
+    return row[0]
+
+
+@partner_bp.get("/partners/shipments")
+def shipments_page():
+    db_init()
+    p=require_partner()
+    return shipment_list_view(p[1], csrf(), _shipment_choices(p[0]))
+
+
+@partner_bp.post("/partners/shipments/new")
+def shipment_create():
+    from datetime import date
+    db_init()
+    p=require_partner()
+    require_csrf()
+    day=str(request.form.get("planned_date") or "")
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        return page("Дата поставки","Неверная дата поставки"),400
+    sid=str(uuid.uuid4())
+    with db_connect() as db:
+        db.cursor().execute(sql("""
+            INSERT INTO partner_uploads (id,partner_id,filename,created_at,pallet_count,planned_date)
+            VALUES (?,?,?,?,?,?)
+        """), (sid,p[0],"поставка",now(),0,day))
+        db.commit()
+    return redirect("/partners/shipments/"+sid)
+
+
+def _shipment_rows(partner_id, sid):
+    with db_connect() as db:
+        cur=db.cursor()
+        shipment=cur.execute(sql("SELECT id,planned_date FROM partner_uploads WHERE id=? AND partner_id=? AND planned_date IS NOT NULL"),(sid,partner_id)).fetchone()
+        if not shipment:
+            abort(404)
+        rows=cur.execute(sql("""
+            SELECT p.id,p.barcode,p.status,p.created_at,
+              COALESCE((SELECT STRING_AGG(l.sku, ' / ') FROM partner_pallet_lines l WHERE l.pallet_id=p.id),'')
+            FROM partner_pallets p WHERE p.partner_id=? AND p.upload_id=?
+            ORDER BY p.created_at,p.id
+        """) if DATABASE_URL else sql("""
+            SELECT p.id,p.barcode,p.status,p.created_at,
+              COALESCE((SELECT GROUP_CONCAT(l.sku,' / ') FROM partner_pallet_lines l WHERE l.pallet_id=p.id),'')
+            FROM partner_pallets p WHERE p.partner_id=? AND p.upload_id=?
+            ORDER BY p.created_at,p.id
+        """),(partner_id,sid)).fetchall()
+    return shipment,rows
+
+
+@partner_bp.get("/partners/shipments/<shipment_id>")
+def shipment_detail(shipment_id):
+    db_init()
+    p=require_partner()
+    shipment,rows=_shipment_rows(p[0],shipment_id)
+    labels=partner_pallet_display(p[0])
+    return shipment_detail_view(csrf(), shipment[1], shipment_id, rows, labels, partner_catalog_widget())
+
+
+@partner_bp.get("/partners/shipments/<shipment_id>/print")
+def shipment_print(shipment_id):
+    db_init()
+    p=require_partner()
+    shipment,rows=_shipment_rows(p[0],shipment_id)
+    selected=request.args.get("only","all")
+    if selected not in ("all","created"):
+        abort(400)
+    chosen=[r for r in rows if selected=="all" or r[2]=="created"]
+    if not chosen:
+        return page("Печать поставки","Нет палет для выбранного режима печати"),404
+    if len(chosen)>500:
+        return page("Печать поставки","Слишком много палет для одного задания (максимум 500)"),413
+    labels=partner_pallet_display(p[0])
+    pages=[]
+    for pid,barcode,status,created,article_fallback in chosen:
+        display=labels.get(pid,{})
+        article=escape(display.get("article") or article_fallback or "Артикул не указан")
+        number=escape(display.get("number") or "1/1")
+        qr=qrcode.make(barcode)
+        out=io.BytesIO()
+        qr.save(out,format="PNG")
+        encoded=base64.b64encode(out.getvalue()).decode()
+        pages.append(f'<section class="sheet"><h1>ONIX · ПАЛЕТА</h1><div class="article">{article}</div><div class="number">{number}</div><img alt="QR палеты" src="data:image/png;base64,{encoded}"></section>')
+    return Response("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+    <title>ONIX · Печать поставки</title><style>
+    @page{size:A4 portrait;margin:0}*{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;margin:0;text-align:center}
+    .sheet{width:210mm;height:297mm;max-height:297mm;overflow:hidden;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;padding:16mm 14mm;break-after:page;page-break-after:always}
+    .sheet:last-child{break-after:auto;page-break-after:auto}
+    h1{font-size:27pt;margin:0 0 14mm}.article{font-size:32pt;font-weight:800;overflow-wrap:anywhere;max-width:180mm;margin-bottom:8mm}
+    .number{font-size:28pt;font-weight:750;margin-bottom:13mm}img{width:142mm;height:142mm;object-fit:contain}
+    .tools{padding:12px;background:#eaf0f5;text-align:left}
+    @media print{.tools{display:none}}
+    </style></head><body><div class="tools"><button onclick="window.print()">Распечатать все А4</button> · """+
+    str(len(chosen))+" палет</div>"+ "".join(pages)+"</body></html>",mimetype="text/html",headers={"Cache-Control":"no-store"})
+
+
 @partner_bp.route("/partners", methods=["GET"])
 def dashboard():
     db_init()
@@ -385,7 +512,8 @@ def dashboard():
                           current_page,page_count,total,
                           str(request.args.get("result","")),partner_catalog_widget(),
                           created_pallet=str(request.args.get("pallet",""))[:48],
-                          created_count=(int(request.args.get("count",0)) if str(request.args.get("count",0)).isdigit() else 0))
+                          created_count=(int(request.args.get("count",0)) if str(request.args.get("count",0)).isdigit() else 0),
+                           shipments=_shipment_choices(p[0]))
 
 
 @partner_bp.get("/partners/catalog/search")
@@ -490,16 +618,21 @@ def manual_create():
     except ValueError as exc:
         return page("Ошибка",escape(str(exc))),400
     pid,uid=str(uuid.uuid4()),str(uuid.uuid4())
+    shipment_id=str(request.form.get("shipment_id") or "").strip()
     with db_connect() as db:
         cur=db.cursor()
-        if not claim_partner_submission(cur,p[0],uid):
+        if shipment_id:
+            _selected_shipment(cur,p[0],shipment_id)
+            uid=shipment_id
+        if not claim_partner_submission(cur,p[0],str(uuid.uuid4())):
             return redirect("/partners?result=duplicate")
-        cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES (?,?,?,?,?)"),(uid,p[0],"вручную",now(),1))
+        if not shipment_id:
+            cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES (?,?,?,?,?)"),(uid,p[0],"вручную",now(),1))
         cur.execute(sql("INSERT INTO partner_pallets(id,partner_id,upload_id,external_ref,barcode,created_at) VALUES (?,?,?,?,?,?)"),(pid,p[0],uid,"Добавлена вручную","ONIX-PAL-"+uuid.uuid4().hex.upper(),now()))
         cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES (?,?,?,?)"),(str(uuid.uuid4()),pid,sku,qty))
         cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pid,p[0],"create",sku,qty,reason,now()))
         db.commit()
-    return redirect("/partners?result=created&pallet="+pid)
+    return redirect("/partners/shipments/"+shipment_id if shipment_id else "/partners?result=created&pallet="+pid)
 
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
@@ -518,6 +651,12 @@ def manual_edit(pallet_id):
         lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=?"),(pallet_id,)).fetchall()
         if len(lines)!=1:
             return page("Изменение запрещено","Редактирование смешанной палеты пока недоступно"),409
+        back=str(request.form.get("back") if request.method=="POST" else request.args.get("back") or "").strip()
+        if back:
+            chosen=cur.execute(sql("SELECT upload_id FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
+            check=cur.execute(sql("SELECT id FROM partner_uploads WHERE id=? AND partner_id=? AND planned_date IS NOT NULL"),(back,p[0])).fetchone()
+            if not check or not chosen or chosen[0]!=back:
+                back=""
         if request.method=="POST":
             try:
                 sku,qty,reason=_manual_fields(request.form)
@@ -529,10 +668,10 @@ def manual_edit(pallet_id):
             cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=?"),(sku,qty,lines[0][0]))
             cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pallet_id,p[0],"edit",lines[0][1],lines[0][2],sku,qty,reason,now()))
             db.commit()
-            return redirect("/partners")
+            return redirect("/partners/shipments/"+back if back else "/partners")
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget())
+    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget(),back=back)
 
 
 @partner_bp.post("/partners/upload")
@@ -548,12 +687,17 @@ def upload():
     except (ValueError, OSError, StopIteration) as exc:
         return page("Ошибка Excel", f'<section class="error">{escape(str(exc))}</section><a href="/partners">Назад</a>'), 400
     upload_id = str(uuid.uuid4())
+    shipment_id=str(request.form.get("shipment_id") or "").strip()
     with db_connect() as db:
         cur = db.cursor()
-        if not claim_partner_submission(cur,p[0],upload_id):
+        if shipment_id:
+            _selected_shipment(cur,p[0],shipment_id)
+            upload_id=shipment_id
+        if not claim_partner_submission(cur,p[0],str(uuid.uuid4())):
             return redirect("/partners?result=duplicate")
-        cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES(?,?,?,?,?)"),
-                    (upload_id, p[0], file.filename[:255], now(), len(groups)))
+        if not shipment_id:
+            cur.execute(sql("INSERT INTO partner_uploads(id,partner_id,filename,created_at,pallet_count) VALUES(?,?,?,?,?)"),
+                        (upload_id, p[0], file.filename[:255], now(), len(groups)))
         for ref, lines in groups.items():
             pallet_id = str(uuid.uuid4())
             barcode = "ONIX-PAL-" + uuid.uuid4().hex.upper()
@@ -563,7 +707,7 @@ def upload():
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
         db.commit()
-    return redirect("/partners?result=uploaded&count="+str(len(groups)))
+    return redirect("/partners/shipments/"+shipment_id if shipment_id else "/partners?result=uploaded&count="+str(len(groups)))
 
 @partner_bp.get("/partners/pallet/<pallet_id>/print")
 def print_label(pallet_id):
