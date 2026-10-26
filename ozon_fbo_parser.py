@@ -18,6 +18,7 @@ MAX_COMPRESSED = 8 * 1024 * 1024
 MAX_UNCOMPRESSED = 35 * 1024 * 1024
 MAX_ROWS = 15000
 MAX_ITEMS = 10000
+MAX_COLUMNS = 256  # Support up to 64 cargo blocks per sheet.
 
 
 def _column(ref):
@@ -30,9 +31,19 @@ def _column(ref):
     return value - 1
 
 
+def _column_label(index):
+    """Convert zero-based column number to Excel letters (including AA+)."""
+    result = ""
+    index += 1
+    while index:
+        index, digit = divmod(index - 1, 26)
+        result = chr(65 + digit) + result
+    return result
+
+
 def _cell_value(cell, strings):
-    if cell.find(MAIN + "f") is not None:
-        raise ValueError("Формулы в данных поставки не допускаются")
+    # Cached formula results in summary rows are ignored; formulas in real
+    # cargo rows are rejected after identifying each four-column data block.
     t = cell.get("t") or ""
     if t == "inlineStr":
         inline = cell.find(MAIN + "is")
@@ -72,8 +83,16 @@ def _load_sheet(z, xml_path, strings):
         values = {}
         for cell in row.findall(MAIN + "c"):
             idx = _column(cell.get("r", ""))
-            if 0 <= idx < 32:
-                values[idx] = (_cell_value(cell, strings), cell.get("t") or "n")
+            if idx >= MAX_COLUMNS:
+                if cell.find(MAIN + "v") is not None or cell.find(MAIN + "f") is not None:
+                    raise ValueError("Слишком много столбцов в листе Excel (максимум 256)")
+                continue
+            if idx >= 0:
+                values[idx] = (
+                    _cell_value(cell, strings),
+                    cell.get("t") or "n",
+                    cell.find(MAIN + "f") is not None,
+                )
         rows.append((int(row.get("r") or len(rows) + 1), values))
         if len(rows) > MAX_ROWS:
             raise ValueError("Слишком много строк в одном листе Excel")
@@ -115,6 +134,7 @@ def parse_ozon_xlsx(blob):
         errors = []
         seen = {}
         barcode_articles = {}
+        gm_sources = {}
         total_lines = 0
         for sheet in wb.findall(".//" + MAIN + "sheets/" + MAIN + "sheet"):
             sheet_name = (sheet.get("name") or "").strip()
@@ -126,12 +146,21 @@ def parse_ozon_xlsx(blob):
                 continue
             headers = rows[0][1]
             blocks = []
-            for start in (0, 4):
+            for start in range(0, MAX_COLUMNS, 4):
                 if not any(start <= col < start + 4 for col in headers):
                     continue
                 captions = [_value_text(headers.get(start + i, ("", ""))[0]).casefold() for i in range(4)]
+                # Ignore auxiliary headings but reject malformed cargo blocks.
+                candidate = (
+                    "шк" in captions[0] or "кол" in captions[2] or "шк" in captions[3]
+                )
+                if not candidate:
+                    continue
                 if "шк" not in captions[0] or "кол" not in captions[2] or "шк" not in captions[3]:
-                    errors.append(f"Лист «{sheet_name}»: ожидались колонки ШК товара, артикул, количество, ШК ГМ")
+                    errors.append(
+                        f"Лист «{sheet_name}», блок {_column_label(start)}–{_column_label(start + 3)}: "
+                        "ожидались колонки ШК товара, артикул, количество, ШК ГМ"
+                    )
                     continue
                 blocks.append((start, _value_text(headers.get(start + 1, ("", ""))[0]) or sheet_name))
             if not blocks:
@@ -141,13 +170,17 @@ def parse_ozon_xlsx(blob):
             for excel_row, fields in rows[1:]:
                 for start, label in blocks:
                     data = [fields.get(start + i, ("", "")) for i in range(4)]
-                    if not any(_value_text(v[0]) for v in data):
+                    # Footers and summary tables have neither a product
+                    # barcode nor a cargo barcode, even when totals are formulas.
+                    if not _value_text(data[0][0]) and not _value_text(data[3][0]):
                         continue
                     total_lines += 1
                     if total_lines > MAX_ITEMS:
                         raise ValueError("В файле слишком много позиций")
-                    location = f"{sheet_name}!{chr(65 + start)}{excel_row}"
+                    location = f"{sheet_name}!{_column_label(start)}{excel_row}"
                     try:
+                        if any(len(v) > 2 and v[2] for v in data):
+                            raise ValueError("формула в товарной строке: замени её готовым значением")
                         barcode = _barcode(data[0], "ШК товара", location)
                         article = _value_text(data[1][0])
                         if not article or len(article) > 160:
@@ -172,6 +205,14 @@ def parse_ozon_xlsx(blob):
                         )
                         continue
                     barcode_articles[barcode] = article
+                    previous_source = gm_sources.get(gm)
+                    if previous_source and previous_source != (sheet_name, start):
+                        errors.append(
+                            f"{location}: ШК грузоместа {gm} указан в разных блоках "
+                            "или направлениях. Проверь Excel."
+                        )
+                        continue
+                    gm_sources[gm] = (sheet_name, start)
                     key = (gm, barcode, article.casefold())
                     old = seen.get(key)
                     if old:
