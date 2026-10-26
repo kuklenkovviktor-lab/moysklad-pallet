@@ -59,6 +59,49 @@ class PartnerPalletTests(unittest.TestCase):
         return self.client.post("/partners/upload", data={"csrf": self.token, "file": (workbook(rows), name)},
                                 content_type="multipart/form-data")
 
+    def test_shipment_creation_grouping_batch_print_and_edit(self):
+        from wms import query_all
+        created=self.client.post("/partners/shipments/new",data={
+            "csrf":self.token,"planned_date":"2026-10-27"})
+        self.assertEqual(created.status_code,302,created.data[:300])
+        sid=created.location.rsplit("/",1)[-1]
+        self.assertIn("2026-10-27",self.client.get(created.location).data.decode())
+        for qty in ("24","36"):
+            r=self.client.post("/partners/pallet/new",data={
+                "csrf":self.token,"shipment_id":sid,"article":"SKU_NEW",
+                "quantity":qty,"reason":"Дополнение поставки"})
+            self.assertEqual(r.status_code,302,r.data[:200])
+        self.assertEqual(self.client.get(created.location).status_code,200)
+        with self.client.session_transaction(path="/partners") as session:
+            partner_id=session["partner_id"]
+        rows=query_all("""SELECT id,barcode FROM partner_pallets
+            WHERE partner_id=? AND upload_id=?""",(partner_id,sid))
+        self.assertEqual(len(rows),2)
+        batch=self.client.get(created.location+"/print")
+        self.assertEqual(batch.status_code,200,batch.data[:200])
+        self.assertEqual(batch.data.count(b'class="sheet"'),2)
+        self.assertIn(b"size:A4 portrait",batch.data)
+        self.assertNotIn(rows[0][1].encode(),batch.data)
+        self.assertNotIn(rows[1][1].encode(),batch.data)
+        self.assertEqual(self.client.get(created.location+"/print?only=created").status_code,200)
+        edit=self.client.get("/partners/pallet/"+rows[0][0]+"/edit")
+        self.assertEqual(edit.status_code,200)
+        self.assertIn("Поставки",self.client.get("/partners").data.decode("utf-8"))
+
+    def test_shipments_are_private_and_require_csrf(self):
+        r=self.client.post("/partners/shipments/new",data={"planned_date":"2026-10-27"})
+        self.assertEqual(r.status_code,403)
+        r=self.client.post("/partners/shipments/new",data={
+           "csrf":self.token,"planned_date":"2026-10-27"})
+        sid=r.location.rsplit("/",1)[-1]
+        with self.client.session_transaction(path="/partners") as session:
+            pid=session["partner_id"]
+            session["partner_id"]="other-partner"
+        self.assertEqual(self.client.get("/partners/shipments/"+sid).status_code,404)
+        self.assertEqual(self.client.get("/partners/shipments/"+sid+"/print").status_code,404)
+        with self.client.session_transaction(path="/partners") as session:
+            session["partner_id"]=pid
+
     def test_unique_pallets_grouping_and_history(self):
         r = self.upload([("Палета", "Артикул", "Количество"), ("P1", "SKU1", 10),
                          ("P1", "SKU2", 3), ("P2", "SKU3", 8)])
