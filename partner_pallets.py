@@ -651,6 +651,12 @@ def manual_edit(pallet_id):
         lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=?"),(pallet_id,)).fetchall()
         if len(lines)!=1:
             return page("Изменение запрещено","Редактирование смешанной палеты пока недоступно"),409
+        back=str(request.form.get("back") if request.method=="POST" else request.args.get("back") or "").strip()
+        if back:
+            chosen=cur.execute(sql("SELECT upload_id FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
+            check=cur.execute(sql("SELECT id FROM partner_uploads WHERE id=? AND partner_id=? AND planned_date IS NOT NULL"),(back,p[0])).fetchone()
+            if not check or not chosen or chosen[0]!=back:
+                back=""
         if request.method=="POST":
             try:
                 sku,qty,reason=_manual_fields(request.form)
@@ -662,10 +668,10 @@ def manual_edit(pallet_id):
             cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=?"),(sku,qty,lines[0][0]))
             cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pallet_id,p[0],"edit",lines[0][1],lines[0][2],sku,qty,reason,now()))
             db.commit()
-            return redirect("/partners")
+            return redirect("/partners/shipments/"+back if back else "/partners")
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget())
+    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget(),back=back)
 
 
 @partner_bp.post("/partners/upload")
