@@ -97,8 +97,8 @@ class PartnerPalletTests(unittest.TestCase):
         with self.client.session_transaction(path="/partners") as session:
             pid=session["partner_id"]
             session["partner_id"]="other-partner"
-        self.assertEqual(self.client.get("/partners/shipments/"+sid).status_code,404)
-        self.assertEqual(self.client.get("/partners/shipments/"+sid+"/print").status_code,404)
+        self.assertEqual(self.client.get("/partners/shipments/"+sid).status_code,302)
+        self.assertEqual(self.client.get("/partners/shipments/"+sid+"/print").status_code,302)
         with self.client.session_transaction(path="/partners") as session:
             session["partner_id"]=pid
 
