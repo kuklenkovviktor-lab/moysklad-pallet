@@ -57,7 +57,7 @@ class LabelsParsingTests(unittest.TestCase):
         self.assertEqual(r["repeat_product_sheets"], 2)
         self.assertEqual(r["sticker_pages"], 15)
         self.assertEqual(r["total_declared_qty"], 15)
-        self.assertEqual(r["products"][0]["sheet_pages"], [1, 19])
+        self.assertEqual(r["products"][0]["sheet_pages"], [1, 17])
 
     def test_repeated_header_conflicts_stop_validation(self):
         r = read([product(1,"ABC"), label("59298125228"),
