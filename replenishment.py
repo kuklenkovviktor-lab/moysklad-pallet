@@ -1,7 +1,7 @@
 """ONIX WMS: independent replenishment task queue. No inventory or scanning mutations."""
 import uuid
 from flask import Blueprint, jsonify, redirect, request
-from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
+from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql, DATABASE_URL
 
 replenishment_bp = Blueprint("replenishment", __name__)
 
@@ -50,12 +50,15 @@ def _check_destination(cur, line, product_id, article):
     distinct concepts. Binding stays a separate manager action.
     The caller must initialize cell_audit tables before entering a DB tx.
     """
-    cur.execute(sql("""
+    query = """
         SELECT l.id, a.product_id, a.article
         FROM replenishment_locations l
         LEFT JOIN cell_sku_assignments a ON a.location_id = l.id
         WHERE l.label = ? AND l.active = 1
-    """), (line,))
+    """
+    if DATABASE_URL:
+        query += " FOR UPDATE OF l"
+    cur.execute(sql(query), (line,))
     found = cur.fetchone()
     if not found:
         return "Ячейка не зарегистрирована или выведена из эксплуатации"
@@ -586,6 +589,8 @@ def manager_replenishment_create():
     with db_connect() as conn:
         cur = conn.cursor()
         try:
+            if not DATABASE_URL:
+                cur.execute("BEGIN IMMEDIATE")
             conflict = _check_destination(cur, line, product_id, article)
             if conflict:
                 return jsonify(error=conflict), 409
@@ -727,6 +732,8 @@ def worker_replenishment_self_create():
         with db_connect() as conn:
             cur = conn.cursor()
             try:
+                if not DATABASE_URL:
+                    cur.execute("BEGIN IMMEDIATE")
                 conflict = _check_destination(cur, line, product_id, article)
                 if conflict:
                     return jsonify(error=conflict), 409
