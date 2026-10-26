@@ -1758,6 +1758,7 @@ STATS_PAGE = """<!doctype html>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/manager/shift-history">📊 История смен</a>
+  <a href="/manager/fbs-pdf">📄 Загрузка PDF FBS</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
   <a href="/history">🔎 История ШК</a>
   <a href="/receiving-monitor">📥 Приёмка</a>
