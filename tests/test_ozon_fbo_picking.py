@@ -48,6 +48,11 @@ class FboPickingTests(unittest.TestCase):
              (self.item,self.cid,"4601234567890","TEST-ART",5,"Москва!A2"))
         self.as_employee("anton")
 
+    def tearDown(self):
+        # Isolate the one-active-cargo-per-employee invariant across tests.
+        # Every test creates its own cargo; release its employee claim.
+        execute("UPDATE ozon_fbo_cargo SET claimed_employee_id=NULL WHERE id=?", (self.cid,))
+
     def as_employee(self, value):
         with self.client.session_transaction() as ses:
             ses.clear()
