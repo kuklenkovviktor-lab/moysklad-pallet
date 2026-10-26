@@ -64,7 +64,7 @@ def _value_text(value):
 
 
 def _barcode(cell, caption, source):
-    value, kind = cell
+    value, kind = cell[:2]
     code = _value_text(value).replace(" ", "").replace("\u00a0", "")
     if not code:
         raise ValueError(f"{source}: не указан {caption}")
