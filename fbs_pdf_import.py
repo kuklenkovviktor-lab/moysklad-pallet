@@ -131,7 +131,19 @@ def inspect_pdf(content):
             "ШК заказов, артикулы и количества ещё не подтверждены. "
             "Никакие задания и остатки не изменены."
         )
+        from fbs_pdf_labels import parse_wb_labels, attach_active_locations
+        wb_report = attach_active_locations(parse_wb_labels(document))
+        if wb_report is not None:
+            issues = [
+                "Проверен весь PDF: товарные листки и стикеры WB. "
+                "Это только предварительный разбор, не запись заказов в ONIX.",
+                "ШК стикеров извлечены из печатного текста. "
+                "Сопоставление со сканером и API WB пока не подтверждено.",
+            ]
+            if not wb_report["valid_structure"]:
+                issues.append("Есть ошибки структуры PDF: результат нельзя использовать для распределения заданий.")
         return {
+            "wb_report": wb_report,
             "sha256": hashlib.sha256(content).hexdigest(),
             "file_bytes": len(content),
             "pages": page_count,
