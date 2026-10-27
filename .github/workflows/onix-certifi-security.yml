@@ -28,11 +28,15 @@ jobs:
           from importlib.metadata import version
           import certifi
           import requests
+          import pip
           from pathlib import Path
           installed = version('certifi')
           version_tuple = tuple(int(x) for x in installed.split('.')[:3])
           assert version_tuple >= (2026, 10, 19), f'Version {installed} is vulnerable'
           assert Path(requests.certs.where()).resolve() == Path(certifi.where()).resolve()
+          installed_pip = version('pip')
+          assert tuple(int(x) for x in installed_pip.split('.')[:3]) >= (26, 2, 2), f'pip {installed_pip} is vulnerable'
           print('Patched certifi:', installed)
+          print('Patched pip:', installed_pip)
           print('Requests CA source: certifi')
           PY
