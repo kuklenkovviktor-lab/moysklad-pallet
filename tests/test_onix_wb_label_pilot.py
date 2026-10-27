@@ -46,10 +46,18 @@ def product(qty, sku="1234_TEST"):
             f"Артикул:\n{sku}")
 
 
+def put_product(page, text):
+    # PDF's built-in Helvetica cannot encode Cyrillic. An embedded Unicode
+    # font ensures the production ONIX parser sees the real Russian headings.
+    fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    page.insert_font(fontname="deja",fontfile=fontfile)
+    page.insert_text((10,12),text,fontsize=9,fontname="deja")
+
+
 def pdf_fixture(path, labels, extra_unknown=False):
     document = fitz.open()
     sheet = document.new_page(width=220,height=190)
-    sheet.insert_text((10,12),product(len(labels)),fontsize=9)
+    put_product(sheet,product(len(labels)))
     for code in labels:
         sticker = document.new_page(width=113.39, height=85.04)  # 40x30 mm
         sticker.insert_text((5,13),"WB "+code,fontsize=9)
@@ -139,7 +147,7 @@ class PilotTests(unittest.TestCase):
         with fitz.open(self.pdf) as d:
             new = fitz.open()
             s = new.new_page(width=220,height=190)
-            s.insert_text((10,12),product(2),fontsize=9)
+            put_product(s,product(2))
             new.insert_pdf(d,from_page=1,to_page=1)
             new.save(self.pdf.with_name("mismatch.pdf"))
             new.close()
@@ -156,7 +164,7 @@ class PilotTests(unittest.TestCase):
     def test_rejects_label_page_thats_a4(self):
         doc=fitz.open()
         sheet=doc.new_page(width=220,height=190)
-        sheet.insert_text((10,12),product(1),fontsize=9)
+        put_product(sheet,product(1))
         sticker=doc.new_page(width=595,height=842)
         sticker.insert_text((10,15),"WB "+self.code,fontsize=9)
         doc.save(self.pdf.with_name("big.pdf"))
