@@ -147,7 +147,7 @@ class PilotTests(unittest.TestCase):
             pilot.write_review(self.pdf.with_name("mismatch.pdf"),self.code)
 
     def test_packing_white_padding_and_black_pixels(self):
-        px=pilot.pack_monochrome(bytes([0,255,255,0]*20),4,20,4)
+        px=pilot.pack_monochrome(bytes([0,255,255,0]*30),4,30,4)
         self.assertEqual(len(px),40*240)
         self.assertEqual(px[:40], b"\xff"*40)
         self.assertNotEqual(px[110*40:111*40],b"\xff"*40)
