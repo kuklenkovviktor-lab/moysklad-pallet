@@ -343,6 +343,11 @@ def require_employee_login():
     if path.startswith("/partners/") or path == "/partners":
         return None
 
+    # The opt-in test-print agent authenticates with its own bearer token
+    # inside onix_print_bridge; it never receives an employee session.
+    if path in ("/api/print-agent/test/next", "/api/print-agent/test/ack"):
+        return None
+
     # Отдельная браузерная сессия руководителя для ПК.
     # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
     manager_paths = {
@@ -352,6 +357,7 @@ def require_employee_login():
         "/manager/shifts",
         "/manager/shift-history",
         "/manager/fbs-pdf",
+        "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
         "/api/manager/shift-history",
         "/api/manager/shifts/actions",
