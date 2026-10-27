@@ -316,19 +316,29 @@ def partner_pallet_display(partner_id):
     Changing visual numbering never changes a QR identifier.
     """
     with db_connect() as db:
-        rows = db.cursor().execute(sql("""SELECT p.id,p.upload_id,p.created_at,u.filename,l.sku
+        rows = db.cursor().execute(sql("""SELECT p.id,p.upload_id,p.created_at,u.filename,l.sku,l.quantity
             FROM partner_pallets p
             JOIN partner_uploads u ON u.id=p.upload_id
             LEFT JOIN partner_pallet_lines l ON l.pallet_id=p.id
             WHERE p.partner_id=?
             ORDER BY p.created_at,p.id,l.sku"""), (partner_id,)).fetchall()
     pallets = OrderedDict()
-    for pid, upload_id, created_at, filename, sku in rows:
+    for pid, upload_id, created_at, filename, sku, qty in rows:
         if pid not in pallets:
             pallets[pid] = dict(upload_id=upload_id, created_at=created_at,
-                                manual=(filename == "вручную"), skus=[])
-        if sku and sku not in pallets[pid]["skus"]:
-            pallets[pid]["skus"].append(sku)
+                                manual=(filename == "вручную"), skus=[], quantity=0,
+                                quantity_ok=True)
+        if sku:
+            if sku not in pallets[pid]["skus"]:
+                pallets[pid]["skus"].append(sku)
+            # Every stored line belongs to this *physical pallet*. Mixed-SKU
+            # pallets sum quantities, never a catalog's standard pack size.
+            if qty is None or int(qty) <= 0:
+                pallets[pid]["quantity_ok"] = False
+            else:
+                pallets[pid]["quantity"] += int(qty)
+        else:
+            pallets[pid]["quantity_ok"] = False
     groups = OrderedDict()
     for pid, pallet in pallets.items():
         article = " / ".join(pallet["skus"]) or "Артикул не указан"
@@ -339,7 +349,10 @@ def partner_pallet_display(partner_id):
     for group, ids in groups.items():
         article = group[2]
         for index, pid in enumerate(ids, 1):
-            result[pid] = dict(article=article, number=str(index)+"/"+str(len(ids)))
+            result[pid] = dict(
+                article=article, number=str(index)+"/"+str(len(ids)),
+                quantity=(pallets[pid]["quantity"] if pallets[pid]["quantity_ok"] else None),
+            )
     return result
 
 
@@ -442,13 +455,16 @@ def shipment_print(shipment_id):
     pages=[]
     for pid,barcode,status,created,article_fallback in chosen:
         display=labels.get(pid,{})
+        if not display.get("quantity"):
+            abort(409, description="Нельзя печатать палету без подтверждённого количества товара")
         article=escape(display.get("article") or article_fallback or "Артикул не указан")
         number=escape(display.get("number") or "1/1")
+        quantity=int(display["quantity"])
         qr=qrcode.make(barcode)
         out=io.BytesIO()
         qr.save(out,format="PNG")
         encoded=base64.b64encode(out.getvalue()).decode()
-        pages.append(f'<section class="sheet"><h1>ONIX · ПАЛЕТА</h1><div class="article">{article}</div><div class="number">{number}</div><img alt="QR палеты" src="data:image/png;base64,{encoded}"></section>')
+        pages.append(f'<section class="sheet"><h1>ONIX · ПАЛЕТА</h1><div class="article">{article}</div><div class="number">{number}</div><div class="quantity">КОЛИЧЕСТВО: {quantity} ШТ.</div><img alt="QR палеты" src="data:image/png;base64,{encoded}"></section>')
     return Response("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
     <title>ONIX · Печать поставки</title><style>
     @page{size:A4 portrait;margin:0}*{box-sizing:border-box}
@@ -457,7 +473,9 @@ def shipment_print(shipment_id):
     align-items:center;justify-content:center;padding:16mm 14mm;break-after:page;page-break-after:always}
     .sheet:last-child{break-after:auto;page-break-after:auto}
     h1{font-size:27pt;margin:0 0 14mm}.article{font-size:32pt;font-weight:800;overflow-wrap:anywhere;max-width:180mm;margin-bottom:8mm}
-    .number{font-size:28pt;font-weight:750;margin-bottom:13mm}img{width:142mm;height:142mm;object-fit:contain}
+    .number{font-size:28pt;font-weight:750;margin-bottom:6mm}
+    .quantity{font-size:23pt;font-weight:800;margin-bottom:10mm}
+    img{width:142mm;height:142mm;object-fit:contain}
     .tools{padding:12px;background:#eaf0f5;text-align:left}
     @media print{.tools{display:none}}
     </style></head><body><div class="tools"><button onclick="window.print()">Распечатать все А4</button> · """+
@@ -721,6 +739,8 @@ def print_label(pallet_id):
     label = partner_pallet_display(p[0]).get(pallet_id)
     if not label:
         abort(404)
+    if not label.get("quantity"):
+        abort(409, description="Нельзя печатать палету без подтверждённого количества товара")
     # Preserve barcode content for the receiving scanner; don't display it as text.
     qr = qrcode.make(row[0])
     out = io.BytesIO()
@@ -728,6 +748,7 @@ def print_label(pallet_id):
     encoded = base64.b64encode(out.getvalue()).decode()
     article = escape(label["article"])
     number = escape(label["number"])
+    quantity = int(label["quantity"])
     return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>ONIX · Палета {article} · {number}</title>
@@ -741,7 +762,8 @@ def print_label(pallet_id):
     .heading{{font-size:27pt;font-weight:800;letter-spacing:.5pt;margin:0 0 14mm}}
     .article{{font-size:32pt;font-weight:800;line-height:1.16;overflow-wrap:anywhere;
       max-width:180mm;margin:0 0 8mm}}
-    .number{{font-size:28pt;font-weight:750;line-height:1.15;margin:0 0 13mm}}
+    .number{{font-size:28pt;font-weight:750;line-height:1.15;margin:0 0 6mm}}
+    .quantity{{font-size:23pt;font-weight:800;line-height:1.16;margin:0 0 10mm}}
     img{{width:142mm;height:142mm;object-fit:contain;image-rendering:pixelated}}
     button{{font:17px Arial;padding:12px 20px;margin:15px}}
     @media print{{button{{display:none}}}}
@@ -749,5 +771,6 @@ def print_label(pallet_id):
     <button onclick="window.print()">Печать А4</button>
     <div class="sheet"><h1 class="heading">ONIX · ПАЛЕТА</h1>
       <div class="article">{article}</div><div class="number">{number}</div>
+      <div class="quantity">КОЛИЧЕСТВО: {quantity} ШТ.</div>
       <img alt="QR палеты" src="data:image/png;base64,{encoded}">
     </div></body></html>"""
