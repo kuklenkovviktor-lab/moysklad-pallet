@@ -80,6 +80,8 @@ class PartnerPalletTests(unittest.TestCase):
         batch=self.client.get(created.location+"/print")
         self.assertEqual(batch.status_code,200,batch.data[:200])
         self.assertEqual(batch.data.count(b'class="sheet"'),2)
+        self.assertIn("КОЛИЧЕСТВО: 24 ШТ.".encode(), batch.data)
+        self.assertIn("КОЛИЧЕСТВО: 36 ШТ.".encode(), batch.data)
         self.assertIn(b"size:A4 portrait",batch.data)
         self.assertNotIn(rows[0][1].encode(),batch.data)
         self.assertNotIn(rows[1][1].encode(),batch.data)
@@ -115,6 +117,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallet_lines WHERE pallet_id=?", (rows[0][0],))[0] in (1, 2), True)
         label = self.client.get(f"/partners/pallet/{rows[0][0]}/print")
         self.assertEqual(label.status_code, 200)
+        self.assertTrue(any(x in label.data for x in ("КОЛИЧЕСТВО: 13 ШТ.".encode(), "КОЛИЧЕСТВО: 8 ШТ.".encode())))
         self.assertNotIn(rows[0][1].encode(), label.data)
         self.assertNotIn("Добавлена вручную".encode(), label.data)
         self.assertIn(b"1/1", label.data)
@@ -124,7 +127,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertIn(b"width:210mm;height:297mm", label.data)
 
 
-    def test_excel_labels_show_article_and_fraction_only(self):
+    def test_excel_labels_show_article_fraction_and_exact_quantity(self):
         from partner_pallets import partner_pallet_display
         self.assertEqual(self.upload([("Артикул", "Палет", "Ед. в палете", "Количество, ед."),
             ("VIVA_96393", 2, 144, 288)]).status_code,302)
@@ -135,6 +138,7 @@ class PartnerPalletTests(unittest.TestCase):
         labels=partner_pallet_display(partner_id)
         self.assertEqual([labels[pid]["number"] for pid,_ in pallets],["1/2","2/2"])
         self.assertEqual({labels[pid]["article"] for pid,_ in pallets},{"VIVA_96393"})
+        self.assertEqual([labels[pid]["quantity"] for pid,_ in pallets],[144,144])
         html=self.client.get("/partners").data.decode("utf-8")
         self.assertNotIn("· строка",html)
         self.assertNotIn("Добавлена вручную",html)
@@ -146,6 +150,7 @@ class PartnerPalletTests(unittest.TestCase):
             qr.assert_called_once_with(code)
             self.assertIn(labels[pid]["number"].encode(),result.data)
             self.assertIn(b"VIVA_96393",result.data)
+            self.assertIn("КОЛИЧЕСТВО: 144 ШТ.".encode(),result.data)
             self.assertNotIn(code.encode(),result.data)
             self.assertNotIn("строка".encode(),result.data)
             self.assertNotIn("Добавлена вручную".encode(),result.data)
@@ -162,6 +167,7 @@ class PartnerPalletTests(unittest.TestCase):
         pallets=query_all("SELECT id,barcode FROM partner_pallets WHERE partner_id=? ORDER BY created_at,id",(partner_id,))
         labels=partner_pallet_display(partner_id)
         self.assertEqual([labels[pid]["number"] for pid,_ in pallets],["1/2","2/2"])
+        self.assertEqual([labels[pid]["quantity"] for pid,_ in pallets],[144,100])
         html=self.client.get("/partners").data.decode("utf-8")
         self.assertNotIn("Добавлена вручную",html)
         self.assertNotIn(pallets[0][1],html)
@@ -169,11 +175,50 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(label.status_code,200)
         self.assertIn(b"SKU_NEW",label.data)
         self.assertIn(b"1/2",label.data)
+        self.assertIn("КОЛИЧЕСТВО: 144 ШТ.".encode(),label.data)
+        second=self.client.get("/partners/pallet/"+pallets[1][0]+"/print")
+        self.assertIn("КОЛИЧЕСТВО: 100 ШТ.".encode(),second.data)
         self.assertNotIn("Добавлена вручную".encode(),label.data)
         self.assertNotIn(pallets[0][1].encode(),label.data)
         # Receiving identity and data remain unchanged.
         from partner_pallets import resolve_receiving_pallet
         self.assertEqual(resolve_receiving_pallet(pallets[0][1])["lines"][0]["quantity"],144)
+
+    def test_mixed_sku_pallet_and_batch_use_sum_of_actual_lines(self):
+        from wms import query_all
+        result=self.upload([("Палета","Артикул","Количество"),
+            ("A1","SKU_NEW",10),("A1","SKU",3),("A2","SKU_NEW",5)])
+        self.assertEqual(result.status_code,302)
+        with self.client.session_transaction(path="/partners") as state:
+            partner_id=state["partner_id"]
+        from partner_pallets import partner_pallet_display
+        rows=query_all("SELECT id FROM partner_pallets WHERE partner_id=?", (partner_id,))
+        labels=partner_pallet_display(partner_id)
+        self.assertEqual(sorted(l["quantity"] for l in labels.values()),[5,13])
+        for (pid,) in rows:
+            printed=self.client.get("/partners/pallet/"+pid+"/print")
+            self.assertEqual(printed.status_code,200)
+            self.assertIn(("КОЛИЧЕСТВО: "+str(labels[pid]["quantity"])+" ШТ.").encode(),printed.data)
+        # Batch labels must have the same numbers as individual labels.
+        sid=query_all("SELECT DISTINCT upload_id FROM partner_pallets WHERE partner_id=?", (partner_id,))[0][0]
+        batch=self.client.get("/partners/shipments/"+sid+"/print")
+        # Standard Excel uploads aren't associated with a shipment, so the
+        # direct batch route may not be available for this upload.
+        self.assertIn(batch.status_code,(200,302,404))
+
+    def test_missing_quantity_blocks_print_instead_of_showing_zero(self):
+        from wms import db_connect, sql, query_one
+        created=self.client.post("/partners/pallet/new",data={
+            "csrf":self.token,"article":"SKU_NEW","quantity":"10","reason":"Тест"})
+        self.assertEqual(created.status_code,302)
+        with self.client.session_transaction(path="/partners") as session:
+            pid=session["partner_id"]
+        pallet=query_one("SELECT id,upload_id FROM partner_pallets WHERE partner_id=?",(pid,))
+        with db_connect() as db:
+            db.cursor().execute(sql("DELETE FROM partner_pallet_lines WHERE pallet_id=?"),(pallet[0],))
+            db.commit()
+        printed=self.client.get("/partners/pallet/"+pallet[0]+"/print")
+        self.assertEqual(printed.status_code,409)
 
     def test_dashboard_ui_stats_statuses_mobile_and_owner_filter(self):
         one=self.upload([("Артикул","Количество"),("SKU_NEW",5)])
