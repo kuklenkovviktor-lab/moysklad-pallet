@@ -219,7 +219,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     return page("ONIX WMS · Палеты партнёра",html,show_title=False)
 
 
-def edit_view(token, article, quantity, history_rows, widget, back="", back_kind="shipment"):
+def edit_view(token, article, quantity, history_rows, widget, back="", back_kind="shipment", line_id="", line_options=(), pallet_id=""):
     """Restricted partner edit page with the same design as the main portal."""
     history=[]
     for before, oldqty, after, newqty, reason, changed_at in history_rows:
@@ -230,13 +230,26 @@ def edit_view(token, article, quantity, history_rows, widget, back="", back_kind
             '<b>'+prev+'</b> → <b>'+curr+'</b><br>'
             '<span class="muted">'+escape(str(reason or ''))+'</span></li>')
     back_path=('/partners/uploads/' if back_kind=='upload' else '/partners/shipments/')+escape(back,quote=True) if back else '/partners'
+    # Explicitly choose a line when a pallet contains multiple SKU records.
+    line_choices=''
+    if len(line_options)>1:
+        parts=[]
+        for lid, sku, qty in line_options:
+            url='/partners/pallet/'+escape(pallet_id,quote=True)+'/edit?line_id='+escape(lid,quote=True)
+            if back:
+                url+='&back='+escape(back,quote=True)
+            parts.append('<a class="btn '+('btn-primary' if lid==line_id else 'btn-secondary')+
+                         '" href="'+url+'">'+escape(str(sku))+' · '+str(qty)+' шт.</a>')
+        line_choices='<p class="muted">Выбери позицию этой палеты для замены:</p><div class="action-links">'+''.join(parts)+'</div>'
     inner=('<div class="topbar"><div class="brand"><span class="logo">ONX</span>'
         '<div><b>ONIX WMS</b><small>Корректировка палеты</small></div></div>'
         '<a class="btn btn-ghost" href="'+back_path+'">← Назад</a></div>'
         '<div class="dashboard-title"><h1>Изменить палету</h1>'
         '<div class="muted">Редактировать можно только до начала приёмки. QR сохранится прежним.</div></div>'
-        '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'
-        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'+'<input type="hidden" name="back" value="'+escape(back,quote=True)+'">'
+        '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'+line_choices+
+        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'+
+        '<input type="hidden" name="back" value="'+escape(back,quote=True)+'">'+
+        '<input type="hidden" name="line_id" value="'+escape(line_id,quote=True)+'">'
         '<div class="field"><label for="edit-article">Артикул товара</label>'
         '<input id="edit-article" name="article" maxlength="150" required value="'+escape(article,quote=True)+'"></div>'
         '<div class="fields-inline"><div class="field"><label for="edit-qty">Количество, шт.</label>'
