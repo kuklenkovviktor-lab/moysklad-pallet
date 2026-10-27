@@ -486,7 +486,8 @@ class PartnerPalletTests(unittest.TestCase):
         mixed=self.client.get("/partners/catalog/search?q=PACK_MIX")
         self.assertIsNone(mixed.json["items"][0]["pack_qty"])
         html=self.client.get("/partners").data
-        self.assertIn(b"exact.pack_qty",html)
+        # Search remains available on the edit page; the partner dashboard no longer offers manual creation.
+        self.assertNotIn(b"exact.pack_qty",html)
 
     def test_partner_catalog_search_is_scoped_and_read_only(self):
         response=self.client.get("/partners/catalog/search?q=SKU_NEW")
