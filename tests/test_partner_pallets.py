@@ -88,7 +88,7 @@ class PartnerPalletTests(unittest.TestCase):
         self.assertEqual(self.client.get(created.location+"/print?only=created").status_code,200)
         edit=self.client.get("/partners/pallet/"+rows[0][0]+"/edit")
         self.assertEqual(edit.status_code,200)
-        self.assertIn("Поставки",self.client.get("/partners").data.decode("utf-8"))
+        self.assertIn("Загруженные Excel-файлы",self.client.get("/partners").data.decode("utf-8"))
 
     def test_shipments_are_private_and_require_csrf(self):
         r=self.client.post("/partners/shipments/new",data={"planned_date":"2026-10-27"})
@@ -217,17 +217,24 @@ class PartnerPalletTests(unittest.TestCase):
     def test_dashboard_ui_stats_statuses_mobile_and_owner_filter(self):
         one=self.upload([("Артикул","Количество"),("SKU_NEW",5)])
         self.assertEqual(one.status_code,302,one.data[:350])
-        self.assertIn("result=uploaded&count=1",one.location)
+        self.assertIn("/partners/uploads/",one.location)
+        detail=self.client.get(one.location)
+        self.assertEqual(detail.status_code,200)
+        self.assertIn("Массовая печать QR",detail.data.decode("utf-8"))
         dashboard=self.client.get("/partners")
         self.assertEqual(dashboard.status_code,200,dashboard.data[:350])
         html=dashboard.data.decode("utf-8")
         for marker in ('class="topbar"','class="kpis"','class="forms-grid"',
                        'name="submission_key"','id="history-search"',
                        'class="table-wrap"','@media(max-width:620px)',
-                       'Статус','Создана','Создать палету и QR'):
+                       'Статус','Создана','Создать палеты из Excel'):
             self.assertIn(marker,html)
         self.assertIn('Партнёр: '+self.name,html)
         self.assertIn("SKU_NEW",html)
+        self.assertIn("Загруженные Excel-файлы",html)
+        self.assertNotIn("Новая поставка",html)
+        self.assertNotIn("Добавить палету",html)
+        self.assertNotIn('name="shipment_id"',html)
         searched=self.client.get("/partners?q=SKU_NEW&status=created")
         self.assertEqual(searched.status_code,200)
         self.assertIn("SKU_NEW",searched.data.decode("utf-8"))
@@ -237,6 +244,86 @@ class PartnerPalletTests(unittest.TestCase):
         # A partner must never see another partner's pallet.
         another=self.client.get("/partners?q=FOREIGN")
         self.assertNotIn("FOREIGN",another.data.decode("utf-8").split("<tbody>")[1].split("</tbody>")[0])
+
+    def test_excel_upload_prints_all_with_no_shipment_created(self):
+        from wms import query_all
+        result=self.upload([("Артикул","Палет","Ед. в палете","Количество, ед."),
+                            ("SKU_NEW",3,144,432)],"pallets_3.xlsx")
+        self.assertEqual(result.status_code,302)
+        self.assertIn("/partners/uploads/",result.location)
+        detail=self.client.get(result.location)
+        self.assertEqual(detail.status_code,200)
+        self.assertIn("Печать всех QR А4",detail.data.decode("utf-8"))
+        self.assertIn("SKU_NEW",detail.data.decode("utf-8"))
+        with self.client.session_transaction(path="/partners") as state:
+            pid=state["partner_id"]
+        rows=query_all("SELECT barcode FROM partner_pallets WHERE partner_id=?",(pid,))
+        self.assertEqual(len(rows),3)
+        batch=self.client.get(result.location+"/print")
+        self.assertEqual(batch.status_code,200)
+        self.assertEqual(batch.data.count(b'class="sheet"'),3)
+        self.assertEqual(batch.data.count("КОЛИЧЕСТВО: 144 ШТ.".encode()),3)
+        for (barcode,) in rows:
+            self.assertNotIn(barcode.encode(),batch.data)
+        self.assertEqual(self.client.get(result.location+"/print?only=created").status_code,200)
+        self.assertIn("pallets_3.xlsx",self.client.get("/partners").data.decode("utf-8"))
+
+    def test_excel_edit_returns_to_file_and_preserves_qr(self):
+        from wms import query_one
+        response=self.upload([("Артикул","Количество"),("SKU_NEW",144)])
+        with self.client.session_transaction(path="/partners") as st:
+            partner_id=st["partner_id"]
+        pallet=query_one("SELECT id,barcode FROM partner_pallets WHERE partner_id=?",(partner_id,))
+        page=self.client.get("/partners/pallet/"+pallet[0]+"/edit?back="+response.location.rsplit("/",1)[-1])
+        self.assertEqual(page.status_code,200)
+        import re
+        from html import unescape
+        match=re.search('name="line_id" value="([^"]+)"',page.data.decode("utf-8"))
+        self.assertIsNotNone(match)
+        result=self.client.post("/partners/pallet/"+pallet[0]+"/edit",data={
+            "csrf":self.token,"line_id":unescape(match.group(1)),
+            "back":response.location.rsplit("/",1)[-1],
+            "article":"SKU","quantity":"100","reason":"Замена позиции"})
+        self.assertEqual(result.status_code,302)
+        self.assertEqual(result.location,response.location)
+        self.assertEqual(query_one("SELECT barcode FROM partner_pallets WHERE id=?",(pallet[0],))[0],pallet[1])
+        self.assertIn("КОЛИЧЕСТВО: 100 ШТ.".encode(),
+            self.client.get("/partners/pallet/"+pallet[0]+"/print").data)
+        detail=self.client.get(response.location)
+        self.assertIn("SKU",detail.data.decode("utf-8"))
+
+    def test_mixed_pallet_allows_replacing_exactly_one_line(self):
+        from wms import query_all
+        response=self.upload([("Палета","Артикул","Количество"),
+                              ("P1","SKU_NEW",10),("P1","SKU",3)])
+        with self.client.session_transaction(path="/partners") as st:
+            partner_id=st["partner_id"]
+        pallet=query_one("SELECT id,barcode FROM partner_pallets WHERE partner_id=?",(partner_id,))
+        edit=self.client.get("/partners/pallet/"+pallet[0]+"/edit?back="+response.location.rsplit("/",1)[-1])
+        self.assertEqual(edit.status_code,200)
+        self.assertIn("Выбери позицию этой палеты",edit.data.decode("utf-8"))
+        lines=query_all("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=? ORDER BY id",(pallet[0],))
+        target=next(line for line in lines if line[1]=="SKU_NEW")
+        action=self.client.post("/partners/pallet/"+pallet[0]+"/edit",data={
+            "csrf":self.token,"back":response.location.rsplit("/",1)[-1],
+            "line_id":target[0],"article":"SKU","quantity":"8","reason":"Замена SKU"})
+        self.assertEqual(action.status_code,302)
+        modified=query_all("SELECT sku,quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))
+        self.assertEqual(sorted(modified),[("SKU",3),("SKU",8)])
+        self.assertIn("КОЛИЧЕСТВО: 11 ШТ.".encode(),
+                      self.client.get("/partners/pallet/"+pallet[0]+"/print").data)
+        self.assertEqual(query_one("SELECT barcode FROM partner_pallets WHERE id=?",(pallet[0],))[0],pallet[1])
+
+    def test_excel_batch_access_is_isolated_between_partners(self):
+        result=self.upload([("Артикул","Количество"),("SKU_NEW",7)])
+        with self.client.session_transaction(path="/partners") as st:
+            real_id=st["partner_id"]
+            st["partner_id"]="another-partner"
+        self.assertEqual(self.client.get(result.location).status_code,302)
+        self.assertEqual(self.client.get(result.location+"/print").status_code,302)
+        with self.client.session_transaction(path="/partners") as st:
+            st["partner_id"]=real_id
+        self.assertEqual(self.client.get(result.location+"/print?only=bogus").status_code,400)
 
     def test_manual_duplicate_form_token_is_idempotent(self):
         from wms import query_one
@@ -263,7 +350,7 @@ class PartnerPalletTests(unittest.TestCase):
                 content_type="multipart/form-data")
         first,again=send(),send()
         self.assertEqual(first.status_code,302)
-        self.assertIn("result=uploaded",first.location)
+        self.assertIn("/partners/uploads/",first.location)
         self.assertEqual(again.status_code,302)
         self.assertIn("result=duplicate",again.location)
         with self.client.session_transaction(path="/partners") as session:
@@ -399,7 +486,8 @@ class PartnerPalletTests(unittest.TestCase):
         mixed=self.client.get("/partners/catalog/search?q=PACK_MIX")
         self.assertIsNone(mixed.json["items"][0]["pack_qty"])
         html=self.client.get("/partners").data
-        self.assertIn(b"exact.pack_qty",html)
+        # Search remains available on the edit page; the partner dashboard no longer offers manual creation.
+        self.assertNotIn(b"exact.pack_qty",html)
 
     def test_partner_catalog_search_is_scoped_and_read_only(self):
         response=self.client.get("/partners/catalog/search?q=SKU_NEW")

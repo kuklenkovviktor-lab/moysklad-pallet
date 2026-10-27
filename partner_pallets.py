@@ -13,7 +13,7 @@ import qrcode
 from flask import Blueprint, abort, jsonify, redirect, request, session, url_for, Response
 from openpyxl import load_workbook
 from wms import db_connect, manager_access, sql, DATABASE_URL
-from partner_portal_ui import page as portal_page, dashboard_view, edit_view, shipment_list_view, shipment_detail_view
+from partner_portal_ui import page as portal_page, dashboard_view, edit_view, shipment_list_view, shipment_detail_view, upload_batch_view
 
 partner_bp = Blueprint("partners", __name__)
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -438,20 +438,14 @@ def shipment_detail(shipment_id):
     return shipment_detail_view(csrf(), shipment[1], shipment_id, rows, labels, partner_catalog_widget())
 
 
-@partner_bp.get("/partners/shipments/<shipment_id>/print")
-def shipment_print(shipment_id):
-    db_init()
-    p=require_partner()
-    shipment,rows=_shipment_rows(p[0],shipment_id)
-    selected=request.args.get("only","all")
-    if selected not in ("all","created"):
-        abort(400)
-    chosen=[r for r in rows if selected=="all" or r[2]=="created"]
+def _render_batch_print(chosen, labels):
+    """Render a document for at most 500 existing QR codes."""
     if not chosen:
-        return page("Печать поставки","Нет палет для выбранного режима печати"),404
+        return page("Печать палет","Нет палет для печати"),404
     if len(chosen)>500:
-        return page("Печать поставки","Слишком много палет для одного задания (максимум 500)"),413
-    labels=partner_pallet_display(p[0])
+        return page("Печать палет","За один раз можно распечатать не более 500 палет"),413
+    if any(not labels.get(row[0],{}).get("quantity") for row in chosen):
+        return page("Печать палет","Не у всех палет подтверждено количество"),409
     pages=[]
     for pid,barcode,status,created,article_fallback in chosen:
         display=labels.get(pid,{})
@@ -480,6 +474,67 @@ def shipment_print(shipment_id):
     @media print{.tools{display:none}}
     </style></head><body><div class="tools"><button onclick="window.print()">Распечатать все А4</button> · """+
     str(len(chosen))+" палет</div>"+ "".join(pages)+"</body></html>",mimetype="text/html",headers={"Cache-Control":"no-store"})
+
+
+def _excel_batch_rows(partner_id, batch_id):
+    with db_connect() as db:
+        cur=db.cursor()
+        batch=cur.execute(sql("""SELECT id,filename,created_at
+            FROM partner_uploads WHERE id=? AND partner_id=?
+            AND LOWER(filename) LIKE '%.xlsx'"""),(batch_id,partner_id)).fetchone()
+        if not batch:
+            abort(404)
+        rows=cur.execute(sql("""
+            SELECT p.id,p.barcode,p.status,p.created_at,
+              COALESCE((SELECT STRING_AGG(l.sku,' / ') FROM partner_pallet_lines l WHERE l.pallet_id=p.id),'')
+            FROM partner_pallets p WHERE p.partner_id=? AND p.upload_id=?
+            ORDER BY p.created_at,p.id
+        """) if DATABASE_URL else sql("""
+            SELECT p.id,p.barcode,p.status,p.created_at,
+              COALESCE((SELECT GROUP_CONCAT(l.sku,' / ') FROM partner_pallet_lines l WHERE l.pallet_id=p.id),'')
+            FROM partner_pallets p WHERE p.partner_id=? AND p.upload_id=?
+            ORDER BY p.created_at,p.id
+        """),(partner_id,batch_id)).fetchall()
+    return batch,rows
+
+
+@partner_bp.get("/partners/uploads/<batch_id>")
+def excel_batch_detail(batch_id):
+    db_init()
+    p=require_partner()
+    batch,rows=_excel_batch_rows(p[0],batch_id)
+    return upload_batch_view(batch,rows,partner_pallet_display(p[0]))
+
+
+@partner_bp.get("/partners/uploads/<batch_id>/print")
+def excel_batch_print(batch_id):
+    db_init()
+    p=require_partner()
+    _,rows=_excel_batch_rows(p[0],batch_id)
+    selected=request.args.get("only","all")
+    if selected not in ("all","created"):
+        abort(400)
+    chosen=[r for r in rows if selected=="all" or r[2]=="created"]
+    try:
+        part=int(request.args.get("part",1))
+    except (ValueError,TypeError):
+        abort(400)
+    if part<1 or part>(len(chosen)+499)//500:
+        abort(404)
+    return _render_batch_print(chosen[(part-1)*500:part*500],partner_pallet_display(p[0]))
+
+
+@partner_bp.get("/partners/shipments/<shipment_id>/print")
+def shipment_print(shipment_id):
+    # Keep old links working without requiring new partners to create shipments.
+    db_init()
+    p=require_partner()
+    _,rows=_shipment_rows(p[0],shipment_id)
+    selected=request.args.get("only","all")
+    if selected not in ("all","created"):
+        abort(400)
+    chosen=[r for r in rows if selected=="all" or r[2]=="created"]
+    return _render_batch_print(chosen,partner_pallet_display(p[0]))
 
 
 @partner_bp.route("/partners", methods=["GET"])
@@ -526,12 +581,20 @@ def dashboard():
     stats=dict(total=int(stats_row[0] or 0),created=int(stats_row[1] or 0),
                accepted=int(stats_row[2] or 0),pending=int(stats_row[3] or 0))
     labels=partner_pallet_display(p[0])
+    with db_connect() as db:
+        batches=db.cursor().execute(sql("""SELECT u.id,u.filename,u.created_at,
+              COUNT(p.id),SUM(CASE WHEN p.status='created' THEN 1 ELSE 0 END)
+            FROM partner_uploads u JOIN partner_pallets p
+              ON p.upload_id=u.id AND p.partner_id=u.partner_id
+            WHERE u.partner_id=? AND LOWER(u.filename) LIKE '%.xlsx'
+            GROUP BY u.id,u.filename,u.created_at
+            ORDER BY u.created_at DESC LIMIT 100"""),(p[0],)).fetchall()
     return dashboard_view(p[1], csrf(), stats, rows, labels, q, status,
                           current_page,page_count,total,
                           str(request.args.get("result","")),partner_catalog_widget(),
                           created_pallet=str(request.args.get("pallet",""))[:48],
                           created_count=(int(request.args.get("count",0)) if str(request.args.get("count",0)).isdigit() else 0),
-                           shipments=_shipment_choices(p[0]))
+                           shipments=_shipment_choices(p[0]), batches=batches)
 
 
 @partner_bp.get("/partners/catalog/search")
@@ -655,26 +718,47 @@ def manual_create():
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
 def manual_edit(pallet_id):
+    """Change only a selected line of a not-yet-received pallet; preserve QR."""
     db_init()
     p=require_partner()
     if request.method=="POST":
         require_csrf()
     with db_connect() as db:
         cur=db.cursor()
-        row=cur.execute(sql("SELECT id,status FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
+        query="SELECT id,status,upload_id FROM partner_pallets WHERE id=? AND partner_id=?"
+        if DATABASE_URL and request.method=="POST":
+            query+=" FOR UPDATE"
+        row=cur.execute(sql(query),(pallet_id,p[0])).fetchone()
         if not row:
             abort(404)
         if row[1]!="created":
             return page("Изменение запрещено","Палета в обработке или уже принята"),409
-        lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=?"),(pallet_id,)).fetchall()
-        if len(lines)!=1:
-            return page("Изменение запрещено","Редактирование смешанной палеты пока недоступно"),409
-        back=str(request.form.get("back") if request.method=="POST" else request.args.get("back") or "").strip()
-        if back:
-            chosen=cur.execute(sql("SELECT upload_id FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
-            check=cur.execute(sql("SELECT id FROM partner_uploads WHERE id=? AND partner_id=? AND planned_date IS NOT NULL"),(back,p[0])).fetchone()
-            if not check or not chosen or chosen[0]!=back:
-                back=""
+        lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=? ORDER BY id"),(pallet_id,)).fetchall()
+        if not lines:
+            return page("Ошибка палеты","Состав палеты пуст. Обратись к руководителю склада."),409
+
+        back=str((request.form.get("back") if request.method=="POST" else request.args.get("back")) or "").strip()
+        back_kind=""
+        if back and row[2]==back:
+            upload=cur.execute(sql("SELECT filename,planned_date FROM partner_uploads WHERE id=? AND partner_id=?"),
+                               (back,p[0])).fetchone()
+            if upload and str(upload[0]).lower().endswith(".xlsx"):
+                back_kind="upload"
+            elif upload and upload[1]:
+                back_kind="shipment"
+        if not back_kind:
+            back=""
+
+        line_id=str((request.form.get("line_id") if request.method=="POST" else request.args.get("line_id")) or "")
+        if len(lines)==1 and not line_id:
+            line_id=lines[0][0]
+        chosen=next((r for r in lines if r[0]==line_id),None)
+        if chosen is None:
+            if request.method=="POST":
+                return page("Ошибка","Выбери позицию палеты для изменения"),400
+            chosen=lines[0]
+            line_id=chosen[0]
+
         if request.method=="POST":
             try:
                 sku,qty,reason=_manual_fields(request.form)
@@ -683,13 +767,21 @@ def manual_edit(pallet_id):
             cur.execute(sql("UPDATE partner_pallets SET external_ref=external_ref WHERE id=? AND partner_id=? AND status='created'"),(pallet_id,p[0]))
             if cur.rowcount!=1:
                 return page("Изменение запрещено","Палета уже в обработке"),409
-            cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=?"),(sku,qty,lines[0][0]))
-            cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pallet_id,p[0],"edit",lines[0][1],lines[0][2],sku,qty,reason,now()))
+            cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=? AND pallet_id=? AND sku=? AND quantity=?"),
+                        (sku,qty,chosen[0],pallet_id,chosen[1],chosen[2]))
+            if cur.rowcount!=1:
+                db.rollback()
+                return page("Ошибка","Палета была изменена в другой вкладке. Обнови страницу."),409
+            cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),
+                        (str(uuid.uuid4()),pallet_id,p[0],"edit",chosen[1],chosen[2],sku,qty,reason,now()))
             db.commit()
-            return redirect("/partners/shipments/"+back if back else "/partners")
+            return redirect(("/partners/uploads/" if back_kind=="upload" else "/partners/shipments/")+back if back else "/partners")
+
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget(),back=back)
+    return edit_view(csrf(),chosen[1],chosen[2],entries,partner_catalog_widget(),
+                     back=back,back_kind=back_kind,line_id=line_id,
+                     line_options=lines,pallet_id=pallet_id)
 
 
 @partner_bp.post("/partners/upload")
@@ -725,7 +817,7 @@ def upload():
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
         db.commit()
-    return redirect("/partners/shipments/"+shipment_id if shipment_id else "/partners?result=uploaded&count="+str(len(groups)))
+    return redirect("/partners/shipments/"+shipment_id if shipment_id else "/partners/uploads/"+upload_id)
 
 @partner_bp.get("/partners/pallet/<pallet_id>/print")
 def print_label(pallet_id):

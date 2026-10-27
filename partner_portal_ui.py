@@ -122,7 +122,7 @@ def status_html(status):
            'uncertain':('Требует сверки','status-uncertain')}.get(status,('Неизвестно',''))
     return '<span class="status '+value[1]+'">'+escape(value[0])+'</span>'
 
-def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget, created_pallet="", created_count=0, shipments=()):
+def dashboard_view(partner, token, stats, rows, labels, q, status, current_page, page_count, total, notice, catalog_widget, created_pallet="", created_count=0, shipments=(), batches=()):
     q_text=escape(q,quote=True)
     token=escape(token,quote=True)
     partner_text=escape(partner,quote=True)
@@ -152,15 +152,18 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
                           '<td data-label="Создана">'+escape(local_date(created_at))+'</td>'
                           '<td data-label="Действия"><div class="action-links">'+actions+'</div></td></tr>')
     if not table_rows:
-        table_rows=['<tr><td colspan="5" class="empty">Палеты не найдены. Попробуй изменить фильтры или создать новую палету.</td></tr>']
+        table_rows=['<tr><td colspan="5" class="empty">Палеты не найдены. Попробуй изменить фильтры или загрузить Excel.</td></tr>']
     def page_url(n):
         return '/partners?'+urlencode({'q':q,'status':status,'page':n})
     back='<a href="'+escape(page_url(current_page-1),quote=True)+'">← Назад</a>' if current_page>1 else '<span class="disabled">← Назад</span>'
     forward='<a href="'+escape(page_url(current_page+1),quote=True)+'">Дальше →</a>' if current_page<page_count else '<span class="disabled">Дальше →</span>'
     page_nav='<div class="paging"><span>Найдено: '+str(total)+' · Страница '+str(current_page)+' из '+str(page_count)+'</span><div class="pages">'+back+forward+'</div></div>'
-    shipment_select='<option value="">Без поставки</option>'+''.join(
-        '<option value="'+escape(str(s[0]),quote=True)+'">Поставка '+escape(str(s[1]))+' ('+str(s[2])+' палет)</option>'
-        for s in shipments)
+    batch_cards=''.join(
+        '<div class="panel" style="margin:8px 0;padding:14px">'
+        '<b>'+escape(str(filename))+'</b> · '+str(count)+' палет, '+str(int(created or 0))+
+        ' ожидают приёмки <span class="muted">('+escape(local_date(when))+')</span>'
+        ' <a class="btn btn-secondary" href="/partners/uploads/'+escape(str(bid),quote=True)+'">Открыть / печать QR</a></div>'
+        for bid,filename,when,count,created in batches)
     html=f"""
     <header class="topbar">
       <div class="brand"><span class="logo">ONX</span><div><b>ONIX WMS</b><small>Кабинет партнёра</small></div></div>
@@ -168,8 +171,8 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
       <form method="post" action="/partners/logout"><input type="hidden" name="csrf" value="{token}">
       <button class="btn btn-secondary" type="submit">Выйти</button></form></div>
     </header>
-    <div class="dashboard-title"><h1>Палеты партнёра</h1><a class="btn btn-secondary" href="/partners/shipments">📦 Поставки</a>
-      <div class="muted">Создание, корректировка, печать и контроль палет поставки</div></div>
+    <div class="dashboard-title"><h1>Палеты партнёра</h1>
+      <div class="muted">Загрузи полученный от компании Excel, распечатай QR и при необходимости измени состав палет.</div></div>
     {flash}
     <div class="kpis">
       <div class="kpi"><div class="kpi-label">Всего палет</div><div class="number">{stats['total']}</div></div>
@@ -178,40 +181,26 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
       <div class="kpi"><div class="kpi-label">В работе / сверке</div><div class="number amber">{stats['pending']}</div></div>
     </div>
     <div class="forms-grid">
-      <section class="panel">
-        <div class="panel-top"><span class="panel-icon">📦</span><div><h2>Добавить палету</h2><div class="muted">При изменении состава машины</div></div></div>
-        <form method="post" action="/partners/pallet/new" data-once>
-          <input type="hidden" name="csrf" value="{token}">
-          <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
-          <div class="field"><label>Поставка (необязательно)</label><select name="shipment_id">{shipment_select}</select></div>
-          <div class="field"><label for="manual-article">Артикул товара</label>
-             <input id="manual-article" name="article" placeholder="Начни вводить артикул или название" maxlength="150" autocomplete="off" required>
-          </div>
-          <div class="fields-inline">
-            <div class="field"><label for="manual-quantity">Количество, шт.</label>
-              <input id="manual-quantity" name="quantity" type="number" min="1" max="1000000" step="1" placeholder="Количество" required></div>
-            <div class="field"><label for="manual-reason">Причина</label>
-              <input id="manual-reason" name="reason" maxlength="300" placeholder="Например: изменение погрузки" required></div>
-          </div>
-          {catalog_widget}
-          <div class="form-foot"><button class="btn btn-primary" type="submit">＋ Создать палету и QR</button></div>
-        </form>
-      </section>
-      <section class="panel">
-        <div class="panel-top"><span class="panel-icon">📄</span><div><h2>Загрузить Excel</h2><div class="muted">Создать сразу несколько палет</div></div></div>
+      <section class="panel" style="grid-column:1/-1">
+        <div class="panel-top"><span class="panel-icon">📄</span><div><h2>1. Загрузить Excel</h2>
+          <div class="muted">Файл заказа, который прислала наша компания</div></div></div>
         <form method="post" action="/partners/upload" enctype="multipart/form-data" data-once>
           <input type="hidden" name="csrf" value="{token}">
           <input type="hidden" name="submission_key" value="{escape(__import__('secrets').token_urlsafe(24),quote=True)}">
-          <div class="field"><label>Поставка (необязательно)</label><select name="shipment_id">{shipment_select}</select></div>
-          <div class="dropzone"><div class="symbol">📁</div><b>Выбери Excel-файл заказа</b>
-            <div class="muted">Формат .xlsx · не более 2 МБ · до 5000 палет</div>
+          <div class="dropzone"><div class="symbol">📁</div><b>Выбери Excel-файл</b>
+            <div class="muted">.xlsx · не более 2 МБ · до 5000 палет</div>
             <input id="partner-file" type="file" name="file" accept=".xlsx" aria-label="Загрузить Excel" required>
             <div class="filename" id="partner-file-name">Файл не выбран</div></div>
-          <div class="field-note">Поддерживаются «Артикул / Палет / Ед. в палете» и «Артикул / Количество / Палета».</div>
+          <div class="field-note">Загрузка создаёт палеты и QR. Затем откроется список с массовой печатью и корректировками.</div>
           <div class="form-foot"><button class="btn btn-primary" type="submit">Создать палеты из Excel</button></div>
         </form>
       </section>
     </div>
+    <section class="panel">
+      <div class="panel-top"><span class="panel-icon">📚</span><div><h2>2. Загруженные Excel-файлы</h2>
+        <div class="muted">Открой файл, распечатай все QR или выбери палету для корректировки</div></div></div>
+      {batch_cards or '<p class="muted">Загрузок пока нет.</p>'}
+    </section>
     <section class="panel">
       <div class="panel-top"><span class="panel-icon">🗂️</span><div><h2>История палет</h2><div class="muted">Поиск, статусы и повторная печать QR</div></div></div>
       <form method="get" action="/partners" class="toolbar">
@@ -230,7 +219,7 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     return page("ONIX WMS · Палеты партнёра",html,show_title=False)
 
 
-def edit_view(token, article, quantity, history_rows, widget, back=""):
+def edit_view(token, article, quantity, history_rows, widget, back="", back_kind="shipment", line_id="", line_options=(), pallet_id=""):
     """Restricted partner edit page with the same design as the main portal."""
     history=[]
     for before, oldqty, after, newqty, reason, changed_at in history_rows:
@@ -240,14 +229,27 @@ def edit_view(token, article, quantity, history_rows, widget, back=""):
             '<small class="muted">'+escape(local_date(changed_at))+'</small><br>'
             '<b>'+prev+'</b> → <b>'+curr+'</b><br>'
             '<span class="muted">'+escape(str(reason or ''))+'</span></li>')
-    back_path='/partners/shipments/'+escape(back,quote=True) if back else '/partners'
+    back_path=('/partners/uploads/' if back_kind=='upload' else '/partners/shipments/')+escape(back,quote=True) if back else '/partners'
+    # Explicitly choose a line when a pallet contains multiple SKU records.
+    line_choices=''
+    if len(line_options)>1:
+        parts=[]
+        for lid, sku, qty in line_options:
+            url='/partners/pallet/'+escape(pallet_id,quote=True)+'/edit?line_id='+escape(lid,quote=True)
+            if back:
+                url+='&back='+escape(back,quote=True)
+            parts.append('<a class="btn '+('btn-primary' if lid==line_id else 'btn-secondary')+
+                         '" href="'+url+'">'+escape(str(sku))+' · '+str(qty)+' шт.</a>')
+        line_choices='<p class="muted">Выбери позицию этой палеты для замены:</p><div class="action-links">'+''.join(parts)+'</div>'
     inner=('<div class="topbar"><div class="brand"><span class="logo">ONX</span>'
         '<div><b>ONIX WMS</b><small>Корректировка палеты</small></div></div>'
         '<a class="btn btn-ghost" href="'+back_path+'">← Назад</a></div>'
         '<div class="dashboard-title"><h1>Изменить палету</h1>'
         '<div class="muted">Редактировать можно только до начала приёмки. QR сохранится прежним.</div></div>'
-        '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'
-        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'+'<input type="hidden" name="back" value="'+escape(back,quote=True)+'">'
+        '<section class="panel" style="max-width:700px"><h2>Состав палеты</h2>'+line_choices+
+        '<form method="post" data-once><input type="hidden" name="csrf" value="'+escape(token,quote=True)+'">'+
+        '<input type="hidden" name="back" value="'+escape(back,quote=True)+'">'+
+        '<input type="hidden" name="line_id" value="'+escape(line_id,quote=True)+'">'
         '<div class="field"><label for="edit-article">Артикул товара</label>'
         '<input id="edit-article" name="article" maxlength="150" required value="'+escape(article,quote=True)+'"></div>'
         '<div class="fields-inline"><div class="field"><label for="edit-qty">Количество, шт.</label>'
@@ -317,3 +319,49 @@ def shipment_detail_view(token, day, shipment_id, rows, labels, widget):
     <tbody>{''.join(table) or '<tr><td colspan="4">Пока нет палет</td></tr>'}</tbody></table></div></section>
     {FORM_JS}
     ''')
+
+
+def upload_batch_view(batch, rows, labels):
+    """Existing Excel upload. Partner can print its QR batch without creating a shipment."""
+    bid, filename, created_at = batch
+    safe_id=escape(str(bid), quote=True)
+    total=len(rows)
+    pending=sum(1 for r in rows if r[2]=='created')
+    buttons=[]
+    for only, count, caption in (('all',total,'🖨 Печать всех QR А4'),
+                                 ('created',pending,'Только ожидающие')):
+        if count < 1:
+            continue
+        parts=(count+499)//500
+        for part in range(1,parts+1):
+            text=caption if parts==1 else caption+' · часть '+str(part)+'/'+str(parts)
+            buttons.append('<a class="btn btn-primary" target="_blank" rel="noopener" href="/partners/uploads/'+
+                safe_id+'/print?only='+only+'&part='+str(part)+'">'+text+'</a>')
+    table=[]
+    for pid, barcode, state, when, fallback in rows:
+        display=labels.get(pid,{})
+        article=escape(display.get('article') or fallback or 'Не указан')
+        number=escape(display.get('number') or '1/1')
+        qty=display.get('quantity')
+        qty_text=(str(qty)+' шт.') if qty is not None else 'Нет количества'
+        actions='<a href="/partners/pallet/'+escape(pid,quote=True)+'/print" target="_blank" rel="noopener">QR / Печать</a>'
+        if state=='created':
+            actions+=' <a href="/partners/pallet/'+escape(pid,quote=True)+'/edit?back='+safe_id+'">Изменить</a>'
+        table.append('<tr><td>'+article+'</td><td>'+number+'</td><td>'+escape(qty_text)+
+            '</td><td>'+status_html(state)+'</td><td class="action-links">'+actions+'</td></tr>')
+    return page('ONIX · Палеты из Excel', '''
+    <div class="dashboard-title"><a href="/partners">← Все Excel-файлы</a>
+      <h1>'''+escape(str(filename))+'''</h1>
+      <p class="muted">Загружено: '''+escape(local_date(created_at))+''' · Палет: '''+
+      str(total)+''' · Ожидают приёмки: '''+str(pending)+'''</p></div>
+    <section class="panel">
+      <div class="panel-top"><span class="panel-icon">🖨</span><div><h2>Массовая печать QR</h2>
+      <div class="muted">Одна палета — один лист А4. Если состав палеты изменён, QR остаётся прежним.</div></div></div>
+      <div class="action-links">'''+(' '.join(buttons) if buttons else '<span class="muted">Нет палет для печати</span>')+'''</div>
+    </section>
+    <section class="panel"><h2>Палеты из файла</h2>
+      <div class="table-wrap"><table><thead><tr><th>Артикул</th><th>Палета</th>
+      <th>Количество</th><th>Статус</th><th>Действия</th></tr></thead>
+      <tbody>'''+''.join(table)+'''</tbody></table></div>
+      <p class="muted">Корректировать можно только палеты, не начатые в приёмке.</p>
+    </section>''')
