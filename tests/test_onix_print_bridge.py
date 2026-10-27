@@ -31,9 +31,10 @@ class OnixPrintBridgeTests(unittest.TestCase):
         self.client=app.app.test_client()
         with self.client.session_transaction() as s:
             s["manager_web"]=True
-        self.client.get("/manager/onix-print-test")
-        with self.client.session_transaction() as s:
+            s["onix_print_csrf"]="test-csrf-token-for-bridge"
             self.csrf=s["onix_print_csrf"]
+        result=self.client.get("/manager/onix-print-test")
+        self.assertEqual(result.status_code,200,result.data[:500])
 
     def _enqueue(self):
         return self.client.post("/manager/onix-print-test",data={
