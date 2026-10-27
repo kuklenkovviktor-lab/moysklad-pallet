@@ -481,7 +481,7 @@ def _excel_batch_rows(partner_id, batch_id):
         cur=db.cursor()
         batch=cur.execute(sql("""SELECT id,filename,created_at
             FROM partner_uploads WHERE id=? AND partner_id=?
-            AND LOWER(filename) LIKE '%.xlsx'"""),(batch_id,partner_id)).fetchone()
+            AND LOWER(filename) LIKE ?"""),(batch_id,partner_id,"%.xlsx")).fetchone()
         if not batch:
             abort(404)
         rows=cur.execute(sql("""
@@ -586,9 +586,9 @@ def dashboard():
               COUNT(p.id),SUM(CASE WHEN p.status='created' THEN 1 ELSE 0 END)
             FROM partner_uploads u JOIN partner_pallets p
               ON p.upload_id=u.id AND p.partner_id=u.partner_id
-            WHERE u.partner_id=? AND LOWER(u.filename) LIKE '%.xlsx'
+            WHERE u.partner_id=? AND LOWER(u.filename) LIKE ?
             GROUP BY u.id,u.filename,u.created_at
-            ORDER BY u.created_at DESC LIMIT 100"""),(p[0],)).fetchall()
+            ORDER BY u.created_at DESC LIMIT 100"""),(p[0],"%.xlsx")).fetchall()
     return dashboard_view(p[1], csrf(), stats, rows, labels, q, status,
                           current_page,page_count,total,
                           str(request.args.get("result","")),partner_catalog_widget(),
