@@ -1,0 +1,23 @@
+name: ONIX print bridge safety tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'onix_print_bridge.py'
+      - 'onix_print_agent.py'
+      - 'onix_usb_print_test.py'
+      - 'tests/test_onix_print_bridge.py'
+      - 'app.py'
+      - '.github/workflows/onix-print-bridge-tests.yml'
+  workflow_dispatch:
+jobs:
+  cloud-test-print:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q onix_print_bridge.py onix_print_agent.py tests/test_onix_print_bridge.py
+      - run: python -m unittest discover -s tests -p 'test_onix_print_bridge.py' -v
