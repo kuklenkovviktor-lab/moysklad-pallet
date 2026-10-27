@@ -245,6 +245,27 @@ class PartnerPalletTests(unittest.TestCase):
         another=self.client.get("/partners?q=FOREIGN")
         self.assertNotIn("FOREIGN",another.data.decode("utf-8").split("<tbody>")[1].split("</tbody>")[0])
 
+    def test_excel_filters_are_parameterized_for_postgres_psycopg(self):
+        # psycopg interprets a literal '%.' in SQL text as an invalid
+        # placeholder and fails GET /partners with HTTP 500.
+        import partner_pallets
+        real_sql=partner_pallets.sql
+        checked=[]
+        def validate(query):
+            if "LOWER(filename) LIKE" in query or "LOWER(u.filename) LIKE" in query:
+                self.assertNotIn("LIKE '%",query)
+                self.assertIn("LIKE ?",query)
+                checked.append(True)
+            return real_sql(query)
+        result=self.upload([("Артикул","Количество"),("SKU_NEW",5)],"order.xlsx")
+        self.assertEqual(result.status_code,302)
+        with patch("partner_pallets.sql",side_effect=validate):
+            dashboard=self.client.get("/partners")
+            batch=self.client.get(result.location)
+        self.assertEqual(dashboard.status_code,200)
+        self.assertEqual(batch.status_code,200)
+        self.assertEqual(len(checked),2)
+
     def test_excel_upload_prints_all_with_no_shipment_created(self):
         from wms import query_all
         result=self.upload([("Артикул","Палет","Ед. в палете","Количество, ед."),
