@@ -9,3 +9,6 @@ openpyxl==3.1.5
 
 # Render advisory (eMudhra, 2026-10-19): use patched HTTPS trust bundle.
 certifi>=2026.10.19
+
+# Patched certificate bundle in pip's vendored trust store.
+pip>=26.2.2
