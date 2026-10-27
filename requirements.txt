@@ -10,3 +10,6 @@ PyMuPDF==1.26.5
 
 # Render security advisory (eMudhra, 2026-10-19): Requests uses this CA bundle.
 certifi>=2026.10.19
+
+# Patched vendored CA bundle in Python package installer.
+pip>=26.2.2
