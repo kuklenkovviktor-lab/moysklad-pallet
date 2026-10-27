@@ -718,26 +718,47 @@ def manual_create():
 
 @partner_bp.route("/partners/pallet/<pallet_id>/edit",methods=["GET","POST"])
 def manual_edit(pallet_id):
+    """Change only a selected line of a not-yet-received pallet; preserve QR."""
     db_init()
     p=require_partner()
     if request.method=="POST":
         require_csrf()
     with db_connect() as db:
         cur=db.cursor()
-        row=cur.execute(sql("SELECT id,status FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
+        query="SELECT id,status,upload_id FROM partner_pallets WHERE id=? AND partner_id=?"
+        if DATABASE_URL and request.method=="POST":
+            query+=" FOR UPDATE"
+        row=cur.execute(sql(query),(pallet_id,p[0])).fetchone()
         if not row:
             abort(404)
         if row[1]!="created":
             return page("Изменение запрещено","Палета в обработке или уже принята"),409
-        lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=?"),(pallet_id,)).fetchall()
-        if len(lines)!=1:
-            return page("Изменение запрещено","Редактирование смешанной палеты пока недоступно"),409
-        back=str(request.form.get("back") if request.method=="POST" else request.args.get("back") or "").strip()
-        if back:
-            chosen=cur.execute(sql("SELECT upload_id FROM partner_pallets WHERE id=? AND partner_id=?"),(pallet_id,p[0])).fetchone()
-            check=cur.execute(sql("SELECT id FROM partner_uploads WHERE id=? AND partner_id=? AND planned_date IS NOT NULL"),(back,p[0])).fetchone()
-            if not check or not chosen or chosen[0]!=back:
-                back=""
+        lines=cur.execute(sql("SELECT id,sku,quantity FROM partner_pallet_lines WHERE pallet_id=? ORDER BY id"),(pallet_id,)).fetchall()
+        if not lines:
+            return page("Ошибка палеты","Состав палеты пуст. Обратись к руководителю склада."),409
+
+        back=str((request.form.get("back") if request.method=="POST" else request.args.get("back")) or "").strip()
+        back_kind=""
+        if back and row[2]==back:
+            upload=cur.execute(sql("SELECT filename,planned_date FROM partner_uploads WHERE id=? AND partner_id=?"),
+                               (back,p[0])).fetchone()
+            if upload and str(upload[0]).lower().endswith(".xlsx"):
+                back_kind="upload"
+            elif upload and upload[1]:
+                back_kind="shipment"
+        if not back_kind:
+            back=""
+
+        line_id=str((request.form.get("line_id") if request.method=="POST" else request.args.get("line_id")) or "")
+        if len(lines)==1 and not line_id:
+            line_id=lines[0][0]
+        chosen=next((r for r in lines if r[0]==line_id),None)
+        if chosen is None:
+            if request.method=="POST":
+                return page("Ошибка","Выбери позицию палеты для изменения"),400
+            chosen=lines[0]
+            line_id=chosen[0]
+
         if request.method=="POST":
             try:
                 sku,qty,reason=_manual_fields(request.form)
@@ -746,13 +767,21 @@ def manual_edit(pallet_id):
             cur.execute(sql("UPDATE partner_pallets SET external_ref=external_ref WHERE id=? AND partner_id=? AND status='created'"),(pallet_id,p[0]))
             if cur.rowcount!=1:
                 return page("Изменение запрещено","Палета уже в обработке"),409
-            cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=?"),(sku,qty,lines[0][0]))
-            cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),(str(uuid.uuid4()),pallet_id,p[0],"edit",lines[0][1],lines[0][2],sku,qty,reason,now()))
+            cur.execute(sql("UPDATE partner_pallet_lines SET sku=?,quantity=? WHERE id=? AND pallet_id=? AND sku=? AND quantity=?"),
+                        (sku,qty,chosen[0],pallet_id,chosen[1],chosen[2]))
+            if cur.rowcount!=1:
+                db.rollback()
+                return page("Ошибка","Палета была изменена в другой вкладке. Обнови страницу."),409
+            cur.execute(sql("INSERT INTO partner_pallet_changes(id,pallet_id,partner_id,action,old_sku,old_quantity,new_sku,new_quantity,reason,changed_at) VALUES (?,?,?,?,?,?,?,?,?,?)"),
+                        (str(uuid.uuid4()),pallet_id,p[0],"edit",chosen[1],chosen[2],sku,qty,reason,now()))
             db.commit()
-            return redirect("/partners/shipments/"+back if back else "/partners")
+            return redirect(("/partners/uploads/" if back_kind=="upload" else "/partners/shipments/")+back if back else "/partners")
+
     with db_connect() as db:
         entries=db.cursor().execute(sql("SELECT old_sku,old_quantity,new_sku,new_quantity,reason,changed_at FROM partner_pallet_changes WHERE pallet_id=? AND partner_id=? ORDER BY changed_at DESC"),(pallet_id,p[0])).fetchall()
-    return edit_view(csrf(),lines[0][1],lines[0][2],entries,partner_catalog_widget(),back=back)
+    return edit_view(csrf(),chosen[1],chosen[2],entries,partner_catalog_widget(),
+                     back=back,back_kind=back_kind,line_id=line_id,
+                     line_options=lines,pallet_id=pallet_id)
 
 
 @partner_bp.post("/partners/upload")
