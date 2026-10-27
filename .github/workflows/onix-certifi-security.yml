@@ -1,0 +1,38 @@
+name: ONIX patched HTTPS certificate bundle
+
+on:
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - '.github/workflows/onix-certifi-security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'requirements.txt'
+      - '.github/workflows/onix-certifi-security.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-certificates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned application dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Confirm patched Requests certificate trust store
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          import certifi
+          import requests
+          from pathlib import Path
+          installed = version('certifi')
+          version_tuple = tuple(int(x) for x in installed.split('.')[:3])
+          assert version_tuple >= (2026, 10, 19), f'Version {installed} is vulnerable'
+          assert Path(requests.certs.where()).resolve() == Path(certifi.where()).resolve()
+          print('Patched certifi:', installed)
+          print('Requests CA source: certifi')
+          PY
