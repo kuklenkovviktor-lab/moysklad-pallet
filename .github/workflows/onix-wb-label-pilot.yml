@@ -1,0 +1,20 @@
+name: ONIX original WB label USB pilot tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'onix_wb_label_pilot.py'
+      - 'tests/test_onix_wb_label_pilot.py'
+      - '.github/workflows/onix-wb-label-pilot.yml'
+  workflow_dispatch:
+jobs:
+  local-pdf-label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q onix_wb_label_pilot.py tests/test_onix_wb_label_pilot.py
+      - run: python -m unittest discover -s tests -p 'test_onix_wb_label_pilot.py' -v
