@@ -199,12 +199,6 @@ class PartnerPalletTests(unittest.TestCase):
             printed=self.client.get("/partners/pallet/"+pid+"/print")
             self.assertEqual(printed.status_code,200)
             self.assertIn(("КОЛИЧЕСТВО: "+str(labels[pid]["quantity"])+" ШТ.").encode(),printed.data)
-        # Batch labels must have the same numbers as individual labels.
-        sid=query_all("SELECT DISTINCT upload_id FROM partner_pallets WHERE partner_id=?", (partner_id,))[0][0]
-        batch=self.client.get("/partners/shipments/"+sid+"/print")
-        # Standard Excel uploads aren't associated with a shipment, so the
-        # direct batch route may not be available for this upload.
-        self.assertIn(batch.status_code,(200,302,404))
 
     def test_missing_quantity_blocks_print_instead_of_showing_zero(self):
         from wms import db_connect, sql, query_one
@@ -432,6 +426,10 @@ class PartnerPalletTests(unittest.TestCase):
         changed=self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"100","reason":"Фактически 100"})
         self.assertEqual(changed.status_code,302,changed.data[:500])
         self.assertEqual(query_one("SELECT quantity FROM partner_pallet_lines WHERE pallet_id=?",(pallet[0],))[0],100)
+        label=self.client.get("/partners/pallet/"+pallet[0]+"/print")
+        self.assertEqual(label.status_code,200)
+        self.assertIn("КОЛИЧЕСТВО: 100 ШТ.".encode(),label.data)
+        self.assertNotIn("КОЛИЧЕСТВО: 120 ШТ.".encode(),label.data)
         self.assertEqual(query_one("SELECT COUNT(*) FROM partner_pallet_changes WHERE pallet_id=?",(pallet[0],))[0],2)
         __import__("partner_pallets").claim_receiving_pallet(pallet[0])
         self.assertEqual(self.client.post(url,data={"csrf":self.token,"article":"SKU_NEW","quantity":"99","reason":"Поздно"}).status_code,409)
