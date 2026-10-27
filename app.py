@@ -32,6 +32,7 @@ from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
 from fbs_pdf_import import fbs_pdf_bp
+from onix_print_bridge import print_bridge_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
 from receiving_idempotency import (
@@ -103,6 +104,7 @@ app.register_blueprint(cell_audit_bp)
 app.register_blueprint(diag_bp)
 app.register_blueprint(shift_history_bp)
 app.register_blueprint(fbs_pdf_bp)
+app.register_blueprint(print_bridge_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
 
@@ -341,6 +343,11 @@ def require_employee_login():
     if path.startswith("/partners/") or path == "/partners":
         return None
 
+    # The opt-in test-print agent authenticates with its own bearer token
+    # inside onix_print_bridge; it never receives an employee session.
+    if path in ("/api/print-agent/test/next", "/api/print-agent/test/ack"):
+        return None
+
     # Отдельная браузерная сессия руководителя для ПК.
     # Она даёт доступ только к desktop-панели и её API, без имитации сотрудника/TSD.
     manager_paths = {
@@ -350,6 +357,7 @@ def require_employee_login():
         "/manager/shifts",
         "/manager/shift-history",
         "/manager/fbs-pdf",
+        "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
         "/api/manager/shift-history",
         "/api/manager/shifts/actions",
