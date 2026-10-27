@@ -6,3 +6,6 @@ boto3==1.40.61
 qrcode[pil]==8.2
 
 openpyxl==3.1.5
+
+# Render advisory (eMudhra, 2026-10-19): use patched HTTPS trust bundle.
+certifi>=2026.10.19
