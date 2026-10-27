@@ -57,6 +57,9 @@ def _init_db():
             claimed_at TEXT,
             completed_at TEXT
         )""")
+        db.cursor().execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_onix_test_one_unresolved
+            ON onix_test_print_jobs(kind)
+            WHERE status IN ('queued','claimed','uncertain')""")
         db.commit()
 
 
@@ -130,9 +133,13 @@ def test_print_enqueue():
         if waiting:
             return jsonify(error="Уже существует незавершённое или сомнительное задание"),409
         cur.execute(sql(
-            "INSERT INTO onix_test_print_jobs(id,kind,status,created_at) VALUES (?,?,?,?)"
+            "INSERT INTO onix_test_print_jobs(id,kind,status,created_at) VALUES (?,?,?,?) "
+            "ON CONFLICT DO NOTHING"
         ),(str(uuid.uuid4()),TEST_KIND,"queued",_now()))
+        created=cur.rowcount
         db.commit()
+    if created!=1:
+        return jsonify(error="Задание уже ожидает выполнения"),409
     return redirect("/manager/onix-print-test",code=303)
 
 
