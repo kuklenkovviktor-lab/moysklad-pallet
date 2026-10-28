@@ -119,12 +119,15 @@ def import_batch():
                 return jsonify(batch_id=existing[0], sticker_count=existing[1],
                                sku_count=existing[2], status=existing[3],
                                duplicate=True, print_jobs_created=0)
-            payload = raw if DATABASE_URL else raw
             cur.execute(sql("""INSERT INTO wb_pdf_batches
                 (id,sha256,filename,status,imported_at,sticker_count,sku_count,original_pdf)
-                VALUES (?,?,?,?,?,?,?,?)"""),
+                VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING"""),
                 (batch_id,digest,filename,"imported_review_only",_utc(),
-                 len(stickers),report["unique_articles"],payload))
+                 len(stickers),report["unique_articles"],raw))
+            if cur.rowcount == 0:
+                current = cur.execute(sql("SELECT id,sticker_count,sku_count,status FROM wb_pdf_batches WHERE sha256=?"), (digest,)).fetchone()
+                conn.commit()
+                return jsonify(batch_id=current[0],sticker_count=current[1],sku_count=current[2],status=current[3],duplicate=True,print_jobs_created=0)
             cur.executemany(sql("""INSERT INTO wb_pdf_batch_stickers
                 (batch_id,wb_code,article,page_no,product_barcode,location_label,route_status)
                 VALUES (?,?,?,?,?,?,?)"""),
