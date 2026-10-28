@@ -99,3 +99,28 @@ def list_queue():
         cur.close()
     keys=("id","batch_id","wb_code","article","line","printer","status","created_at")
     return jsonify(jobs=[dict(zip(keys,r)) for r in rows])
+
+# Read-only preview endpoint for a local Windows agent. It cannot claim a job
+# or change queue state, and intentionally never returns PDF contents.
+@wb_print_queue_bp.get("/api/print-agent/wb/preview-next")
+def agent_preview_next():
+    token=os.environ.get("ONIX_PRINT_AGENT_TOKEN","")
+    supplied=request.headers.get("Authorization","")
+    if len(token)<32 or not hmac.compare_digest(supplied,"Bearer "+token):
+        return jsonify(error="Unauthorized"),401
+    _schema()
+    from wb_pdf_batches import _schema as batch_schema
+    batch_schema()
+    with db_connect() as conn:
+        cur=conn.cursor()
+        row=cur.execute(sql("""SELECT j.id,j.batch_id,j.wb_code,j.article,j.page_no,
+                                      j.line,j.printer,b.sha256
+                               FROM wb_route_print_jobs j
+                               JOIN wb_pdf_batches b ON b.id=j.batch_id
+                               WHERE j.status='queued' AND j.printer=?
+                               ORDER BY j.created_at,j.id LIMIT 1"""),(TEST_PRINTER,)).fetchone()
+        cur.close()
+    if not row:
+        return "",204
+    keys=("job_id","batch_id","wb_code","article","page_no","line","printer","pdf_sha256")
+    return jsonify(dict(zip(keys,row), mode="dry_run_only"))
