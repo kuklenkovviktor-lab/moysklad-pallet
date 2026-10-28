@@ -1866,7 +1866,8 @@ function renderEmployeeShift(x,completed){
    .map(([type,sec])=>activityName(type)+': '+formatDuration(sec)).join(' · ');
  return '<div class="worker"><div><b>'+esc(x.employee)+'</b><div class="small op">'+esc(current)+'</div>'
    +(extra?'<div class="small">'+esc(extra)+'</div>':'')+'</div>'
-   +'<div><b>'+Number(x.orders||0)+'</b><div class="small">заказов</div></div>'
+   +'<div><b>'+Number(x.wb_fbs_orders??x.orders??0)+'</b><div class="small">WB FBS, заказов</div>'
+   +'<div class="small" style="margin-top:4px">Ozon FBO: <b>'+Number(x.ozon_fbo_units||0)+'</b> шт. · '+Number(x.ozon_fbo_scans||0)+' скан.</div></div>'
    +'<div><b>'+Number(x.orders_per_hour||0)+'</b><div class="small">заказ/ч</div></div>'
    +'<div><b>'+formatDuration(x.picking_seconds)+'</b><div class="small">чистая сборка</div></div>'
    +'<div><b>'+formatDuration(x.replenishment_seconds)+'</b><div class="small">пополнение за смену</div></div></div>';
@@ -3676,6 +3677,32 @@ def fbs_overview():
     )
 
 
+def _ozon_fbo_units_for_shift(shift):
+    """Read-only FBO units counted during this specific shift; never count as FBS orders."""
+    try:
+        rows = query_all(
+            """SELECT COALESCE(SUM(quantity),0), COUNT(*)
+               FROM ozon_fbo_pick_events
+               WHERE employee_id=? AND voided_at IS NULL
+                 AND created_at >= ? AND created_at < ?""",
+            (shift["employee_id"], shift["started_at"],
+             shift["ended_at"] or now_iso()),
+        )
+        return int(rows[0][0] or 0), int(rows[0][1] or 0)
+    except Exception:
+        # A new/unused FBO module may not have created its event table yet.
+        return 0, 0
+
+
+def _with_market_details(shift):
+    units, operations = _ozon_fbo_units_for_shift(shift)
+    shift["wb_fbs_orders"] = shift["orders"]
+    shift["ozon_fbo_units"] = units
+    shift["ozon_fbo_scans"] = operations
+    shift["market_breakdown_available"] = True
+    return shift
+
+
 @wms_bp.get("/api/fbs/dashboard")
 def dashboard():
     ensure_db()
@@ -3693,7 +3720,7 @@ def dashboard():
     for row in rows:
         item = shift_stats(row[0])
         if item:
-            workers.append(item)
+            workers.append(_with_market_details(item))
     completed = []
     date_from = request.args.get("from")
     date_to = request.args.get("to")
@@ -3718,5 +3745,5 @@ def dashboard():
         for row in ended_rows:
             item = shift_stats(row[0])
             if item:
-                completed.append(item)
+                completed.append(_with_market_details(item))
     return jsonify(workers=workers, completed=completed, target=TARGET, rate=RATE)
