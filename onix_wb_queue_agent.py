@@ -50,7 +50,8 @@ def validate_job(job, pdf_path, spooler):
     path = Path(pdf_path).resolve(strict=True)
     if not path.is_file() or path.suffix.lower() != ".pdf":
         raise ValueError("Нужен оригинальный локальный WB PDF")
-    digest = hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
+    with path.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
     if digest != job.get("pdf_sha256"):
         raise ValueError("SHA256 не совпадает: это другой PDF")
     meta, packed = read_and_select(path, str(job.get("wb_code","")))
