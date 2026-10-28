@@ -124,3 +124,67 @@ def agent_preview_next():
         return "",204
     keys=("job_id","batch_id","wb_code","article","page_no","line","printer","pdf_sha256")
     return jsonify(dict(zip(keys,row), mode="dry_run_only"))
+
+def _agent_authorized():
+    token=os.environ.get("ONIX_PRINT_AGENT_TOKEN","")
+    supplied=request.headers.get("Authorization","")
+    return len(token)>=32 and hmac.compare_digest(supplied,"Bearer "+token)
+
+
+@wb_print_queue_bp.post("/api/print-agent/wb/claim-one")
+def claim_one():
+    """Atomically claim one pending job. No PDF/USB data is sent."""
+    if not _agent_authorized():
+        return jsonify(error="Unauthorized"),401
+    _schema()
+    from wb_pdf_batches import _schema as batch_schema
+    batch_schema()
+    with db_connect() as conn:
+        cur=conn.cursor()
+        row=cur.execute(sql("""UPDATE wb_route_print_jobs
+             SET status='claimed',claimed_at=?
+             WHERE id=(SELECT id FROM wb_route_print_jobs
+                       WHERE status='queued' AND printer=?
+                       ORDER BY created_at,id LIMIT 1)
+               AND status='queued'
+             RETURNING id,batch_id,wb_code,article,page_no,line,printer"""),
+             (_now(),TEST_PRINTER)).fetchone()
+        conn.commit()
+        if not row:
+            cur.close()
+            return "",204
+        b=cur.execute(sql("SELECT sha256 FROM wb_pdf_batches WHERE id=?"),(row[1],)).fetchone()
+        cur.close()
+    if not b:
+        # Claimed job stays claimed for manual reconciliation; never requeue.
+        return jsonify(error="Исходная партия недоступна; ручная сверка"),409
+    keys=("job_id","batch_id","wb_code","article","page_no","line","printer")
+    return jsonify(dict(zip(keys,row),pdf_sha256=b[0],mode="claim_no_auto_retry"))
+
+
+@wb_print_queue_bp.post("/api/print-agent/wb/ack")
+def acknowledge_one():
+    """Terminal acknowledgement requires matching job ID and claim state."""
+    if not _agent_authorized():
+        return jsonify(error="Unauthorized"),401
+    data=request.get_json(silent=True) or {}
+    job_id=data.get("job_id")
+    status=data.get("status")
+    try:
+        uuid.UUID(job_id)
+    except (ValueError,TypeError,AttributeError):
+        return jsonify(error="Invalid job ID"),400
+    if status not in ("submitted","uncertain"):
+        return jsonify(error="Invalid status"),400
+    _schema()
+    with db_connect() as conn:
+        cur=conn.cursor()
+        cur.execute(sql("""UPDATE wb_route_print_jobs SET status=?,completed_at=?
+                           WHERE id=? AND status='claimed' AND printer=?"""),
+                    (status,_now(),job_id,TEST_PRINTER))
+        changed=cur.rowcount
+        conn.commit()
+        cur.close()
+    if changed!=1:
+        return jsonify(error="Not claimed or already acknowledged"),409
+    return jsonify(ok=True,job_id=job_id,status=status,physical_print_confirmed=False)
