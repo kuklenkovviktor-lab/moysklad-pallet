@@ -159,3 +159,55 @@ def list_batches():
                                    FROM wb_pdf_batches ORDER BY imported_at DESC LIMIT 30""")).fetchall()
         cur.close()
     return jsonify(batches=[dict(zip(("id","filename","status","imported_at","sticker_count","sku_count"),row)) for row in rows])
+
+# Read-only route planning: no job creation, assignment or printer access.
+import re
+LINE_PATTERN = re.compile(r"^([A-Z])(?:[-_ ]?\\d|$)")
+
+
+def classify_route(location, status, allowed):
+    if status != "located" or not location:
+        return "blocked_" + status
+    matched = LINE_PATTERN.match(location.upper())
+    if not matched:
+        return "blocked_invalid_address"
+    line = matched.group(1)
+    return line if line in allowed else "outside_selected_lines"
+
+
+@wb_batches_bp.get("/api/manager/wb-batches/<batch_id>/routes")
+def batch_routes(batch_id):
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    try:
+        uuid.UUID(batch_id)
+    except (TypeError, ValueError):
+        return jsonify(error="Некорректный ID партии"), 400
+    requested = request.args.get("lines", "A,B").upper().split(",")
+    lines = sorted({part.strip() for part in requested})
+    if not lines or len(lines)>4 or any(len(x)!=1 or x not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for x in lines):
+        return jsonify(error="Укажи до четырёх линий A-Z"), 400
+    _schema()
+    with db_connect() as conn:
+        cur = conn.cursor()
+        batch = cur.execute(sql("SELECT id,sticker_count FROM wb_pdf_batches WHERE id=?"), (batch_id,)).fetchone()
+        if not batch:
+            return jsonify(error="Партия не найдена"), 404
+        rows = cur.execute(sql("""SELECT wb_code,article,page_no,location_label,route_status
+                                  FROM wb_pdf_batch_stickers WHERE batch_id=?
+                                  ORDER BY page_no,wb_code"""), (batch_id,)).fetchall()
+        cur.close()
+    counts = {line:0 for line in lines}
+    blocked = {}
+    selected = []
+    for code,article,page,address,status in rows:
+        route = classify_route(address,status,lines)
+        if route in counts:
+            counts[route] += 1
+            selected.append({"wb_code":code,"article":article,"page":page,"address":address,"line":route})
+        else:
+            blocked[route] = blocked.get(route,0)+1
+    return jsonify(batch_id=batch_id,selected_lines=lines,counts=counts,
+                   blocked=blocked,selected_orders=selected,
+                   total_stickers=batch[1],print_jobs_created=0,
+                   mode="read_only_preview")
