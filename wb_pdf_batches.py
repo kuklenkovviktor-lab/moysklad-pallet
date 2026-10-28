@@ -162,7 +162,7 @@ def list_batches():
 
 # Read-only route planning: no job creation, assignment or printer access.
 import re
-LINE_PATTERN = re.compile(r"^([A-Z])(?:[-_ ]?\\d|$)")
+LINE_PATTERN = re.compile(r"^([A-Z])(?:[-_ ]?[0-9]|$)")
 
 
 def classify_route(location, status, allowed):
