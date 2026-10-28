@@ -36,6 +36,7 @@ _previous_labels = sys.modules.get("fbs_pdf_labels")
 sys.modules["fbs_pdf_labels"] = labels_stub
 import wb_pdf_batches as batches
 import wb_print_queue as queue
+import onix_wb_queue_agent as agent
 # Restore process-wide module lookup after loading the isolated test subjects.
 if _previous_wms is None:
     sys.modules.pop("wms", None)
@@ -173,6 +174,45 @@ class BatchTests(unittest.TestCase):
                                        json={"job_id":job["job_id"],"status":"submitted"})
             self.assertEqual(duplicate.status_code,409)
             self.assertEqual(self.client.post("/api/print-agent/wb/claim-one").status_code,401)
+
+    def test_agent_spools_once_on_valid_claim(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            pdf=Path(directory)/"wb.pdf"
+            pdf.write_bytes(b"%PDF-FAKE-CONTENT")
+            digest=__import__("hashlib").sha256(pdf.read_bytes()).hexdigest()
+            base={"mode":"dry_run_only","printer":"ONIX-TEST-XP460B",
+                  "pdf_sha256":digest,"wb_code":"59393228243",
+                  "article":"1349_NONE","page_no":2,"job_id":"test-job",
+                  "batch_id":"batch-one"}
+            claimed=dict(base,mode="claim_no_auto_retry")
+            replies=[base,claimed,{"ok":True}]
+            def remote(*args,**kwargs):return replies.pop(0)
+            metadata={"wb_code":"59393228243","article":"1349_NONE",
+                      "page":2,"target_mm":[58,40]}
+            with patch.object(agent,"remote",side_effect=remote), \
+                 patch.object(agent,"validate_job",return_value={"verified":True}), \
+                 patch.object(agent,"read_and_select",return_value=(metadata,b"bitmap")), \
+                 patch.object(agent,"_spool_one") as printer:
+                agent.do_print_one("s"*40,str(pdf),object())
+                printer.assert_called_once()
+
+    def test_agent_refuses_changed_job_without_spooling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            from pathlib import Path
+            pdf=Path(directory)/"wb.pdf"
+            pdf.write_bytes(b"%PDF-FAKE")
+            first={"mode":"dry_run_only","printer":"ONIX-TEST-XP460B",
+                   "job_id":"first","wb_code":"59393228243","article":"1349_NONE",
+                   "page_no":2,"batch_id":"b","pdf_sha256":"x"}
+            changed=dict(first,mode="claim_no_auto_retry",job_id="different")
+            replies=[first,changed,{"ok":True}]
+            with patch.object(agent,"remote",side_effect=lambda *a,**k:replies.pop(0)), \
+                 patch.object(agent,"validate_job",return_value={"verified":True}), \
+                 patch.object(agent,"_spool_one") as printer:
+                with self.assertRaises(ValueError):
+                    agent.do_print_one("s"*40,str(pdf),object())
+                printer.assert_not_called()
 
     def test_invalid_origin_and_pdf(self):
         self.assertEqual(self.upload(headers={"Origin":"https://evil.example"}).status_code, 403)
