@@ -34,6 +34,7 @@ from shift_history import shift_history_bp
 from fbs_pdf_import import fbs_pdf_bp
 from onix_print_bridge import print_bridge_bp
 from wb_pdf_batches import wb_batches_bp
+from wb_print_queue import wb_print_queue_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
 from receiving_idempotency import (
@@ -107,6 +108,7 @@ app.register_blueprint(shift_history_bp)
 app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(print_bridge_bp)
 app.register_blueprint(wb_batches_bp)
+app.register_blueprint(wb_print_queue_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
 
