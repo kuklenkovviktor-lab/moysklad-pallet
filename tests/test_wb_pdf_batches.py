@@ -82,6 +82,19 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batches").fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batch_stickers").fetchone()[0], 4)
 
+    def test_read_only_route_preview(self):
+        with patch.object(batches, "_parse", return_value=make_report()):
+            data = self.upload(raw=b"%PDF-ROUTE").get_json()
+        batch_id = data["batch_id"]
+        r = self.client.get(f"/api/manager/wb-batches/{batch_id}/routes?lines=E,A")
+        self.assertEqual(r.status_code, 200, r.get_json())
+        out = r.get_json()
+        self.assertEqual(out["counts"], {"A": 0, "E": 2})
+        self.assertEqual(out["blocked"], {"blocked_unassigned": 1, "blocked_ambiguous": 1})
+        self.assertEqual(out["print_jobs_created"], 0)
+        self.assertEqual(len(out["selected_orders"]), 2)
+        self.assertEqual(self.client.get(f"/api/manager/wb-batches/{batch_id}/routes?lines=A,INVALID").status_code, 400)
+
     def test_invalid_origin_and_pdf(self):
         self.assertEqual(self.upload(headers={"Origin":"https://evil.example"}).status_code, 403)
         self.assertEqual(self.upload(raw=b"NOT A PDF").status_code, 400)
