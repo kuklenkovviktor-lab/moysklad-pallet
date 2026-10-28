@@ -26,14 +26,25 @@ def db_connect():
 wms_stub.db_connect = db_connect
 wms_stub.manager_access = lambda: True
 wms_stub.sql = lambda q: q
+_previous_wms = sys.modules.get("wms")
 sys.modules["wms"] = wms_stub
 
 labels_stub = types.ModuleType("fbs_pdf_labels")
 labels_stub.parse_wb_labels = lambda doc: None
 labels_stub.attach_active_locations = lambda report: report
+_previous_labels = sys.modules.get("fbs_pdf_labels")
 sys.modules["fbs_pdf_labels"] = labels_stub
 import wb_pdf_batches as batches
 import wb_print_queue as queue
+# Restore process-wide module lookup after loading the isolated test subjects.
+if _previous_wms is None:
+    sys.modules.pop("wms", None)
+else:
+    sys.modules["wms"] = _previous_wms
+if _previous_labels is None:
+    sys.modules.pop("fbs_pdf_labels", None)
+else:
+    sys.modules["fbs_pdf_labels"] = _previous_labels
 
 
 def make_report():
