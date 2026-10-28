@@ -116,6 +116,25 @@ class BatchTests(unittest.TestCase):
         with db_connect() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_route_print_jobs WHERE batch_id=?",(batch_id,)).fetchone()[0],2)
 
+    def test_agent_preview_read_only_and_authenticated(self):
+        with patch.object(batches, "_parse", return_value=make_report()):
+            batch_id = self.upload(raw=b"%PDF-AGENT").get_json()["batch_id"]
+        route=f"/api/manager/wb-batches/{batch_id}/print-queue"
+        self.client.post(route,json={"confirmation":"reserve-onix-test-only","lines":["E"],
+                                   "printer":"ONIX-TEST-XP460B"},
+            base_url="https://onix.example",headers={"Origin":"https://onix.example"})
+        with patch.dict(os.environ, {"ONIX_PRINT_AGENT_TOKEN":"s"*40}):
+            endpoint="/api/print-agent/wb/preview-next"
+            self.assertEqual(self.client.get(endpoint).status_code,401)
+            good=self.client.get(endpoint,headers={"Authorization":"Bearer "+"s"*40})
+            self.assertEqual(good.status_code,200,good.get_json())
+            self.assertEqual(good.get_json()["wb_code"],"59393228243")
+            self.assertEqual(good.get_json()["mode"],"dry_run_only")
+            with db_connect() as conn:
+                status=conn.execute("SELECT status FROM wb_route_print_jobs WHERE id=?",
+                                    (good.get_json()["job_id"],)).fetchone()[0]
+                self.assertEqual(status,"queued")
+
     def test_invalid_origin_and_pdf(self):
         self.assertEqual(self.upload(headers={"Origin":"https://evil.example"}).status_code, 403)
         self.assertEqual(self.upload(raw=b"NOT A PDF").status_code, 400)
