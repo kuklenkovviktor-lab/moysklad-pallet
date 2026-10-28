@@ -67,7 +67,7 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 <tbody id="wbProducts"></tbody></table></div>
 <p class="small">Точные адреса берутся из карты ONIX. Если SKU закреплён за несколькими ячейками, выбрать адрес автоматически нельзя. Данные остаются только в ответе текущей загрузки.</p>
 </section>
-<section class="card" id="results" hidden>
+<section class="card" id="batchSave" hidden><h2>Сохранить проверенную партию WB</h2><p class="small">PDF и ШК сохраняются. Печать, сборка и остатки не изменяются.</p><button type="button" id="saveBatch">Сохранить партию без печати</button><div id="batchMessage" role="status"></div></section><section class="card" id="results" hidden>
 <h2>Предпросмотр содержимого</h2>
 <p class="small">ONIX показывает текст и размеры выбранных страниц. Найденные числа и артикулы пока не считаются подтверждёнными заказами. Для сканированных этикеток без текстового слоя понадобится отдельный этап распознавания.</p>
 <div id="warnings"></div>
@@ -76,14 +76,14 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 </main><script>
 const form=document.getElementById('form'),button=document.getElementById('submit');
 const msg=document.getElementById('message'),summary=document.getElementById('summary');
-const results=document.getElementById('results'),wbEl=document.getElementById('wb');
+const results=document.getElementById('results'),wbEl=document.getElementById('wb');const batchSave=document.getElementById('batchSave'),saveBatch=document.getElementById('saveBatch'),batchMessage=document.getElementById('batchMessage');
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function metric(label,value){return '<div class="metric"><div class="l">'+esc(label)+'</div><div class="v">'+esc(value)+'</div></div>'}
 function renderWB(d){
  const w=d.wb_report;
- if(!w){wbEl.hidden=true;return}
+ if(!w){wbEl.hidden=true;batchSave.hidden=true;return}
  wbEl.hidden=false;
- const good=w.valid_structure;
+ const good=w.valid_structure;batchSave.hidden=!(good && w.locations_available);
  document.getElementById('wbStatus').className='notice'+(good?' good':' error');
  document.getElementById('wbStatus').textContent=good?
   '✓ Весь файл согласован: количество уникальных ШК WB равно заявленным количествам по SKU. Это ещё не подтверждение от WB API.':
@@ -142,7 +142,7 @@ form.addEventListener('submit',async e=>{
  const file=document.getElementById('pdf').files[0];
  if(!file){msg.textContent='Выбери PDF';return}
  if(file.size>25*1024*1024){msg.className='error';msg.textContent='PDF больше 25 МБ';return}
- button.disabled=true;summary.hidden=true;results.hidden=true;wbEl.hidden=true;
+ button.disabled=true;summary.hidden=true;results.hidden=true;wbEl.hidden=true;batchSave.hidden=true;batchMessage.textContent='';
  msg.className='';msg.textContent='Проверяю PDF…';
  try{
   const formData=new FormData();formData.append('file',file);
@@ -158,5 +158,21 @@ form.addEventListener('submit',async e=>{
  }catch(err){msg.className='error';msg.textContent=err.name==='AbortError'?
   'Обработка слишком долгая. Попробуй меньший файл для первого теста.':err.message;
  }finally{button.disabled=false}
+});
+saveBatch.addEventListener('click',async ()=>{
+ const file=document.getElementById('pdf').files[0];
+ if(!file||saveBatch.disabled)return;
+ saveBatch.disabled=true;batchMessage.textContent='Сохраняю партию…';
+ try{
+  const fd=new FormData();fd.append('file',file);
+  const r=await fetch('/api/manager/wb-batches/import',{method:'POST',body:fd,cache:'no-store'});
+  if(r.status===403){location.href='/manager-login';return}
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error||'Сохранение не удалось');
+  batchMessage.className='good';
+  batchMessage.textContent=(d.duplicate?'Партия уже сохранена. ':'Партия сохранена. ')+
+   'Стикеров: '+d.sticker_count+', заданий печати: 0. ID: '+d.batch_id;
+ }catch(err){batchMessage.className='error';batchMessage.textContent=err.message}
+ finally{saveBatch.disabled=false}
 });
 </script></body></html>"""
