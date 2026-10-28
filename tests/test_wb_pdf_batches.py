@@ -81,8 +81,8 @@ class BatchTests(unittest.TestCase):
             self.assertTrue(repeat.get_json()["duplicate"])
             self.assertEqual(repeat.get_json()["batch_id"], data["batch_id"])
         with db_connect() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batches").fetchone()[0], 1)
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batch_stickers").fetchone()[0], 4)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batches WHERE id=?",(data["batch_id"],)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_pdf_batch_stickers WHERE batch_id=?",(data["batch_id"],)).fetchone()[0], 4)
 
     def test_read_only_route_preview(self):
         with patch.object(batches, "_parse", return_value=make_report()):
