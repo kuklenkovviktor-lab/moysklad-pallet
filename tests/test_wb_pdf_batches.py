@@ -135,6 +135,33 @@ class BatchTests(unittest.TestCase):
                                     (good.get_json()["job_id"],)).fetchone()[0]
                 self.assertEqual(status,"queued")
 
+    def test_atomic_claim_and_ack_no_requeue(self):
+        with patch.object(batches, "_parse", return_value=make_report()):
+            batch_id=self.upload(raw=b"%PDF-CLAIM").get_json()["batch_id"]
+        route=f"/api/manager/wb-batches/{batch_id}/print-queue"
+        self.client.post(route,json={"confirmation":"reserve-onix-test-only",
+                 "lines":["E"],"printer":"ONIX-TEST-XP460B"},
+                 headers={"Origin":"https://onix.example"},base_url="https://onix.example")
+        auth={"Authorization":"Bearer "+"s"*40}
+        with patch.dict(os.environ,{"ONIX_PRINT_AGENT_TOKEN":"s"*40}):
+            one=self.client.post("/api/print-agent/wb/claim-one",headers=auth)
+            self.assertEqual(one.status_code,200,one.get_json())
+            job=one.get_json()
+            self.assertEqual(job["mode"],"claim_no_auto_retry")
+            two=self.client.post("/api/print-agent/wb/claim-one",headers=auth)
+            self.assertEqual(two.status_code,200,two.get_json())
+            self.assertNotEqual(job["job_id"],two.get_json()["job_id"])
+            three=self.client.post("/api/print-agent/wb/claim-one",headers=auth)
+            self.assertEqual(three.status_code,204)
+            ack=self.client.post("/api/print-agent/wb/ack",headers=auth,
+                                 json={"job_id":job["job_id"],"status":"uncertain"})
+            self.assertEqual(ack.status_code,200,ack.get_json())
+            self.assertFalse(ack.get_json()["physical_print_confirmed"])
+            duplicate=self.client.post("/api/print-agent/wb/ack",headers=auth,
+                                       json={"job_id":job["job_id"],"status":"submitted"})
+            self.assertEqual(duplicate.status_code,409)
+            self.assertEqual(self.client.post("/api/print-agent/wb/claim-one").status_code,401)
+
     def test_invalid_origin_and_pdf(self):
         self.assertEqual(self.upload(headers={"Origin":"https://evil.example"}).status_code, 403)
         self.assertEqual(self.upload(raw=b"NOT A PDF").status_code, 400)
