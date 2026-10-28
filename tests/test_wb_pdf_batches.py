@@ -33,6 +33,7 @@ labels_stub.parse_wb_labels = lambda doc: None
 labels_stub.attach_active_locations = lambda report: report
 sys.modules["fbs_pdf_labels"] = labels_stub
 import wb_pdf_batches as batches
+import wb_print_queue as queue
 
 
 def make_report():
@@ -57,6 +58,7 @@ class BatchTests(unittest.TestCase):
     def setUpClass(cls):
         app = Flask(__name__)
         app.register_blueprint(batches.wb_batches_bp)
+        app.register_blueprint(queue.wb_print_queue_bp)
         cls.client = app.test_client()
 
     def upload(self, raw=b"%PDF-VALID", headers=None):
@@ -94,6 +96,25 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(out["print_jobs_created"], 0)
         self.assertEqual(len(out["selected_orders"]), 2)
         self.assertEqual(self.client.get(f"/api/manager/wb-batches/{batch_id}/routes?lines=A,INVALID").status_code, 400)
+
+    def test_queue_idempotency_and_test_printer_only(self):
+        with patch.object(batches, "_parse", return_value=make_report()):
+            batch_id=self.upload(raw=b"%PDF-QUEUE").get_json()["batch_id"]
+        route=f"/api/manager/wb-batches/{batch_id}/print-queue"
+        data={"confirmation":"reserve-onix-test-only","lines":["E"],"printer":"ONIX-TEST-XP460B"}
+        kwargs={"json":data,"base_url":"https://onix.example","headers":{"Origin":"https://onix.example"}}
+        first=self.client.post(route,**kwargs)
+        self.assertEqual(first.status_code,200,first.get_json())
+        self.assertEqual(first.get_json()["created"],2)
+        second=self.client.post(route,**kwargs)
+        self.assertEqual(second.status_code,200)
+        self.assertEqual(second.get_json()["created"],0)
+        self.assertEqual(second.get_json()["already_reserved"],2)
+        bad=dict(data,printer="Xprinter XP-460B")
+        self.assertEqual(self.client.post(route,json=bad,base_url="https://onix.example",
+            headers={"Origin":"https://onix.example"}).status_code,400)
+        with db_connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM wb_route_print_jobs WHERE batch_id=?",(batch_id,)).fetchone()[0],2)
 
     def test_invalid_origin_and_pdf(self):
         self.assertEqual(self.upload(headers={"Origin":"https://evil.example"}).status_code, 403)
