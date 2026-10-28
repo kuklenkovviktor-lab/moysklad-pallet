@@ -4,11 +4,10 @@ Stores the original validated document in DB for a future audited print workflow
 All imported stickers have unique codes within the batch.
 """
 import hashlib
-import io
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Blueprint, jsonify, request
 from wms import DATABASE_URL, db_connect, manager_access, sql
@@ -89,6 +88,11 @@ def _sticker_rows(report):
 def import_batch():
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
+    # Explicit same-origin browser action; reject cross-site form submissions.
+    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    target = urlsplit(origin)
+    if target.scheme != "https" or target.netloc != request.host:
+        return jsonify(error="Запрос должен исходить из защищённого интерфейса ONIX"), 403
     if request.content_length is not None and request.content_length > MAX_PDF_BYTES + 65536:
         return jsonify(error="PDF превышает 25 МБ"), 413
     upload = request.files.get("file")
