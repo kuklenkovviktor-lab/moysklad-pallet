@@ -152,7 +152,8 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(two.status_code,200,two.get_json())
             self.assertNotEqual(job["job_id"],two.get_json()["job_id"])
             three=self.client.post("/api/print-agent/wb/claim-one",headers=auth)
-            self.assertEqual(three.status_code,204)
+            self.assertEqual(three.status_code,200)
+            self.assertNotIn(three.get_json()["job_id"], (job["job_id"],two.get_json()["job_id"]))
             ack=self.client.post("/api/print-agent/wb/ack",headers=auth,
                                  json={"job_id":job["job_id"],"status":"uncertain"})
             self.assertEqual(ack.status_code,200,ack.get_json())
