@@ -20,9 +20,16 @@ from onix_usb_print_test import (
     verify_safe_test_destination,
 )
 
-WIDTH_DOTS = 320
-HEIGHT_DOTS = 240
+# Both warehouse Xprinter XP-460B units use 58x40 mm media.
+# 203 dpi is approximately 8 printer dots per millimetre.
+LABEL_WIDTH_MM = 58
+LABEL_HEIGHT_MM = 40
+DOTS_PER_MM = 8
+WIDTH_DOTS = LABEL_WIDTH_MM * DOTS_PER_MM
+HEIGHT_DOTS = LABEL_HEIGHT_MM * DOTS_PER_MM
 BYTES_PER_ROW = WIDTH_DOTS // 8
+# Leave 1.5 mm of white margin on all sides for barcodes / quiet zones.
+PRINT_MARGIN_DOTS = 12
 MAX_PDF_BYTES = 25 * 1024 * 1024
 MAX_PAGES = 10000
 WB_PATTERN = re.compile(r"\d{11}\Z")
@@ -72,18 +79,25 @@ def read_and_select(pdf_path, wb_code):
                 f"Размер исходной страницы {w_mm:.1f}×{h_mm:.1f} мм. "
                 "Это не отдельная этикетка. Печать запрещена."
             )
-        # Scale uniformly to fit 40×30, never crop or distort WB code.
-        scale = min(WIDTH_DOTS / page.rect.width, HEIGHT_DOTS / page.rect.height)
+        # Scale uniformly to the usable 58x40 area: no cropping,
+        # stretched barcode modules or contact with the label edges.
+        usable_width = WIDTH_DOTS - 2 * PRINT_MARGIN_DOTS - 2
+        usable_height = HEIGHT_DOTS - 2 * PRINT_MARGIN_DOTS - 2
+        scale = min(usable_width / page.rect.width,
+                    usable_height / page.rect.height)
         pix = page.get_pixmap(
             matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY, alpha=False
         )
-        if pix.width > WIDTH_DOTS or pix.height > HEIGHT_DOTS:
-            raise PilotError("Изображение превышает размеры 40×30 мм.")
+        if pix.width > usable_width + 1 or pix.height > usable_height + 1:
+            raise PilotError("Изображение не помещается в безопасную область 58×40 мм.")
         packed = pack_monochrome(pix.samples, pix.width, pix.height, pix.stride)
         return {
             "pdf_path": str(path), "pdf_sha256": digest,
             "wb_code": wb_code, "page": sticker["page"],
             "article": product["article"], "source_mm": [round(w_mm, 1), round(h_mm, 1)],
+            "target_mm": [LABEL_WIDTH_MM, LABEL_HEIGHT_MM],
+            "margin_mm": PRINT_MARGIN_DOTS / DOTS_PER_MM,
+            "rendered_content_dots": [pix.width, pix.height],
             "raster_sha256": hashlib.sha256(packed).hexdigest(),
         }, packed
 
@@ -114,7 +128,8 @@ def tspl_bitmap(packed):
     if len(packed) != HEIGHT_DOTS * BYTES_PER_ROW:
         raise PilotError("Некорректный размер TSPL растра.")
     return (
-        b"SIZE 40 mm,30 mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 1\r\nCLS\r\n"
+        f"SIZE {LABEL_WIDTH_MM} mm,{LABEL_HEIGHT_MM} mm\r\n"
+        .encode("ascii") + b"GAP 2 mm,0 mm\r\nDIRECTION 1\r\nCLS\r\n"
         + f"BITMAP 0,0,{BYTES_PER_ROW},{HEIGHT_DOTS},0,".encode("ascii")
         + packed
         + b"\r\nPRINT 1,1\r\n"
@@ -215,7 +230,8 @@ def print_review(pdf_path, wb_code, confirmed_code, spooler=None):
         raise PilotError("Эта этикетка уже заявлена к печати. Повтор запрещён.")
     fresh, packed = read_and_select(pdf_path, wb_code)
     for field in ("pdf_path", "pdf_sha256", "wb_code", "page",
-                  "article", "source_mm", "raster_sha256", "printer"):
+                  "article", "source_mm", "target_mm", "margin_mm",
+                  "rendered_content_dots", "raster_sha256", "printer"):
         expected = TEST_PRINTER_NAME if field == "printer" else fresh.get(field)
         if saved.get(field) != expected:
             raise PilotError("Исходный PDF или параметры изменились. Печать запрещена.")
@@ -260,7 +276,8 @@ def main(argv=None):
             png, journal, meta = write_review(args.pdf, args.barcode)
             print("Готово БЕЗ ПЕЧАТИ:", png)
             print("Артикул:", meta["article"], "Страница:", meta["page"],
-                  "Размер PDF (мм):", meta["source_mm"])
+                  "Размер PDF (мм):", meta["source_mm"],
+                  "Размер печати (мм):", meta["target_mm"])
             print("Открой PNG, проверь изображение и только затем разрешай печать.")
         else:
             if not args.confirm_code:
