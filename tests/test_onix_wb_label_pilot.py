@@ -83,6 +83,11 @@ class PilotTests(unittest.TestCase):
         self.assertTrue(png.exists())
         self.assertTrue(review.exists())
         self.assertEqual(data["page"],2)
+        self.assertEqual(data["target_mm"],[58,40])
+        self.assertEqual(data["margin_mm"],1.5)
+        self.assertEqual(png.read_bytes()[16:24], __import__("struct").pack(">II",464,320))
+        self.assertGreater(data["rendered_content_dots"][0],320)
+        self.assertGreater(data["rendered_content_dots"][1],240)
         self.assertEqual(data["article"],"1234_TEST")
         self.assertEqual(data["status"],"preview_ready")
         self.assertTrue(png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
@@ -99,7 +104,8 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(len(device.writes),1)
         self.assertEqual(device.calls[0],("open","ONIX-TEST-XP460B"))
         raw=device.writes[0]
-        self.assertIn(b"BITMAP 0,0,40,240,0,",raw)
+        self.assertIn(b"SIZE 58 mm,40 mm",raw)
+        self.assertIn(b"BITMAP 0,0,58,320,0,",raw)
         self.assertTrue(raw.endswith(b"\r\nPRINT 1,1\r\n"))
         self.assertEqual(raw.count(b"PRINT 1,1"),1)
         _,journal=pilot.paths_for(self.pdf,self.code)
@@ -156,10 +162,27 @@ class PilotTests(unittest.TestCase):
 
     def test_packing_white_padding_and_black_pixels(self):
         px=pilot.pack_monochrome(bytes([0,255,255,0]*30),4,30,4)
-        self.assertEqual(len(px),40*240)
-        self.assertEqual(px[:40], b"\xff"*40)
-        self.assertNotEqual(px[110*40:111*40],b"\xff"*40)
-        self.assertIn(b"BITMAP 0,0,40,240,0,",pilot.tspl_bitmap(px))
+        self.assertEqual(len(px),58*320)
+        self.assertEqual(px[:58], b"\xff"*58)
+        self.assertNotEqual(px[150*58:151*58],b"\xff"*58)
+        self.assertIn(b"BITMAP 0,0,58,320,0,",pilot.tspl_bitmap(px))
+
+    def test_old_40x30_preview_cannot_be_printed_after_geometry_change(self):
+        png, journal, saved = pilot.write_review(self.pdf,self.code)
+        saved["target_mm"] = [40,30]
+        journal.write_text(json.dumps(saved),encoding="utf-8")
+        device=FakeSpooler()
+        with self.assertRaises(pilot.PilotError):
+            pilot.print_review(self.pdf,self.code,self.code,device)
+        self.assertEqual(device.writes,[])
+
+    def test_original_label_preserves_aspect_ratio_and_margins(self):
+        data,_=pilot.read_and_select(self.pdf,self.code)
+        width,height=data["rendered_content_dots"]
+        self.assertLessEqual(width,464-2*12)
+        self.assertLessEqual(height,320-2*12)
+        # Source PDF sticker aspect is 40:30 and should not be stretched
+        self.assertAlmostEqual(width/height,40/30,delta=0.03)
 
     def test_rejects_label_page_thats_a4(self):
         doc=fitz.open()
