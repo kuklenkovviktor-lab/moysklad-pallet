@@ -24,7 +24,7 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
-from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
+from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status, legacy_sscc_pallet
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from warehouse_map import warehouse_map_bp
@@ -2581,6 +2581,11 @@ def osz_check():
     try:
         data = request.get_json(force=True)
         sscc = normalize_sscc(data.get("sscc", ""))
+        if legacy_sscc_pallet(sscc):
+            return jsonify(
+                error="Этот SSCC ОСЗ уже связан с новым QR ONIX. Сканируй ONIX-PAL на палете.",
+                reason="onix_qr_required",
+            ), 409
         existing = query_one(
             "SELECT receipt_id, article, quantity, accepted_at FROM external_pallets WHERE sscc = ?",
             (sscc,),
@@ -2719,6 +2724,13 @@ def osz_accept():
         if not employee:
             return jsonify(error="Нужен вход по бейджу"), 401
 
+        # Migration guard: old physical SSCC and new QR are a single pallet.
+        # Once mapped, never allow the legacy route to write a second time.
+        if legacy_sscc_pallet(sscc):
+            return jsonify(
+                error="Этот SSCC ОСЗ переведён на QR ONIX-PAL. Повторная приёмка запрещена.",
+                reason="onix_qr_required",
+            ), 409
         accepted = query_one("SELECT receipt_id FROM external_pallets WHERE sscc = ?", (sscc,))
         if accepted:
             return jsonify(error=f"Палета ОСЗ SSCC {sscc} уже принята."), 409
@@ -2839,6 +2851,8 @@ def cache_status():
 
 def partner_pallet_status_error(pallet):
     status = pallet["status"]
+    if status == "legacy_already_processed":
+        return "SSCC этой палеты ОСЗ ранее был принят или требует сверки с МойСклад. Новый QR заблокирован."
     if status == "accepted":
         accepted_at = pallet.get("accepted_at")
         if accepted_at:
