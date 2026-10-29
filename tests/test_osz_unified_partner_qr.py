@@ -92,12 +92,12 @@ class OszUnifiedQrTests(unittest.TestCase):
         self.assertIn(b"size:A4 portrait", print_page.data)
         self.assertIn("КОЛИЧЕСТВО: 144 ШТ.".encode(), print_page.data)
         self.assertNotIn(qr_code.encode(), print_page.data)
-        old_check = self.client.post("/api/osz/check", json={"sscc": code})
-        self.assertEqual(old_check.status_code, 409, old_check.json)
-        self.assertEqual(old_check.json.get("reason"), "onix_qr_required")
         with patch.object(app, "get_session_employee",
                           return_value={"id": "viktor", "name": "Viktor"}), \
              patch.object(app, "add_or_increment_position") as write:
+            old_check = self.client.post("/api/osz/check", json={"sscc": code})
+            self.assertEqual(old_check.status_code, 409, old_check.json)
+            self.assertEqual(old_check.json.get("reason"), "onix_qr_required")
             old_accept = self.client.post(
                 "/api/osz/accept", json={"sscc": code, "receipt_id": "rec-1",
                                          "product_barcode": "TEST", "quantity": 144}
