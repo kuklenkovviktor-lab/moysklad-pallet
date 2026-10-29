@@ -16,9 +16,15 @@ os.environ.setdefault("WMS_BADGE_SECRET", "test-badge")
 os.environ.setdefault("WMS_TERMINAL_SECRET", "test-terminal")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("MOYSKLAD_TOKEN", "test-only")
-os.environ["WMS_REQUIRE_POSTGRES"] = "0"
-os.environ.pop("DATABASE_URL", None)
-os.environ["WMS_DB_PATH"] = os.path.join(_tmp.name, "osz-qr.db")
+if os.getenv("OSZ_TEST_POSTGRES") == "1":
+    # A disposable PostgreSQL 16 service from GitHub Actions, never production.
+    os.environ["WMS_REQUIRE_POSTGRES"] = "1"
+    if not os.environ.get("DATABASE_URL"):
+        raise RuntimeError("OSZ_TEST_POSTGRES requires a test DATABASE_URL")
+else:
+    os.environ["WMS_REQUIRE_POSTGRES"] = "0"
+    os.environ.pop("DATABASE_URL", None)
+    os.environ["WMS_DB_PATH"] = os.path.join(_tmp.name, "osz-qr.db")
 
 import app
 from partner_pallets import db_init, legacy_sscc_pallet
