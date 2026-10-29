@@ -2571,6 +2571,11 @@ def finish_receipt(receipt_id):
     except Exception as e:
         return jsonify(error=str(e)), 500
 
+def osz_receiving_operation_id(sscc):
+    """Stable receiving ID for one physical OSZ SSCC across devices and retries."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "onix:receiving:osz:" + sscc))
+
+
 @app.post("/api/osz/check")
 def osz_check():
     try:
@@ -2587,6 +2592,13 @@ def osz_check():
                 article=existing[1],
                 quantity=existing[2],
                 accepted_at=existing[3],
+            ), 409
+        operation = read_operation(osz_receiving_operation_id(sscc))
+        if operation:
+            return jsonify(
+                error="Эта палета ОСЗ уже отправлялась на приёмку. Проверь МойСклад перед повторной работой.",
+                status=operation["status"],
+                operation_id=operation["operation_id"],
             ), 409
         return jsonify(ok=True, sscc=sscc)
     except ValueError as e:
@@ -2682,90 +2694,125 @@ def osz_product_info():
 
 @app.post("/api/osz/accept")
 def osz_accept():
+    """Receive an OSZ SSCC once, even if several devices submit it simultaneously.
+
+    The durable confirmation is reserved BEFORE calling MoySklad. Uncertain
+    writes are never retried automatically; the warehouse must reconcile them.
+    """
     try:
         data = request.get_json(force=True)
         receipt_id = str(data.get("receipt_id", "")).strip()
         sscc = normalize_sscc(data.get("sscc", ""))
         product_barcode = str(data.get("product_barcode", "")).strip()
-        quantity = float(data.get("quantity", 0) or 0)
-
+        raw_quantity = data.get("quantity")
+        if isinstance(raw_quantity, bool):
+            return jsonify(error="Количество должно быть положительным числом"), 400
+        quantity = float(raw_quantity)
+        if not math.isfinite(quantity) or quantity <= 0 or quantity > 10000000:
+            return jsonify(error="Некорректное количество палеты ОСЗ"), 400
         if not receipt_id:
             return jsonify(error="Не выбрано Оприходование"), 400
         if not product_barcode:
             return jsonify(error="Не отсканирован товар"), 400
-        if quantity <= 0:
-            return jsonify(error="Количество должно быть больше нуля"), 400
 
-        existing = query_one("SELECT receipt_id FROM external_pallets WHERE sscc = ?", (sscc,))
-        if existing:
+        employee = get_session_employee()
+        if not employee:
+            return jsonify(error="Нужен вход по бейджу"), 401
+
+        accepted = query_one("SELECT receipt_id FROM external_pallets WHERE sscc = ?", (sscc,))
+        if accepted:
             return jsonify(error=f"Палета ОСЗ SSCC {sscc} уже принята."), 409
+
+        # SSCC, not browser state, is the stable idempotency key. This blocks
+        # double taps, parallel devices, different employees and changed UUIDs.
+        operation_id = osz_receiving_operation_id(sscc)
+        previous = read_operation(operation_id)
+        if previous:
+            return jsonify(
+                error="Эта палета ОСЗ уже передавалась в МойСклад. Проверь документ и статус операции.",
+                operation_id=operation_id,
+                status=previous["status"],
+            ), 409
 
         product, pack = find_product_by_any_barcode(product_barcode)
         if not product:
             return jsonify(error=f"Товар со штрихкодом {product_barcode} не найден"), 404
 
-        result = add_or_increment_position(
-            receipt_id,
-            product,
-            pack,
-            requested_qty=quantity,
-            enforce_pack_limit=False,
-        )
+        # Atomic INSERT ON CONFLICT: only one request can call the external API.
+        try:
+            claimed, previous = claim_operation(
+                operation_id, receipt_id, employee["id"], sscc, str(quantity)
+            )
+        except ValueError:
+            return jsonify(error="Палета ОСЗ уже закреплена за другим документом или сотрудником",
+                           operation_id=operation_id), 409
+        if not claimed:
+            return jsonify(
+                error="Палета ОСЗ уже обрабатывается или ожидает сверки с МойСклад.",
+                operation_id=operation_id,
+                status=previous["status"],
+            ), 409
 
-        employee = get_session_employee()
-        execute(
-            """
-            INSERT INTO external_pallets
-            (sscc, partner, receipt_id, employee_id, product_barcode, article, quantity, accepted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                sscc,
-                "OSZ",
-                receipt_id,
-                (employee or {}).get("id"),
-                product_barcode,
-                product.get("article"),
-                result["added"],
-                now_iso(),
-            ),
-        )
-
-        if employee:
-            log_event(
-                employee["id"],
-                "receiving",
-                "external_pallet",
-                object_code=sscc,
-                quantity=result["added"],
-                result=receipt_id,
-                article=product.get("article"),
-                product_name=product.get("name"),
+        try:
+            result = add_or_increment_position(
+                receipt_id, product, pack, requested_qty=quantity, enforce_pack_limit=False
             )
 
-        added = result["added"]
-        total = result["total"]
-        if float(added).is_integer():
-            added = int(added)
-        if float(total).is_integer():
-            total = int(total)
+            # Persist the accepted SSCC before completing the confirmation.
+            # Any failure after the MoySklad write leaves an unresolved operation.
+            execute(
+                """
+                INSERT INTO external_pallets
+                (sscc, partner, receipt_id, employee_id, product_barcode, article, quantity, accepted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (sscc, "OSZ", receipt_id, employee["id"], product_barcode,
+                 product.get("article"), result["added"], now_iso()),
+            )
+            response = dict(
+                sscc=sscc,
+                barcode=product_barcode,
+                name=product.get("name"),
+                article=product.get("article"),
+                added=int(result["added"]) if float(result["added"]).is_integer() else result["added"],
+                total=int(result["total"]) if float(result["total"]).is_integer() else result["total"],
+            )
+            finish_operation(operation_id, response)
+        except ReceiptUnavailable as exc:
+            # The document is known unavailable before an external write.
+            reject_operation(operation_id, exc.reason)
+            return receipt_unavailable_response(exc)
+        except requests.HTTPError as exc:
+            if receipt_error_is_deleted(exc):
+                reject_operation(operation_id, "deleted")
+                return receipt_unavailable_response(ReceiptUnavailable("deleted"))
+            if exc.response is not None and exc.response.status_code in (404, 410):
+                reject_operation(operation_id, "missing")
+                return receipt_unavailable_response(ReceiptUnavailable("missing"))
+            mark_uncertain(operation_id, str(exc))
+            return jsonify(error="Результат приёмки ОСЗ не подтверждён. Сверь документ МойСклад перед повторной работой.",
+                           operation_id=operation_id, status="uncertain"), 503
+        except Exception as exc:
+            mark_uncertain(operation_id, str(exc))
+            return jsonify(error="Приёмка ОСЗ требует сверки с МойСклад. Не сканируй эту палету повторно.",
+                           operation_id=operation_id, status="uncertain"), 503
 
-        return jsonify(
-            ok=True,
-            sscc=sscc,
-            barcode=product_barcode,
-            name=product.get("name"),
-            article=product.get("article"),
-            added=added,
-            total=total,
-        )
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-    except requests.HTTPError as e:
-        body = e.response.text[:1200] if e.response is not None else ""
-        return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
-    except Exception as e:
-        return jsonify(error=str(e)), 500
+        # Audit is best-effort: failure must not turn a confirmed write into
+        # a retryable HTTP error that causes another employee to re-add stock.
+        try:
+            log_event(
+                employee["id"], "receiving", "external_pallet", object_code=sscc,
+                quantity=result["added"], result=receipt_id,
+                article=product.get("article"), product_name=product.get("name"),
+            )
+        except Exception as exc:
+            print(f"OSZ receiving audit failed {operation_id}: {exc}", flush=True)
+
+        return jsonify(ok=True, operation_id=operation_id, **response)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        return jsonify(error="Не удалось проверить приёмку ОСЗ. Повтори проверку статуса документа, не скан палеты."), 503
 
 
 @app.post("/api/warmup")
