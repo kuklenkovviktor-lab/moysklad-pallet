@@ -9,6 +9,34 @@ on:
       - partner_pallets.py
       - tests/test_osz_unified_partner_qr.py
 jobs:
+  postgres-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: onix_test
+          POSTGRES_PASSWORD: local_ci_only_password
+          POSTGRES_DB: onix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onix_test -d onix_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      OSZ_TEST_POSTGRES: "1"
+      DATABASE_URL: postgresql://onix_test:local_ci_only_password@127.0.0.1:5432/onix_test
+      WMS_BADGE_SECRET: github-actions-test-badge-secret
+      WMS_TERMINAL_SECRET: github-actions-test-terminal-secret
+      SECRET_KEY: github-actions-test-secret
+      MOYSKLAD_TOKEN: mocked-in-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_osz_unified_partner_qr.py' -v
   test:
     runs-on: ubuntu-latest
     steps:
