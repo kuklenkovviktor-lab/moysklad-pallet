@@ -2,7 +2,7 @@ name: ONIX OSZ unified partner QR tests
 on:
   push:
     branches:
-      - fix/onix-v1-osz-idempotency-20261029
+      - fix/osz-exact-promsiz-flow-20261029
   pull_request:
     paths:
       - app.py
@@ -46,4 +46,19 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: python -m py_compile app.py partner_pallets.py
+      - name: Check receiving scanner JavaScript syntax
+        env:
+          WMS_BADGE_SECRET: github-actions-test-badge-secret
+          WMS_TERMINAL_SECRET: github-actions-test-terminal-secret
+          SECRET_KEY: github-actions-test-secret
+          MOYSKLAD_TOKEN: mocked-in-tests
+        run: |
+          python - <<'PY'
+          import app, re
+          scripts = re.findall(r'<script[^>]*>(.*?)</script>', app.PAGE, re.S | re.I)
+          assert any(x.strip() for x in scripts), 'No inline receiving JavaScript'
+          with open('/tmp/onix-receiving.js', 'w', encoding='utf-8') as file:
+              file.write('\n'.join(scripts))
+          PY
+          node --check /tmp/onix-receiving.js
       - run: python -m unittest discover -s tests -p 'test_osz_unified_partner_qr.py' -v
