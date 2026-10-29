@@ -354,6 +354,7 @@ def require_employee_login():
         "/manager/partners",
         "/api/partners/accounts",
         "/manager",
+        "/fbs-manager",  # legacy URL redirects to /stats -> /manager
         "/manager/shifts",
         "/manager/shift-history",
         "/manager/fbs-pdf",
