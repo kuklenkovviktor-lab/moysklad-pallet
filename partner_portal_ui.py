@@ -138,16 +138,6 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     print_link=('<a href="/partners/pallet/'+escape(created_pallet,quote=True)+'/print">Распечатать QR →</a>'
                 if notice=='created' and created_pallet else '')
     flash='<div class="notice" role="status">'+escape(message)+' '+print_link+'</div>' if message else ''
-    # Same Promsiz interface; one migration note only for OSZ supplier accounts.
-    osz_migration_note = (
-        '<div class="notice"><b>ОСЗ: новый единый QR ONIX</b><p>'
-        'Загружай Excel и печатай одну этикетку ONIX-PAL на каждую физическую палету. '
-        'Если эта палета уже имела старый SSCC, добавь в Excel столбец SSCC '
-        '(18 цифр, формат ячейки: текст). Так старый код будет запрещён к повторной приёмке. '
-        'Ранее принятые палеты повторно не загружай.</p></div>'
-        if "осз" in str(partner).casefold() or str(partner).strip().casefold() == "osz"
-        else ""
-    )
     table_rows=[]
     for pid, code, ref, created_at, state in rows:
         label=labels.get(pid,{})
@@ -184,7 +174,6 @@ def dashboard_view(partner, token, stats, rows, labels, q, status, current_page,
     <div class="dashboard-title"><h1>Палеты партнёра</h1>
       <div class="muted">Загрузи полученный от компании Excel, распечатай QR и при необходимости измени состав палет.</div></div>
     {flash}
-    {osz_migration_note}
     <div class="kpis">
       <div class="kpi"><div class="kpi-label">Всего палет</div><div class="number">{stats['total']}</div></div>
       <div class="kpi"><div class="kpi-label">Ожидают приёмки</div><div class="number blue">{stats['created']}</div></div>
