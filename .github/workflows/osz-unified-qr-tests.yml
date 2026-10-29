@@ -1,0 +1,21 @@
+name: ONIX OSZ unified partner QR tests
+on:
+  push:
+    branches:
+      - fix/onix-v1-osz-idempotency-20261029
+  pull_request:
+    paths:
+      - app.py
+      - partner_pallets.py
+      - tests/test_osz_unified_partner_qr.py
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app.py partner_pallets.py
+      - run: python -m unittest discover -s tests -p 'test_osz_unified_partner_qr.py' -v
