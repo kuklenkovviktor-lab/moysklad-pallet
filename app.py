@@ -24,7 +24,7 @@ from wms import (
     manager_access,
     WB_STRICT_MATCHING,
 )
-from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status, legacy_sscc_pallet
+from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receiving_pallet, set_receiving_pallet_status
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from warehouse_map import warehouse_map_bp
@@ -805,31 +805,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <button id="cameraBtn" onclick="toggleCamera('full')" disabled>📷 Полная палета</button>
   <div class="quick-row">
     <button class="secondary" id="partialBtn" onclick="toggleCamera('partial')" disabled>Неполная</button>
-    <button class="secondary" id="oszBtn" onclick="startOszFlow()" disabled>ОСЗ / SSCC</button>
     <button class="secondary" id="manualBtn" onclick="toggleManual()" disabled>ТСД / ввод</button>
   </div>
 
   <div id="reader" class="hidden"></div>
 
-  <div id="oszForm" class="info hidden">
-    <b>ОСЗ / SSCC</b>
-    <div class="small" id="oszStatus">Сканируй SSCC палеты.</div>
-    <div id="oszProductInfo" class="hidden"></div>
-    <label id="oszQtyLabel" class="hidden">Количество, шт.</label>
-    <input id="oszQty" class="hidden" inputmode="numeric" type="number" min="1" step="1">
-    <div id="oszQtyPad" class="qtypad hidden">
-      <button type="button" onclick="oszQtyDigit('1')">1</button><button type="button" onclick="oszQtyDigit('2')">2</button><button type="button" onclick="oszQtyDigit('3')">3</button>
-      <button type="button" onclick="oszQtyDigit('4')">4</button><button type="button" onclick="oszQtyDigit('5')">5</button><button type="button" onclick="oszQtyDigit('6')">6</button>
-      <button type="button" onclick="oszQtyDigit('7')">7</button><button type="button" onclick="oszQtyDigit('8')">8</button><button type="button" onclick="oszQtyDigit('9')">9</button>
-      <button type="button" class="action" onclick="oszQtyClear()">Очистить</button><button type="button" onclick="oszQtyDigit('0')">0</button><button type="button" class="action" onclick="oszQtyBackspace()">⌫</button>
-    </div>
-    <button id="oszProductBtn" class="secondary hidden" onclick="scanOszProduct()">Сканировать товар</button>
-    <button id="oszAcceptBtn" class="hidden" onclick="acceptOszPallet()">Принять палету</button>
-    <button class="secondary" onclick="cancelOszFlow()">Отмена</button>
-  </div>
-
   <div id="manual" class="hidden">
-    <input id="barcode" inputmode="numeric" autocomplete="off" placeholder="Сканируй штрихкод">
+    <input id="barcode" inputmode="text" autocomplete="off" placeholder="Сканируй штрихкод">
     <button onclick="sendManualFull()">Принять</button>
     <button class="secondary" onclick="sendManualPartial()">Неполная палета</button>
   </div>
@@ -873,9 +855,6 @@ let pendingConfirmation=null;
 const RECEIVING_PENDING_KEY='onix_receiving_confirmation_v1';
 let lastBarcode='';
 let lastScanAt=0;
-let oszSscc='';
-let oszProductBarcode='';
-let oszProductMeta=null;
 
 function initAudio(){
   try{
@@ -945,7 +924,6 @@ function setActiveReceipt(id,name,meta=''){
   const enabled=!!activeReceiptId;
   document.getElementById('cameraBtn').disabled=!enabled;
   document.getElementById('partialBtn').disabled=!enabled;
-  document.getElementById('oszBtn').disabled=!enabled;
   document.getElementById('manualBtn').disabled=!enabled;
   document.getElementById('completeBtn').disabled=!enabled;
 
@@ -974,7 +952,6 @@ function showUnavailableReceipt(info,name=''){
   stagedPallet=null;
   cancelPartial();
   resetOszForm();
-  document.getElementById('oszForm').classList.add('hidden');
   setActiveReceipt('','','');
   hideDocForms();
   document.getElementById('docCard').classList.remove('hidden');
@@ -1218,7 +1195,6 @@ async function stopScanner(){
   document.getElementById('reader').classList.add('hidden');
   document.getElementById('cameraBtn').textContent='📷 Сканировать полную палету';
   document.getElementById('partialBtn').textContent='📦 Неполная палета';
-  document.getElementById('oszBtn').textContent='🏭 Палета ОСЗ / SSCC';
 }
 
 async function toggleCamera(mode='full'){
@@ -1239,9 +1215,10 @@ async function toggleCamera(mode='full'){
   }
 
   const scanWidth=Math.max(240,Math.min(360,window.innerWidth-56));
-  const formats=(mode==='osz_sscc')
-    ? [Html5QrcodeSupportedFormats.CODE_128]
-    : [Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.CODE_128];
+  // ONIX-PAL labels are QR; standard EAN/CODE128 packing labels still work.
+  const formats=[Html5QrcodeSupportedFormats.QR_CODE,
+                 Html5QrcodeSupportedFormats.EAN_13,
+                 Html5QrcodeSupportedFormats.CODE_128];
 
   document.getElementById('reader').classList.remove('hidden');
   document.getElementById('result').innerHTML='<div class="info">Наведи камеру на ШК целиком и держи его горизонтально.</div>';
@@ -1252,7 +1229,7 @@ async function toggleCamera(mode='full'){
       {facingMode:"environment"},
       {
         fps:20,
-        qrbox:{width:scanWidth,height:110},
+        qrbox:{width:Math.min(scanWidth,300),height:Math.min(scanWidth,300)},
         disableFlip:true,
         formatsToSupport:formats
       },
@@ -1270,14 +1247,11 @@ async function toggleCamera(mode='full'){
         document.getElementById('result').innerHTML='<div class="info"><b>ШК считан.</b> Обрабатываю…</div>';
 
         if(scanMode==='partial') await preparePartial(decodedText);
-        else if(scanMode==='osz_sscc') await handleOszSscc(decodedText);
-        else if(scanMode==='osz_product') await prepareOszProduct(decodedText);
         else await sendScan(decodedText);
       },
       ()=>{}
     );
     if(scanMode==='partial') document.getElementById('partialBtn').textContent='⏹ Остановить камеру';
-    else if(scanMode==='osz_sscc'||scanMode==='osz_product') document.getElementById('oszBtn').textContent='⏹ Остановить камеру';
     else document.getElementById('cameraBtn').textContent='⏹ Остановить камеру';
   }catch(e){
     await stopScanner();
@@ -1290,15 +1264,6 @@ async function toggleCamera(mode='full'){
   }
 }
 
-function looksLikeSscc(code){
-  const raw=String(code||'').trim().replace(/\s+/g,'');
-  if(raw.startsWith(']C1'))return true;
-  if(/^\(00\)\d{18}$/.test(raw))return true;
-  if(/^00\d{18}$/.test(raw))return true;
-  if(/^\d{18}$/.test(raw))return true;
-  return false;
-}
-
 async function sendManualFull(){
   if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
   const input=document.getElementById('barcode');
@@ -1308,25 +1273,6 @@ async function sendManualFull(){
   // Очищаем поле сразу, потому что HID-сканер уже передал весь код.
   // Дальше результат операции показывается отдельным статусом.
   input.value='';
-
-  // Если уже считан SSCC ОСЗ, следующий HID-скан считаем ШК товара.
-  if(oszSscc && !oszProductBarcode){
-    document.getElementById('result').innerHTML='<div class="info"><b>ШК товара считан.</b> Ищу товар…</div>';
-    await prepareOszProduct(code);
-    return;
-  }
-
-  // HID-сканер может отдавать GS1 SSCC как (00)+18 цифр, 00+18 цифр
-  // или только 18 цифр. Валидность окончательно проверяет сервер.
-  if(looksLikeSscc(code)){
-    document.getElementById('oszForm').classList.remove('hidden');
-    document.getElementById('result').innerHTML='<div class="info"><b>SSCC считан.</b> Проверяю палету…</div>';
-    await handleOszSscc(code,false);
-    if(oszSscc){
-      setTimeout(()=>input.focus(),80);
-    }
-    return;
-  }
 
   await sendScan(code);
   input.focus();
@@ -1390,179 +1336,6 @@ async function confirmPartial(){
   const data=partialMeta;
   cancelPartial();
   await submitReceivingPallet(makeReceivingPallet(barcode,qty,data));
-}
-
-function resetOszForm(){
-  oszSscc='';
-  oszProductBarcode='';
-  oszProductMeta=null;
-  document.getElementById('oszStatus').textContent='Сначала отсканируйте SSCC палеты.';
-  document.getElementById('oszProductInfo').classList.add('hidden');
-  document.getElementById('oszProductInfo').innerHTML='';
-  document.getElementById('oszQtyLabel').classList.add('hidden');
-  document.getElementById('oszQty').classList.add('hidden');
-  document.getElementById('oszQtyPad').classList.add('hidden');
-  document.getElementById('oszQty').value='';
-  document.getElementById('oszProductBtn').classList.add('hidden');
-  document.getElementById('oszAcceptBtn').classList.add('hidden');
-}
-
-async function startOszFlow(){
-  if(stagedPallet||pendingConfirmation){showError('Сначала подтверди предыдущую палету.');return;}
-  if(!activeReceiptId){showError('Сначала создай или открой Приёмку.');return;}
-  resetOszForm();
-  document.getElementById('oszForm').classList.remove('hidden');
-  await toggleCamera('osz_sscc');
-}
-
-async function handleOszSscc(raw,autoCamera=true){
-  busy=true;
-  try{
-    const r=await fetch('/api/osz/check',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({sscc:raw})
-    });
-    const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Не удалось проверить SSCC');
-
-    await stopScanner();
-    oszSscc=data.sscc;
-    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>'+
-      (autoCamera?'SSCC принят. Готовлю сканирование ШК товара…':'SSCC принят. Теперь отсканируйте ШК товара этим же сканером.');
-    document.getElementById('oszProductBtn').classList.remove('hidden');
-    successFeedback();
-
-    // Для камеры следующий этап открываем автоматически.
-    // Для Bluetooth/HID оставляем фокус в поле ТСД: следующий пик будет ШК товара.
-    if(autoCamera){
-      setTimeout(()=>{
-        if(oszSscc && !scanner && !oszProductBarcode){
-          toggleCamera('osz_product');
-        }
-      },250);
-    }
-  }catch(e){
-    await stopScanner();
-    showError(e.message);
-  }finally{
-    busy=false;
-  }
-}
-
-async function scanOszProduct(){
-  if(!oszSscc){showError('Сначала отсканируйте SSCC палеты ОСЗ.');return;}
-  await toggleCamera('osz_product');
-}
-
-async function prepareOszProduct(barcode){
-  busy=true;
-  try{
-    const r=await fetch('/api/osz/product-info',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({barcode:barcode})
-    });
-    const data=await r.json();
-    if(!r.ok)throw new Error(data.error||'Товар не найден');
-
-    await stopScanner();
-    oszProductBarcode=barcode;
-    oszProductMeta=data;
-    document.getElementById('oszProductInfo').innerHTML=
-      '<div style="margin-top:10px"><b>'+escapeHtml(data.article||data.name||'Товар')+'</b><br>'+
-      '<span class="small">'+escapeHtml(data.name||'')+
-      (data.standard_qty?'<br>Квант МойСклад: '+data.standard_qty+' шт.':'')+
-      '</span></div>';
-    document.getElementById('oszProductInfo').classList.remove('hidden');
-    document.getElementById('oszQtyLabel').classList.remove('hidden');
-    document.getElementById('oszQty').classList.remove('hidden');
-    document.getElementById('oszQtyPad').classList.remove('hidden');
-    document.getElementById('oszQty').value='';
-    document.getElementById('oszAcceptBtn').classList.remove('hidden');
-    document.getElementById('oszProductBtn').classList.add('hidden');
-    document.getElementById('oszStatus').innerHTML='SSCC: <b>'+escapeHtml(oszSscc)+'</b><br>Проверьте количество по этикетке ОСЗ.';
-    successFeedback();
-  }catch(e){
-    await stopScanner();
-    showError(e.message);
-  }finally{
-    busy=false;
-  }
-}
-
-function oszQtyDigit(digit){
-  const input=document.getElementById('oszQty');
-  const current=String(input.value||'');
-  if(current.length>=7)return;
-  input.value=(current==='0'?'':current)+digit;
-}
-
-function oszQtyBackspace(){
-  const input=document.getElementById('oszQty');
-  input.value=String(input.value||'').slice(0,-1);
-}
-
-function oszQtyClear(){
-  document.getElementById('oszQty').value='';
-}
-
-async function acceptOszPallet(){
-  if(busy)return;
-  if(!oszSscc||!oszProductBarcode){showError('Сначала отсканируйте SSCC и товар.');return;}
-  const qty=Number(document.getElementById('oszQty').value);
-  if(!Number.isFinite(qty)||qty<=0){showError('Введите количество с этикетки ОСЗ.');return;}
-
-  busy=true;
-  try{
-    const r=await fetch('/api/osz/accept',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        receipt_id:activeReceiptId,
-        sscc:oszSscc,
-        product_barcode:oszProductBarcode,
-        quantity:qty
-      })
-    });
-    const data=await r.json();
-    if(!r.ok){
-      if(RECEIPT_UNAVAILABLE_REASONS.includes(data.reason)){
-        showUnavailableReceipt(data,activeReceiptName);
-        return;
-      }
-      throw new Error(data.error||'Не удалось принять палету ОСЗ');
-    }
-
-    pallets+=1;
-    units+=Number(data.added||0);
-    document.getElementById('pallets').textContent=pallets;
-    document.getElementById('units').textContent=units;
-    successFeedback();
-    document.getElementById('result').innerHTML=
-      '<div class="ok"><b>Палета ОСЗ принята</b><br>'+
-      escapeHtml(data.article||data.name||'')+' · <b>'+data.added+' шт.</b><br>'+
-      '<span class="small">SSCC '+escapeHtml(data.sscc)+'</span></div>';
-
-    resetOszForm();
-    document.getElementById('oszForm').classList.add('hidden');
-
-    // При работе Bluetooth/HID сканером сразу готовы к следующей палете.
-    const manual=document.getElementById('manual');
-    if(manual && !manual.classList.contains('hidden')){
-      setTimeout(()=>document.getElementById('barcode').focus(),80);
-    }
-  }catch(e){
-    showError(e.message);
-  }finally{
-    busy=false;
-  }
-}
-
-async function cancelOszFlow(){
-  if(scanner)await stopScanner();
-  resetOszForm();
-  document.getElementById('oszForm').classList.add('hidden');
 }
 
 function makeReceivingPallet(barcode,quantity,meta){
@@ -2581,11 +2354,6 @@ def osz_check():
     try:
         data = request.get_json(force=True)
         sscc = normalize_sscc(data.get("sscc", ""))
-        if legacy_sscc_pallet(sscc):
-            return jsonify(
-                error="Этот SSCC ОСЗ уже связан с новым QR ONIX. Сканируй ONIX-PAL на палете.",
-                reason="onix_qr_required",
-            ), 409
         existing = query_one(
             "SELECT receipt_id, article, quantity, accepted_at FROM external_pallets WHERE sscc = ?",
             (sscc,),
@@ -2724,13 +2492,6 @@ def osz_accept():
         if not employee:
             return jsonify(error="Нужен вход по бейджу"), 401
 
-        # Migration guard: old physical SSCC and new QR are a single pallet.
-        # Once mapped, never allow the legacy route to write a second time.
-        if legacy_sscc_pallet(sscc):
-            return jsonify(
-                error="Этот SSCC ОСЗ переведён на QR ONIX-PAL. Повторная приёмка запрещена.",
-                reason="onix_qr_required",
-            ), 409
         accepted = query_one("SELECT receipt_id FROM external_pallets WHERE sscc = ?", (sscc,))
         if accepted:
             return jsonify(error=f"Палета ОСЗ SSCC {sscc} уже принята."), 409
@@ -2851,8 +2612,6 @@ def cache_status():
 
 def partner_pallet_status_error(pallet):
     status = pallet["status"]
-    if status == "legacy_already_processed":
-        return "SSCC этой палеты ОСЗ ранее был принят или требует сверки с МойСклад. Новый QR заблокирован."
     if status == "accepted":
         accepted_at = pallet.get("accepted_at")
         if accepted_at:
