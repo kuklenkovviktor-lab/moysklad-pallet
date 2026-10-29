@@ -46,6 +46,9 @@ def db_init():
             created_at TEXT NOT NULL, PRIMARY KEY(partner_id, token)
         )""",
         """CREATE TABLE IF NOT EXISTS partner_pallet_changes (id TEXT PRIMARY KEY, pallet_id TEXT NOT NULL, partner_id TEXT NOT NULL, action TEXT NOT NULL, old_sku TEXT, old_quantity INTEGER, new_sku TEXT, new_quantity INTEGER, reason TEXT NOT NULL, changed_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS partner_pallet_legacy_sscc (
+            sscc TEXT PRIMARY KEY, pallet_id TEXT NOT NULL UNIQUE
+        )""",
         "CREATE INDEX IF NOT EXISTS idx_partner_pallet_owner ON partner_pallets(partner_id, created_at)",
     ]
     with db_connect() as db:
@@ -66,6 +69,28 @@ def db_init():
                 cur.execute("ALTER TABLE partner_uploads ADD COLUMN planned_date TEXT")
         db.commit()
 
+def legacy_sscc_pallet(sscc):
+    """The new ONIX QR, not this SSCC, is used for receiving migrated OSZ pallets."""
+    db_init()
+    with db_connect() as db:
+        return db.cursor().execute(
+            sql("SELECT pallet_id FROM partner_pallet_legacy_sscc WHERE sscc=?"),
+            (sscc,),
+        ).fetchone()
+
+
+def _sscc_already_processed(cur, sscc):
+    """Never put a formerly accepted/uncertain SSCC behind a fresh ONIX QR."""
+    from app import osz_receiving_operation_id
+    accepted = cur.execute(sql(
+        "SELECT 1 FROM external_pallets WHERE sscc=?"
+    ), (sscc,)).fetchone()
+    attempted = cur.execute(sql(
+        "SELECT 1 FROM receiving_confirmations WHERE operation_id=?"
+    ), (osz_receiving_operation_id(sscc),)).fetchone()
+    return bool(accepted or attempted)
+
+
 def resolve_receiving_pallet(barcode):
     """Read-only pallet metadata; a code is never looked up as a MoySklad pack."""
     if not str(barcode).startswith("ONIX-PAL-"):
@@ -80,8 +105,15 @@ def resolve_receiving_pallet(barcode):
             return None
         lines = cur.execute(sql("SELECT sku, quantity FROM partner_pallet_lines WHERE pallet_id=?"),
                             (row[0],)).fetchall()
+        linked = cur.execute(sql(
+            "SELECT sscc FROM partner_pallet_legacy_sscc WHERE pallet_id=?"
+        ), (row[0],)).fetchone()
+        legacy_sscc = linked[0] if linked else None
+        already = bool(legacy_sscc and _sscc_already_processed(cur, legacy_sscc))
     return dict(id=row[0], partner_id=row[1], partner=row[2], reference=row[3],
-                status=row[4], accepted_at=row[5], lines=[dict(article=r[0], quantity=int(r[1])) for r in lines])
+                status="legacy_already_processed" if already else row[4],
+                accepted_at=row[5], legacy_sscc=legacy_sscc,
+                lines=[dict(article=r[0], quantity=int(r[1])) for r in lines])
 
 
 def claim_receiving_pallet(pallet_id):
@@ -234,8 +266,8 @@ def manager_partners():
       <section><h2>Партнёры</h2><table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
 
 
-def parse_excel(file):
-    """Accept simple SKU/qty rows or ONIX purchase orders like the Promsiz file."""
+def parse_excel(file, include_legacy_sscc=False):
+    """Import identical Promsiz or OSZ layout; optional SSCC binds old and new QR."""
     if not file.filename.lower().endswith(".xlsx"):
         raise ValueError("Загрузи файл .xlsx")
     raw = file.stream.read(MAX_UPLOAD + 1)
@@ -261,6 +293,7 @@ def parse_excel(file):
         each = column("ед. в палете")
         quantity = column("количество", "количество, ед.", "qty", "кол-во")
         group_column = column("палета", "паллет", "pallet")
+        sscc_column = column("sscc", "sscc осз", "шк осз")
         if quantity is None and (pallets is None or each is None):
             raise ValueError("Нужны количество либо столбцы Палет и Ед. в палете")
         def positive(value, num):
@@ -272,6 +305,7 @@ def parse_excel(file):
             except (TypeError, ValueError, OverflowError):
                 raise ValueError(f"Строка {num}: ожидается положительное целое число")
         groups = OrderedDict()
+        sscc_by_group = {}
         for num, row in enumerate(records[header_row + 1:], start=header_row + 2):
             if not any(x is not None and str(x).strip() for x in row):
                 continue
@@ -280,6 +314,18 @@ def parse_excel(file):
                 continue
             if len(sku) > 150:
                 raise ValueError(f"Строка {num}: артикул слишком длинный")
+            legacy_sscc = None
+            if sscc_column is not None and sscc_column < len(row) and row[sscc_column] is not None:
+                raw_sscc = str(row[sscc_column]).strip()
+                if raw_sscc:
+                    # 18-digit SSCC in Excel must be text: numeric cells lose precision.
+                    from app import normalize_sscc
+                    try:
+                        legacy_sscc = normalize_sscc(raw_sscc)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Строка {num}: {exc} Запиши SSCC в Excel как текст."
+                        ) from exc
             if pallets is not None and each is not None:
                 count = positive(row[pallets] if pallets < len(row) else None, num)
                 per_pallet = positive(row[each] if each < len(row) else None, num)
@@ -289,8 +335,13 @@ def parse_excel(file):
                         raise ValueError(f"Строка {num}: количество не сходится с палетами")
                 if len(groups) + count > MAX_ROWS:
                     raise ValueError("Не более 5000 палет в одной загрузке")
+                if legacy_sscc and count != 1:
+                    raise ValueError(f"Строка {num}: один SSCC нельзя привязать к {count} палетам")
                 for index in range(1, count + 1):
-                    groups[f"{sku} · {index}/{count} · строка {num}"] = [(sku, per_pallet)]
+                    key = f"{sku} · {index}/{count} · строка {num}"
+                    groups[key] = [(sku, per_pallet)]
+                    if legacy_sscc:
+                        sscc_by_group[key] = legacy_sscc
             else:
                 qty = positive(row[quantity] if quantity < len(row) else None, num)
                 ref = str(row[group_column]).strip() if group_column is not None and group_column < len(row) and row[group_column] is not None else ""
@@ -298,11 +349,17 @@ def parse_excel(file):
                 if not key:
                     raise ValueError(f"Строка {num}: не указан номер палеты")
                 groups.setdefault(key, []).append((sku, qty))
+                if legacy_sscc:
+                    if key in sscc_by_group and sscc_by_group[key] != legacy_sscc:
+                        raise ValueError(f"Строка {num}: у одной палеты разные SSCC")
+                    sscc_by_group[key] = legacy_sscc
                 if len(groups) > MAX_ROWS:
                     raise ValueError("Не более 5000 палет в одной загрузке")
         if not groups:
             raise ValueError("Нет строк с товарами")
-        return groups
+        if len(sscc_by_group) != len(set(sscc_by_group.values())):
+            raise ValueError("Один SSCC указан у нескольких физических палет")
+        return (groups, sscc_by_group) if include_legacy_sscc else groups
     finally:
         wb.close()
 
@@ -793,7 +850,7 @@ def upload():
     if not file:
         abort(400)
     try:
-        groups = parse_excel(file)
+        groups, sscc_by_group = parse_excel(file, include_legacy_sscc=True)
     except (ValueError, OSError, StopIteration) as exc:
         return page("Ошибка Excel", f'<section class="error">{escape(str(exc))}</section><a href="/partners">Назад</a>'), 400
     upload_id = str(uuid.uuid4())
@@ -816,6 +873,21 @@ def upload():
             for sku, qty in lines:
                 cur.execute(sql("INSERT INTO partner_pallet_lines(id,pallet_id,sku,quantity) VALUES(?,?,?,?)"),
                             (str(uuid.uuid4()), pallet_id, sku, qty))
+            if ref in sscc_by_group:
+                legacy = sscc_by_group[ref]
+                if _sscc_already_processed(cur, legacy):
+                    db.rollback()
+                    return page("Палета уже обработана", "SSCC " + escape(legacy) +
+                                " ранее обрабатывался в ОСЗ. Новый QR не создан."), 409
+                if cur.execute(sql(
+                    "SELECT 1 FROM partner_pallet_legacy_sscc WHERE sscc=?"
+                ), (legacy,)).fetchone():
+                    db.rollback()
+                    return page("Повторный SSCC", "SSCC " + escape(legacy) +
+                                " уже привязан к другому QR."), 409
+                cur.execute(sql(
+                    "INSERT INTO partner_pallet_legacy_sscc(sscc,pallet_id) VALUES (?,?)"
+                ), (legacy, pallet_id))
         db.commit()
     return redirect("/partners/shipments/"+shipment_id if shipment_id else "/partners/uploads/"+upload_id)
 

@@ -212,5 +212,85 @@ class ReceivingConfirmationTests(unittest.TestCase):
         self.assertIn("await openReceiptSafely(savedId",html)
 
 
+
+    def _osz_payload(self):
+        return {"sscc": f"{uuid.uuid4().int % 10**18:018d}",
+                "receipt_id": "osz-test-receipt", "product_barcode": "OSZ-PRODUCT",
+                "quantity": 144}
+
+    def test_osz_same_sscc_double_scan_never_adds_twice(self):
+        p=self._osz_payload()
+        with patch.object(app,"normalize_sscc",return_value=p["sscc"]), \
+             patch.object(app,"find_product_by_any_barcode",return_value=(self.product,self.pack)) as lookup, \
+             patch.object(app,"add_or_increment_position",return_value={"added":144,"total":144}) as write, \
+             patch.object(app,"log_event"):
+            a=self.client.post("/api/osz/accept",json=p)
+            b=self.client.post("/api/osz/accept",json=p)
+            c=self.client.post("/api/osz/check",json={"sscc":p["sscc"]})
+        self.assertEqual(a.status_code,200,a.json)
+        self.assertEqual(b.status_code,409,b.json)
+        self.assertEqual(c.status_code,409,c.json)
+        write.assert_called_once()
+        lookup.assert_called_once()
+        self.assertEqual(read_operation(a.json["operation_id"])["status"],"done")
+
+    def test_osz_timeout_blocks_same_sscc_and_receipt_completion(self):
+        p=self._osz_payload()
+        with patch.object(app,"normalize_sscc",return_value=p["sscc"]), \
+             patch.object(app,"find_product_by_any_barcode",return_value=(self.product,self.pack)), \
+             patch.object(app,"add_or_increment_position",side_effect=TimeoutError("lost response")) as write:
+            a=self.client.post("/api/osz/accept",json=p)
+            b=self.client.post("/api/osz/accept",json=dict(p,receipt_id="other-receipt"))
+            c=self.client.post("/api/osz/check",json={"sscc":p["sscc"]})
+        self.assertEqual(a.status_code,503,a.json)
+        self.assertEqual(a.json["status"],"uncertain")
+        self.assertEqual(b.status_code,409,b.json)
+        self.assertEqual(c.status_code,409,c.json)
+        self.assertEqual(read_operation(a.json["operation_id"])["status"],"uncertain")
+        self.assertTrue(app.has_unresolved_operations(p["receipt_id"]))
+        write.assert_called_once()
+
+    def test_osz_nonfinite_quantity_rejected(self):
+        p=self._osz_payload()
+        p["quantity"]="inf"
+        with patch.object(app,"normalize_sscc",return_value=p["sscc"]), \
+             patch.object(app,"add_or_increment_position") as write:
+            response=self.client.post("/api/osz/accept",json=p)
+        self.assertEqual(response.status_code,400,response.json)
+        self.assertIsNone(read_operation(app.osz_receiving_operation_id(p["sscc"])))
+        write.assert_not_called()
+
+    def test_osz_two_devices_compete_for_one_sscc(self):
+        import threading
+        p=self._osz_payload()
+        entered,resume=threading.Event(),threading.Event()
+        results=[]
+        def slow_write(*args,**kwargs):
+            entered.set()
+            if not resume.wait(5):
+                raise TimeoutError("First device was not released")
+            return {"added":144,"total":144}
+        def first_device():
+            client=app.app.test_client()
+            with client.session_transaction() as sess:
+                sess["employee_id"]="viktor"
+            results.append(client.post("/api/osz/accept",json=p))
+        with patch.object(app,"normalize_sscc",return_value=p["sscc"]), \
+             patch.object(app,"find_product_by_any_barcode",return_value=(self.product,self.pack)), \
+             patch.object(app,"add_or_increment_position",side_effect=slow_write) as write, \
+             patch.object(app,"log_event"):
+            thread=threading.Thread(target=first_device,daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5),"First OSZ device never entered external write")
+                second=self.client.post("/api/osz/accept",json=p)
+                self.assertEqual(second.status_code,409,second.json)
+            finally:
+                resume.set()
+                thread.join(6)
+            self.assertEqual(len(results),1)
+            self.assertEqual(results[0].status_code,200,results[0].json)
+            write.assert_called_once()
+
 if __name__=="__main__":
     unittest.main()
