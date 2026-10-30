@@ -1,0 +1,19 @@
+# Keep the working ONIX app, secrets and PostgreSQL on Render.
+# This lightweight service provides a separate HTTPS entrance only.
+services:
+  onix-edge:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ONIX_DOMAIN: ${ONIX_DOMAIN:?Set ONIX_DOMAIN to a domain controlled by you}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
