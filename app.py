@@ -330,6 +330,10 @@ def require_employee_login():
         "/login",
         "/api/auth/login",
         "/api/health",
+        # PWA assets are public; an expired mobile cookie must not cause the
+        # browser's background service-worker refresh to download /login HTML.
+        "/sw.js",
+        "/manifest.webmanifest",
         "/supervisor-terminal",
         "/api/supervisor-terminal/qr",
         "/manager-login",
