@@ -1,0 +1,75 @@
+name: ONIX own VPS self-hosted stack
+on:
+  push:
+    branches:
+      - infra/onix-owned-vps-postgres-20261030
+  pull_request:
+    paths:
+      - deploy/self-hosted/**
+      - .dockerignore
+      - .github/workflows/onix-selfhosted-vps-tests.yml
+jobs:
+  self-hosted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare disposable test-only credentials, no production data
+        working-directory: deploy/self-hosted
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          d=Path("secrets")
+          d.mkdir(exist_ok=True)
+          values={
+            "postgres_password":"ci_local_postgres_secret_128",
+            "flask_secret":"ci_local_flask_secret_128",
+            "badge_secret":"ci_local_badge_secret_128",
+            "terminal_secret":"ci_local_terminal_secret_128",
+            "manager_password":"ci_local_manager_secret_128",
+            "moysklad_token":"ci-dummy-no-real-moysklad-access",
+            "wb_api_token":"",
+          }
+          for name,value in values.items():
+            f=d/name
+            f.write_text(value)
+            f.chmod(0o644)
+          Path(".env").write_text("ONIX_DOMAIN=onix.example.invalid\nWB_STRICT_MATCHING=0\n")
+          PY
+      - name: Check Docker Compose and required isolation
+        working-directory: deploy/self-hosted
+        run: |
+          docker compose config --quiet
+          docker compose config | grep -q 'internal: true'
+          ! grep -E '^[[:space:]]*-[[:space:]]*"?5432:|^[[:space:]]*-[[:space:]]*"?8000:' compose.yml
+          ! grep -E 'onrender\.com' compose.yml Caddyfile run-web.sh
+          ! grep -E 'WMS_MIGRATE_SQLITE_FROM_S3:[[:space:]]*"?1' compose.yml
+      - name: Validate local Caddy TLS config
+        working-directory: deploy/self-hosted
+        run: |
+          docker run --rm \
+            -e ONIX_DOMAIN=onix.example.invalid \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+      - name: Start separate ONIX + PostgreSQL 16 with fake secrets
+        working-directory: deploy/self-hosted
+        run: docker compose up -d --build db web
+      - name: Verify ONIX starts against real disposable PostgreSQL 16
+        working-directory: deploy/self-hosted
+        run: |
+          for attempt in $(seq 1 50); do
+            if docker compose exec -T web python -c 'import json,urllib.request; x=json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/health",timeout=5)); assert x.get("ready") is True or x.get("startup_ready") is True, x; print("ready on postgres")'; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose logs --tail=120 db web
+          exit 1
+      - name: Make and validate test-only PostgreSQL backup
+        working-directory: deploy/self-hosted
+        run: |
+          sh backup.sh
+          test -n "$(find backups -name 'onix-*.dump' -type f -size +1k -print -quit)"
+      - name: Tear down ephemeral database
+        if: always()
+        working-directory: deploy/self-hosted
+        run: docker compose down -v --remove-orphans || true

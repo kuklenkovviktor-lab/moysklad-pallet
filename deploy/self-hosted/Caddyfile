@@ -1,0 +1,11 @@
+# Full self-host: ALL ONIX HTTP requests go to local container "web".
+# No upstream Render dependency; Caddy obtains TLS for the owned domain.
+{$ONIX_DOMAIN} {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+        -Server
+    }
+    reverse_proxy web:8000
+}

@@ -1,0 +1,18 @@
+# Never copy live WMS credentials, PostgreSQL dumps or local test data
+# into ONIX Docker images. Docker build context is the repository root.
+.git
+.github
+**/.env
+**/secrets
+**/secrets/**
+**/backups
+**/backups/**
+**/*.dump
+**/*.sql
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/__pycache__
+**/*.pyc
+.pytest_cache
+tests
