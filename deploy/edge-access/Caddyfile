@@ -1,0 +1,22 @@
+# ONIX alternate entry point. Trial only until tested on warehouse Wi-Fi without VPN.
+# One fixed upstream: this is NOT an open proxy.
+# ONIX_DOMAIN is a real domain pointing (A) to this server's public IPv4.
+{$ONIX_DOMAIN} {
+    # Do not cache warehouse sessions, labels, documents or JSON.
+    # Caddy reverse_proxy has no caching by default.
+    @edge_health path /__edge/health
+    respond @edge_health "ONIX edge: ready" 200
+
+    reverse_proxy https://onix-wms-frankfurt.onrender.com {
+        # Render uses this host for origin routing and certificate selection.
+        header_up Host onix-wms-frankfurt.onrender.com
+        # Discard any user-supplied X-Forwarded-For for honest server audit/rate limit.
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+        transport http {
+            dial_timeout 10s
+            tls_timeout 10s
+            response_header_timeout 90s
+        }
+    }
+}
