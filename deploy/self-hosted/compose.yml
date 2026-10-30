@@ -44,7 +44,9 @@ services:
       - manager_password
       - moysklad_token
       - wb_api_token
-    networks: [internal]
+    # Outbound access is needed for MoySklad/Wildberries APIs.
+    # Database is reachable only on internal Docker network.
+    networks: [internal, external]
     expose:
       - "8000"
     security_opt:
