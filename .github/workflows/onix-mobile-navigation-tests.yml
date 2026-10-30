@@ -1,0 +1,35 @@
+name: ONIX mobile PWA navigation and replenishment
+on:
+  push:
+    branches:
+      - fix/onix-mobile-sw-navigation-20261030
+  pull_request:
+    paths:
+      - wms.py
+      - app.py
+      - tests/test_mobile_pwa_navigation.py
+jobs:
+  mobile-navigation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app.py wms.py
+      - name: Validate service worker JavaScript syntax
+        env:
+          WMS_BADGE_SECRET: github-test-badge
+          WMS_TERMINAL_SECRET: github-test-terminal
+          SECRET_KEY: github-test-secret
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path("wms.py").read_text()
+          block = source.split('def pwa_service_worker():',1)[1].split('"""',2)[1]
+          Path("/tmp/onix-worker.js").write_text(block)
+          PY
+          node --check /tmp/onix-worker.js
+      - run: python -m unittest discover -s tests -p 'test_mobile_pwa_navigation.py' -v

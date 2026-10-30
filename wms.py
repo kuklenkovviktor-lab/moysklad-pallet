@@ -3217,17 +3217,19 @@ def pwa_icon_512():
 
 @wms_bp.get("/sw.js")
 def pwa_service_worker():
+    # A network-only worker: phone browsers must not receive a failed
+    # navigation from a cache that ONIX never populated. In particular the
+    # old fetch handler did respondWith(fetch(...).catch(caches.match(...))).
+    # When Render was waking up, caches.match() returned undefined, turning
+    # temporary unavailability into Chrome ERR_FAILED / failed navigation.
+    # Keep install/activate for the PWA; let Chrome and Render own requests.
     js = """
-const CACHE = 'onix-pwa-v2';
+// ONIX mobile PWA v3. No fetch interception and no caching of WMS data.
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
 self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
-});
-self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });
 """
     response = Response(js, mimetype="application/javascript")
