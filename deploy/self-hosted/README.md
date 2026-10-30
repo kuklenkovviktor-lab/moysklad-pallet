@@ -65,7 +65,7 @@ openssl rand -hex 32 > secrets/postgres_password
 | `wb_api_token` | Текущее `WB_API_TOKEN`, если не используется — пустой файл |
 | `postgres_password` | Новый пароль, созданный выше |
 
-`chmod 600 secrets/* .env`. Не вводить секреты в GitHub, публичные issues, скриншоты и чаты. При необходимости переносить их в SSH/SCP или защищённом менеджере секретов. **Не менять WMS_BADGE_SECRET и WMS_TERMINAL_SECRET при переезде.**
+`chmod 700 secrets`; `chmod 644 secrets/*`; `chmod 600 .env`. В Compose nonroot-контейнер читает только явно примонтированные ему secrets; каталог secrets на хосте должен принадлежать администратору и быть закрыт правами 0700. В этой конфигурации Docker Compose file-backed secrets требуют доступных на чтение файлов. Не делать каталог общедоступным. Не вводить секреты в GitHub, публичные issues, скриншоты и чаты. При необходимости переносить их в SSH/SCP или защищённом менеджере секретов. **Не менять WMS_BADGE_SECRET и WMS_TERMINAL_SECRET при переезде.**
 
 Также скопировать из текущего Render `WB_STRICT_MATCHING` и `SUPERVISOR_QR_PERIOD` в локальную `.env`, если они отличаются от примеров. Другие специальные env, используемые текущим ONIX, нужно сверить перед cutover.
 
