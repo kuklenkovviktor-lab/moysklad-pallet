@@ -32,7 +32,7 @@ jobs:
           for name,value in values.items():
             f=d/name
             f.write_text(value)
-            f.chmod(0o600)
+            f.chmod(0o644)
           Path(".env").write_text("ONIX_DOMAIN=onix.example.invalid\nWB_STRICT_MATCHING=0\n")
           PY
       - name: Check Docker Compose and required isolation
