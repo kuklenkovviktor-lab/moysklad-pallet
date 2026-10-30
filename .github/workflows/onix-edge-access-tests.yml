@@ -1,0 +1,44 @@
+name: ONIX warehouse access edge - configuration checks
+on:
+  push:
+    branches:
+      - infra/onix-warehouse-access-20261030
+  pull_request:
+    paths:
+      - deploy/edge-access/**
+      - .github/workflows/onix-edge-access-tests.yml
+jobs:
+  validate-edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate reverse proxy config with Caddy
+        run: |
+          docker run --rm \
+            -e ONIX_DOMAIN=onix-example.invalid \
+            -v "$PWD/deploy/edge-access/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10.2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validate Compose configuration
+        run: |
+          ONIX_DOMAIN=onix-example.invalid docker compose \
+            -f deploy/edge-access/compose.yml config --quiet
+      - name: Check staging safety rules
+        run: |
+          grep -q 'reverse_proxy https://onix-wms-frankfurt.onrender.com' deploy/edge-access/Caddyfile
+          ! grep -Eq 'tls_insecure_skip_verify|MOYSKLAD_TOKEN|DATABASE_URL|SECRET_KEY' deploy/edge-access/Caddyfile
+          ! grep -Eq '(^|[[:space:]])cache[[:space:]]*\{' deploy/edge-access/Caddyfile
+          ! grep -Eq '(^|[[:space:]])access_log|(^|[[:space:]])log[[:space:]]*\{' deploy/edge-access/Caddyfile
+      - name: Check Windows PowerShell diagnostic script syntax
+        shell: pwsh
+        run: |
+          $errors = @()
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "deploy/edge-access/test-onix-network.ps1",
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
