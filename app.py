@@ -31,6 +31,7 @@ from warehouse_map import warehouse_map_bp
 from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
+from integrations import integrations_bp
 from fbs_pdf_import import fbs_pdf_bp
 from onix_print_bridge import print_bridge_bp
 from ozon_fbo import ozon_fbo_bp
@@ -96,6 +97,7 @@ app.config.update(
     SESSION_REFRESH_EACH_REQUEST=True,
 )
 app.register_blueprint(wms_bp)
+app.register_blueprint(integrations_bp)
 app.register_blueprint(partner_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
