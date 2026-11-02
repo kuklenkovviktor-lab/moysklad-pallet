@@ -807,11 +807,11 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
  #reader{min-height:62px;max-height:88px}#reader video{max-height:88px!important}
  .barcode-zone{min-height:74px;padding-top:3px}.barcode-wrap{height:70px;padding:2px 5px}#zebraBarcode{height:66px}
 }
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body><div class="wrap"><div class="card">
 <div class="header">
   <div class="header-left">
-    <div class="logo">ONX</div>
+    <img src="/grit-logo.png?v=2" width="30" height="30" alt="GRIT WMS" style="border-radius:7px;object-fit:cover;flex:none">
     <div class="header-copy"><h1>GRIT WMS</h1><div class="muted">Терминал сотрудника</div></div>
   </div>
   <div id="scannerStatus" class="status">Zebra не подключена</div>
@@ -1216,7 +1216,7 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
  .manual-entry.open #scanButton{width:100%}
 }
 </style>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body>
 <div class="wrap">
 
@@ -1561,7 +1561,7 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
  .secondary{grid-column:1;grid-row:4;margin:0;font-size:10px;align-self:end}
  .err,.ok{margin:0;padding:7px;font-size:10px}
 }
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🚪 Завершение смены</h1>
 <div class="muted">Самостоятельный выход заблокирован. Для завершения смены отсканируй QR старшего в точке сдачи TSD/сканера.</div>
 <div class="warning">После подтверждения текущая операция остановится, смена закроется, а TSD выйдет из учётной записи.</div>
@@ -1612,7 +1612,7 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap">
 <div class="top"><a href="/manager">← Панель управления</a><button onclick="print()">Печать</button></div>
 <div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
 </div><script>
@@ -1640,7 +1640,7 @@ SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Терминал выхода</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>📟 Терминал выхода</h1>
 <div class="muted">Авторизуй это устройство один раз. После этого твоя учётка Виктора будет удалена из этой браузерной сессии, а устройство сможет показывать только динамический QR выхода.</div>
 <div class="note"><b>Важно:</b> это не завершает твою рабочую смену в WMS. Оно только убирает твою авторизацию с этого конкретного устройства.</div>
@@ -1669,7 +1669,7 @@ SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🔐 QR старшего</h1>
 <div class="muted">Терминал авторизован отдельно от учётки руководителя. QR меняется каждые 30 секунд.</div>
 <div id="qr" class="qr"></div>
@@ -1715,7 +1715,7 @@ h1{margin:0 0 8px;font-size:25px}.muted{color:#6b7785;font-size:14px;line-height
 input{width:100%;margin-top:16px;padding:14px;border:1px solid #cbd9e2;border-radius:10px;font-size:16px;background:#fff}
 button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}
 .err{margin-top:10px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🖥️ Панель управления</h1>
 <div class="muted">Отдельный вход с компьютера. Сканер и бейдж здесь не нужны.</div>
 <input id="password" type="password" autocomplete="current-password" placeholder="Пароль руководителя">
@@ -1751,10 +1751,10 @@ STATS_PAGE = """<!doctype html>
 .wbbar{display:none;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 14px;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px}.wbstate{display:flex;align-items:center;gap:9px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:#a7b2bb;flex:0 0 auto}.dot.ok{background:#4f8a64}.dot.warn{background:#c08a32}.dot.err{background:#ad5757}.wbbar button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:8px 11px;font-weight:750;cursor:pointer}.wbbar button:disabled{opacity:.55;cursor:wait}
 .modal{position:fixed;inset:0;background:rgba(20,30,40,.48);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.open{display:flex}.modal-card{width:min(430px,96vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.22);text-align:center}.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.modal-head h2{margin:0;font-size:21px}.close-btn{border:0;background:#eef3f6;color:#25313d;border-radius:9px;width:38px;height:38px;font-size:22px;cursor:pointer}.qrbox{display:flex;justify-content:center;align-items:center;min-height:290px;margin:14px 0}.ttl{font-size:30px;font-weight:850}.qr-note{font-size:12px;color:#6b7785;margin-top:5px}
 @media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:1fr 1fr}.worker>div:first-child{grid-column:1/-1}.progress-head{align-items:flex-start;flex-direction:column}.dev{grid-template-columns:70px 95px 1fr}.dev .object{display:none}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body>
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 GRIT WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b><img src="/grit-logo.png?v=2" width="24" height="24" alt="" style="vertical-align:middle;border-radius:5px;margin-right:6px">GRIT WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/manager/shift-history">📊 История смен</a>
@@ -2084,10 +2084,10 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
 .table-wrap{overflow:auto;max-height:68vh;border:1px solid #dde5eb;border-radius:11px}table{width:100%;border-collapse:collapse;min-width:1050px;background:#fff}th,td{padding:10px 11px;border-bottom:1px solid #e4eaee;text-align:left;font-size:13px;white-space:nowrap}th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}.qty{font-weight:850}
 .period-filters{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;margin-top:14px}.period-filters label{display:grid;gap:4px;font-size:12px;font-weight:700;color:#51606e}.period-filters input{min-height:39px;border:1px solid #cbd9e2;border-radius:9px;background:#fff;padding:7px 10px;color:#25313d;font:inherit}.period-filters button{min-height:39px;border:1px solid #cbd9e2;border-radius:9px;background:#48647a;color:#fff;padding:8px 13px;font-weight:750;cursor:pointer}.period-filters button.secondary{background:#e8eef3;color:#314657}.period-message{margin-top:9px}.data-warning{margin-top:7px;color:#8a5c2e}
 @media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body>
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 GRIT WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b><img src="/grit-logo.png?v=2" width="24" height="24" alt="" style="vertical-align:middle;border-radius:5px;margin-right:6px">GRIT WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
@@ -2188,7 +2188,7 @@ table{width:100%;border-collapse:collapse;min-width:1000px;background:#fff}th,td
 th{position:sticky;top:0;background:#eef3f6;z-index:2;color:#51606e}.article{font-weight:800}.muted{color:#71808d}
 .type-debt{color:#8a5a12;font-weight:750}.type-normal{color:#356446;font-weight:750}
 @media(max-width:800px){.filters{grid-template-columns:1fr 1fr}.top{align-items:flex-start;flex-direction:column}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap">
 <div class="card">
  <div class="top"><div><h1>📋 Журнал FBS</h1><div class="small">Кто, какой товар, под какой WB-заказ и во сколько собрал.</div></div><a href="/manager">← Панель управления</a></div>
  <div class="filters">
@@ -2234,7 +2234,7 @@ input,button{min-height:44px;border:1px solid #cbd9e2;border-radius:9px;padding:
 .timeline{margin-top:12px}.event{display:grid;grid-template-columns:155px 130px 160px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid #e1e7eb;align-items:center}.event:last-child{border:0}
 .time{font-size:12px;color:#6b7785}.who{font-weight:800}.type{font-weight:800}.meta{font-size:12px}.empty{padding:22px 0;color:#6b7785}
 @media(max-width:800px){.event{grid-template-columns:1fr 1fr}.meta{grid-column:1/-1}.top{align-items:flex-start;flex-direction:column}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap">
 <div class="card">
  <div class="top"><div><h1>🔎 История ШК</h1><div class="small">Сканируй или введи ШК товара, WB, SSCC, артикул или код объекта.</div></div><a href="/manager">← Панель управления</a></div>
  <div class="search"><input id="q" autofocus placeholder="ШК / WB / SSCC / артикул"><button onclick="load()">Найти</button></div>
@@ -2281,7 +2281,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
  body.print-single .badge{display:none!important}
  body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0}
 }
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body>
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="wrap">
  <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div>
  <div id="grid" class="grid"></div>
@@ -2345,7 +2345,7 @@ def bootstrap_viktor_badge():
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:22px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}.btn{display:block;margin-top:14px;padding:12px;border-radius:11px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}@media print{body{background:#fff}.wrap{padding:0}.btn,.hint{display:none}.card{border:0}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
+</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <div class="small">GRIT WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
 <a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в GRIT WMS.</div>
@@ -3187,34 +3187,51 @@ def pwa_manifest():
     return response
 
 
-_PWA_ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAADOUlEQVR42u3dQU7yUBiGUWi6OBy6Bxy5AxwYByzBEYtwyPJwZKKJIqXQ9rvvOUPzx/i339PbAl7Xm+3utIJQnUOAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAHAPfVVftCP9zdnq5jH59fF/4zrJf+JJEMvhsgADL4QYp8BDH/blnZ+OweH5PPcOSgkn+/OwSD5vHcOAsnn3xthROuS68cqYAXACgACcPtD4G2QFQArAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAUE/fwn+iwiasrar+i02d4Sf5+LsFwjMACAAEAAIAAYAAQAAggMWyxaLjP0bvJGAFAAGAAEAAIAAQAAgABAACAAGAAEAAIAAozMZYjGJjLMMfzcZYIAAQAAgABAACAAGAAEAAd2JPIMd/DBtjYQUAAYAAQAAgABAACADa1TsEmS75Ta6E91cEYOgv+vetxiAAgz/oe7QWggAMfnQIHoIN/yK/vxWAxQ9mC6uBjbG4yfGvGoGNsYg+D54BiCYAolcBARAdgQAY5HjYuwUie/j/i6DSKiAArrryHw/7JlYDAXCXW6Iqq4AAGHXf//D0YgWYkz2BDP8YNsYqaKrbi7H3+BU+IuEWiKuGv4WrvwCIHn4BGOrBWhp+AYQN/yURtP7QK4DwK/+5AU8bfgGE3vb89vXWPuMjAM5etb8PfNJDrwBE8GPwk4dfAEUNfXPp2iEeO/wV3qAUgJUg8sovABHED78Agm6Dph7uKp/PEoCVIPbqL4DQVeCvQb/V8Ff6dK6tEa0E0awAwatA8r2/AEQQP/wCwC2QQ2AVSL36C0AE0cO/WnkVqNkIpvjF+RY2I5htBbCvf+3hvPX3n2serABWg7irvgCEED/4X9ab7e7k1YM8S/pL8XPeDlsBPCNEm/1lUA/DVqLoAERg+OMDEIHhjw9ABIY/PgARGP6pzf4y6DleqTD40QGIwdALAJKeAUAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACAAGAAEAAIAAQAAgABAACQAAgABAACAAEAAIAAYAAQAAgAGjLJzuHA2/RGO37AAAAAElFTkSuQmCC"
-_PWA_ICON_512 = "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"
+# Approved GRIT brand image. Keep the same source for browser and mobile icons.
+from pathlib import Path
+from functools import lru_cache
+from PIL import Image
+
+_GRIT_LOGO_PATH = Path(__file__).with_name("grit-logo.png")
 
 
-FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect width="64" height="64" rx="14" fill="#162A42"/>
-<text x="32" y="34" text-anchor="middle" dominant-baseline="middle"
-      fill="#FFFFFF" font-family="Arial,Helvetica,sans-serif"
-      font-size="22" font-weight="800" letter-spacing="-1.2">ONX</text>
-</svg>"""
+@lru_cache(maxsize=3)
+def _grit_icon_png(size):
+    with Image.open(_GRIT_LOGO_PATH) as original:
+        image = original.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, format="PNG", optimize=True)
+        return output.getvalue()
+
+
+@wms_bp.get("/grit-logo.png")
+def grit_logo():
+    response = Response(_GRIT_LOGO_PATH.read_bytes(), mimetype="image/png")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 @wms_bp.get("/favicon.svg")
+def favicon_svg():
+    picture = base64.b64encode(_grit_icon_png(128)).decode("ascii")
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">'
+           '<image width="128" height="128" href="data:image/png;base64,' + picture + '"/></svg>')
+    return Response(svg, mimetype="image/svg+xml")
+
+
 @wms_bp.get("/favicon.ico")
-def favicon():
-    response = Response(FAVICON_SVG, mimetype="image/svg+xml")
-    response.headers["Cache-Control"] = "public, max-age=3600"
-    return response
+def favicon_ico():
+    return Response(_grit_icon_png(64), mimetype="image/png")
 
 
 @wms_bp.get("/pwa-icon-192.png")
 def pwa_icon_192():
-    return Response(base64.b64decode(_PWA_ICON_192), mimetype="image/png")
+    return Response(_grit_icon_png(192), mimetype="image/png")
 
 
 @wms_bp.get("/pwa-icon-512.png")
 def pwa_icon_512():
-    return Response(base64.b64decode(_PWA_ICON_512), mimetype="image/png")
+    return Response(_grit_icon_png(512), mimetype="image/png")
 
 
 @wms_bp.get("/sw.js")
@@ -3278,7 +3295,7 @@ h1{font-size:30px;margin:4px 0 6px}
  h1{font-size:26px}
 }
 </style>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body>
 <div class="wrap">
   <div class="nav">
