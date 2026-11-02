@@ -149,7 +149,7 @@ def _startup_public_message():
         return "Резервная копия базы повреждена и не была подключена."
     if "timeout" in raw or "timed out" in raw or "connection" in raw or "endpoint" in raw:
         return "Нет стабильной связи с Yandex Object Storage. Повторяю подключение."
-    return "Не удалось подключить рабочую базу. ONIX автоматически повторяет попытку."
+    return "Не удалось подключить рабочую базу. GRIT WMS автоматически повторяет попытку."
 
 def _migrate_sqlite_backup_to_postgres_if_needed():
     if not os.getenv("DATABASE_URL", "").strip():
@@ -308,16 +308,16 @@ def require_employee_login():
     if not _WMS_READY.is_set():
         if path.startswith("/api/"):
             return jsonify(
-                error="ONIX WMS восстанавливает базу данных",
+                error="GRIT WMS восстанавливает базу данных",
                 startup=_startup_snapshot(),
             ), 503
         return Response(
             """<!doctype html><html lang="ru"><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>ONIX WMS · запуск</title>
+            <title>GRIT WMS · запуск</title>
             <body style="font-family:system-ui;background:#e9eef3;color:#25313d;display:grid;place-items:center;min-height:100vh;margin:0">
             <div style="max-width:520px;background:#fff;padding:24px;border-radius:16px;border:1px solid #d7e0e7">
-            <h2 style="margin-top:0">ONIX WMS запускается</h2>
+            <h2 style="margin-top:0">GRIT WMS запускается</h2>
             <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
             <p style="color:#6b7785">""" + _startup_public_message() + """</p>
             <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """ · этап: """ + str(_startup_snapshot().get("stage", "unknown")) + """</p>
@@ -1451,7 +1451,7 @@ async function reconcileReceivingPallet(){
     }
     pendingConfirmation=null;
     localStorage.removeItem(RECEIVING_PENDING_KEY);
-    document.getElementById('result').innerHTML='<div class="info">Сверка отмечена. ONIX не прибавляла товар повторно.</div>';
+    document.getElementById('result').innerHTML='<div class="info">Сверка отмечена. GRIT WMS не прибавляла товар повторно.</div>';
   }catch(e){showError(e.message);}
   finally{busy=false;}
 }
@@ -2659,7 +2659,7 @@ def pack_info():
         if barcode.startswith("ONIX-PAL-"):
             pallet = resolve_receiving_pallet(barcode)
             if not pallet:
-                return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
+                return jsonify(error="ШК палеты партнёра не найден в GRIT WMS"), 404
             if pallet["status"] != "created":
                 return jsonify(error=partner_pallet_status_error(pallet)), 409
             if len(pallet["lines"]) != 1:
@@ -2782,7 +2782,7 @@ def scan():
         if barcode.startswith("ONIX-PAL-"):
             partner_pallet = resolve_receiving_pallet(barcode)
             if not partner_pallet:
-                return jsonify(error="ШК палеты партнёра не найден в ONIX"), 404
+                return jsonify(error="ШК палеты партнёра не найден в GRIT WMS"), 404
             if partner_pallet["status"] != "created":
                 return jsonify(error=partner_pallet_status_error(partner_pallet)), 409
             if len(partner_pallet["lines"]) != 1:
