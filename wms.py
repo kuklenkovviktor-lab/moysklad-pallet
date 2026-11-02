@@ -765,7 +765,7 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="screen-orientation" content="landscape">
-<title>ONIX WMS · Вход</title>
+<title>GRIT WMS · Вход</title>
 <script src="/static/jsQR.js"></script>
 <script src="/static/JsBarcode.all.min.js"></script>
 <style>
@@ -812,7 +812,7 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
 <div class="header">
   <div class="header-left">
     <div class="logo">ONX</div>
-    <div class="header-copy"><h1>ONIX WMS</h1><div class="muted">Терминал сотрудника</div></div>
+    <div class="header-copy"><h1>GRIT WMS</h1><div class="muted">Терминал сотрудника</div></div>
   </div>
   <div id="scannerStatus" class="status">Zebra не подключена</div>
 </div>
@@ -1021,7 +1021,7 @@ async function toggleCamera(){
  }
 
  if(typeof jsQR!=='function'){
-  result.innerHTML='<div class="err">QR-модуль ONIX не загрузился. Обнови страницу.</div>';
+  result.innerHTML='<div class="err">QR-модуль GRIT не загрузился. Обнови страницу.</div>';
   return;
  }
  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
@@ -1098,7 +1098,7 @@ async function toggleCamera(){
  }catch(e){
   await stopBadgeCamera();
   const msg=(e&&e.name==='NotAllowedError')
-   ? 'Нет доступа к камере. Разреши камеру для ONIX в Safari.'
+   ? 'Нет доступа к камере. Разреши камеру для GRIT в Safari.'
    : 'Камера не открылась: '+String((e&&e.message)||e||'ошибка');
   result.innerHTML='<div class="err">'+msg+'</div>';
   setTimeout(focusHid,100);
@@ -1222,7 +1222,7 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 
 
 <div id="topbar">
-  <div class="brand">ONIX WMS · FBS</div>
+  <div class="brand">GRIT WMS · FBS</div>
   <div class="top-right">
     <div class="who" id="identity"></div>
     <div class="mini-earnings hidden" id="miniEarnings"><span class="mini-label">Выработка</span><span id="miniOrders">0</span> / <span id="miniEarned">0 ₽</span><span class="mini-note">расч.</span></div>
@@ -1537,7 +1537,7 @@ if ('serviceWorker' in navigator) {
 EXIT_PAGE = """<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Завершение смены</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Завершение смены</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh}
@@ -1606,7 +1606,7 @@ async function toggleCamera(){
 
 SUPERVISOR_QR_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · QR старшего</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · QR старшего</title>
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
@@ -1637,7 +1637,7 @@ refreshQr();setInterval(refreshQr,1000);
 
 SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Терминал выхода</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Терминал выхода</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
@@ -1665,7 +1665,7 @@ async function activate(){
 
 SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · QR выхода</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · QR выхода</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
@@ -1707,7 +1707,7 @@ refreshQr();setInterval(refreshQr,1000);
 
 MANAGER_LOGIN_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Вход руководителя</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Вход руководителя</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}
 .wrap{width:100%;max-width:460px;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:18px;padding:22px;box-shadow:0 3px 14px rgba(52,72,91,.08)}
@@ -1736,7 +1736,7 @@ document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='E
 
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Панель управления</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Панель управления</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
@@ -1754,7 +1754,7 @@ STATS_PAGE = """<!doctype html>
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 ONIX WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b>📦 GRIT WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a class="active" href="/manager">🖥️ Главная</a>
   <a href="/manager/shift-history">📊 История смен</a>
@@ -1775,7 +1775,7 @@ STATS_PAGE = """<!doctype html>
 </aside>
 
 <main class="content"><div class="wrap">
- <div class="card head"><h1>🖥️ ONIX WMS</h1><div class="small">Оперативная картина склада. Обновление каждые 10 секунд.</div></div>
+ <div class="card head"><h1>🖥️ GRIT WMS</h1><div class="small">Оперативная картина склада. Обновление каждые 10 секунд.</div></div>
 
  <div id="wbBar" class="wbbar">
   <div class="wbstate"><span id="wbDot" class="dot"></span><div><b id="wbTitle">WB-защита</b><div class="small" id="wbText"></div></div></div>
@@ -1996,7 +1996,7 @@ if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openEx
 
 SHIFT_ADMIN_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX WMS · Управление сменами</title>
+<title>GRIT WMS · Управление сменами</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;color:#25313d;margin:0}
 .wrap{max-width:1040px;margin:auto;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:15px;padding:18px;margin:14px 0}
@@ -2074,7 +2074,7 @@ load().catch(function(e){document.getElementById('shiftRows').textContent=e.mess
 
 RECEIVING_MONITOR_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Приёмка</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Приёмка</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100dvh}.sidebar{background:#f7f9fb;border-right:1px solid #d7e0e7;padding:18px 12px;position:sticky;top:0;height:100dvh}.brand{padding:4px 8px 16px;border-bottom:1px solid #e0e7ec;margin-bottom:12px}.brand b{display:block;font-size:18px}.brand span{font-size:11px;color:#6b7785}.side-nav{display:grid;gap:7px}.side-nav a{display:flex;align-items:center;gap:9px;min-height:44px;padding:10px 12px;border-radius:10px;text-decoration:none;font-weight:750;font-size:13px;background:#eef3f6;color:#314657;border:1px solid transparent}.side-nav a:hover{background:#e3ebf0}.side-nav a.active{background:#48647a;color:#fff}.side-nav a.logout{margin-top:12px;background:#f3ecec;color:#794545}
@@ -2086,7 +2086,7 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body>
 <div class="app">
 <aside class="sidebar">
- <div class="brand"><b>📦 ONIX WMS</b><span>Панель управления</span></div>
+ <div class="brand"><b>📦 GRIT WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
   <a href="/manager">🖥️ Главная</a>
   <a href="/fbs-journal">📋 Журнал FBS</a>
@@ -2107,7 +2107,7 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
    <button id="showYesterday" class="secondary" type="button">Вчера</button>
   </div>
   <div id="periodMessage" class="small period-message"></div>
-  <div class="small data-warning">Пока показатели рассчитаны по событиям ONIX: незавершённые документы МойСклад могут попадать в итог. Сверка будет исправлена отдельно.</div>
+  <div class="small data-warning">Пока показатели рассчитаны по событиям GRIT: незавершённые документы МойСклад могут попадать в итог. Сверка будет исправлена отдельно.</div>
  </div>
  <div class="kpis">
   <div class="kpi"><div class="l">Единиц по операциям за период</div><div class="v" id="units">0</div></div>
@@ -2173,7 +2173,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!monitorB
 
 FBS_JOURNAL_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Журнал FBS</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Журнал FBS</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .wrap{max-width:1500px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px;box-shadow:0 2px 10px rgba(52,72,91,.07)}
@@ -2222,7 +2222,7 @@ employees().then(load);
 
 HISTORY_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · История ШК</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · История ШК</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
 .wrap{max-width:1450px;margin:auto;padding:14px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:16px;padding:16px;margin-bottom:10px}
@@ -2257,7 +2257,7 @@ document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')l
 
 BADGES_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · Бейджи</title>
+<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Бейджи</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}
@@ -2304,7 +2304,7 @@ async function load(){
   if(!d)return;
   g.innerHTML=d.employees.map(x=>
    '<div class="badge" id="badge_'+esc(x.id)+'">'+
-    '<div class="brand">ONIX WMS</div>'+
+    '<div class="brand">GRIT WMS</div>'+
     '<div class="name">'+esc(x.name)+'</div>'+
     '<img class="qr" src="'+x.qr_png+'" alt="QR '+esc(x.name)+'">'+
     '<div class="num">№'+esc(x.badge_number)+'</div>'+
@@ -2339,14 +2339,14 @@ def bootstrap_viktor_badge():
     code = make_badge_code("viktor")
     page = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ONIX WMS · Бейдж Виктора</title>
+<title>GRIT WMS · Бейдж Виктора</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:22px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.num{font-size:34px;font-weight:850}.small{font-size:12px;color:#6b7785}.btn{display:block;margin-top:14px;padding:12px;border-radius:11px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}@media print{body{background:#fff}.wrap{padding:0}.btn,.hint{display:none}.card{border:0}}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head><body><div class="wrap"><div class="card">
-<div class="small">ONIX WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
+<div class="small">GRIT WMS</div><div class="num">№1</div><h2>Виктор</h2><div class="small">Руководитель склада · Manager</div>
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
-<a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в ONIX WMS.</div>
+<a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в GRIT WMS.</div>
 </div></div><script>new QRCode(document.getElementById('qr'),{text:"__VIKTOR_BADGE_CODE__",width:260,height:260});</script></body></html>"""
     return page
 
@@ -3165,9 +3165,9 @@ def fbs_journal_api():
 def pwa_manifest():
     manifest = {
         "id": "/fbs",
-        "name": "ONIX WMS · FBS терминал",
-        "short_name": "ONIX FBS",
-        "description": "Рабочий FBS-терминал ONIX WMS",
+        "name": "GRIT WMS · FBS терминал",
+        "short_name": "GRIT FBS",
+        "description": "Рабочий FBS-терминал GRIT WMS",
         "start_url": "/fbs",
         "scope": "/",
         "display": "fullscreen",
@@ -3218,13 +3218,13 @@ def pwa_icon_512():
 @wms_bp.get("/sw.js")
 def pwa_service_worker():
     # A network-only worker: phone browsers must not receive a failed
-    # navigation from a cache that ONIX never populated. In particular the
+    # navigation from a cache that GRIT never populated. In particular the
     # old fetch handler did respondWith(fetch(...).catch(caches.match(...))).
     # When Render was waking up, caches.match() returned undefined, turning
     # temporary unavailability into Chrome ERR_FAILED / failed navigation.
     # Keep install/activate for the PWA; let Chrome and Render own requests.
     js = """
-// ONIX mobile PWA v3. No fetch interception and no caching of WMS data.
+// GRIT mobile PWA v3. No fetch interception and no caching of WMS data.
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
@@ -3248,7 +3248,7 @@ MOVE_PAGE = """<!doctype html>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="screen-orientation" content="landscape">
-<title>ONIX WMS · Перемещение</title>
+<title>GRIT WMS · Перемещение</title>
 <style>
 :root{--bg:#e9eef3;--panel:#f7f9fb;--panel2:#eef3f6;--text:#25313d;--muted:#6b7785;--line:#d7e0e7;--accent:#48647a;--accent2:#dde8ef}
 *{box-sizing:border-box}
