@@ -336,6 +336,9 @@ def require_employee_login():
         # browser's background service-worker refresh to download /login HTML.
         "/sw.js",
         "/manifest.webmanifest",
+        "/grit-logo.png",
+        "/pwa-icon-192.png",
+        "/pwa-icon-512.png",
         "/supervisor-terminal",
         "/api/supervisor-terminal/qr",
         "/manager-login",
