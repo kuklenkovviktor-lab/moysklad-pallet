@@ -171,7 +171,7 @@ def login():
             csrf()
             return redirect("/partners")
         error = "Неверный логин или пароль"
-    return page("ONIX · Вход партнёра", f"""<section><p class="error">{escape(error)}</p>
+    return page("GRIT WMS · Вход партнёра", f"""<section><p class="error">{escape(error)}</p>
       <form method="post"><input name="name" placeholder="Логин" required autocomplete="username">
       <input type="password" name="password" placeholder="Пароль" required autocomplete="current-password">
       <button>Войти</button></form></section>""")
@@ -227,7 +227,7 @@ def manager_partners():
         partners = db.cursor().execute(sql("SELECT name, created_at, active FROM partner_accounts ORDER BY created_at DESC")).fetchall()
     rows = "".join(f"<tr><td>{escape(name)}</td><td>{escape(created[:16])}</td><td>{'Активен' if active else 'Отключён'}</td></tr>"
                    for name, created, active in partners)
-    return page("ONIX · Управление партнёрами", f"""<p><a href="/manager">← Панель руководителя</a></p>
+    return page("GRIT WMS · Управление партнёрами", f"""<p><a href="/manager">← Панель руководителя</a></p>
       <section><h2>Создать ограниченный доступ партнёру</h2><p>{escape(notice)}</p>
       <form method="post"><input type="hidden" name="csrf" value="{csrf()}"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
         <input name="password" placeholder="Пароль (от 12 символов)" required minlength="12" autocomplete="new-password">
@@ -459,9 +459,9 @@ def _render_batch_print(chosen, labels):
         out=io.BytesIO()
         qr.save(out,format="PNG")
         encoded=base64.b64encode(out.getvalue()).decode()
-        pages.append(f'<section class="sheet"><h1>ONIX · ПАЛЕТА</h1><div class="article">{article}</div><div class="number">{number}</div><div class="quantity">КОЛИЧЕСТВО: {quantity} ШТ.</div><img alt="QR палеты" src="data:image/png;base64,{encoded}"></section>')
+        pages.append(f'<section class="sheet"><h1>GRIT WMS · ПАЛЕТА</h1><div class="article">{article}</div><div class="number">{number}</div><div class="quantity">КОЛИЧЕСТВО: {quantity} ШТ.</div><img alt="QR палеты" src="data:image/png;base64,{encoded}"></section>')
     return Response("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
-    <title>ONIX · Печать поставки</title><style>
+    <title>GRIT WMS · Печать поставки</title><style>
     @page{size:A4 portrait;margin:0}*{box-sizing:border-box}
     body{font-family:Arial,sans-serif;margin:0;text-align:center}
     .sheet{width:210mm;height:297mm;max-height:297mm;overflow:hidden;display:flex;flex-direction:column;
@@ -672,7 +672,7 @@ def _manual_fields(form):
     with db_connect() as db:
         found=db.cursor().execute(sql("SELECT 1 FROM fbs_catalog_barcodes WHERE article=? LIMIT 1"),(sku,)).fetchone()
     if not found:
-        raise ValueError("Артикул не найден в каталоге ONIX. Выбери товар из подсказок.")
+        raise ValueError("Артикул не найден в каталоге GRIT WMS. Выбери товар из подсказок.")
     return sku,int(raw),reason
 
 
@@ -844,7 +844,7 @@ def print_label(pallet_id):
     quantity = int(label["quantity"])
     return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>ONIX · Палета {article} · {number}</title>
+    <title>GRIT WMS · Палета {article} · {number}</title>
     <style>
     @page{{size:A4 portrait;margin:0}}
     *{{box-sizing:border-box}}
@@ -862,7 +862,7 @@ def print_label(pallet_id):
     @media print{{button{{display:none}}}}
     </style></head><body>
     <button onclick="window.print()">Печать А4</button>
-    <div class="sheet"><h1 class="heading">ONIX · ПАЛЕТА</h1>
+    <div class="sheet"><h1 class="heading">GRIT WMS · ПАЛЕТА</h1>
       <div class="article">{article}</div><div class="number">{number}</div>
       <div class="quantity">КОЛИЧЕСТВО: {quantity} ШТ.</div>
       <img alt="QR палеты" src="data:image/png;base64,{encoded}">
