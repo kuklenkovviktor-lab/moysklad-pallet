@@ -1768,6 +1768,7 @@ STATS_PAGE = """<!doctype html>
    <a href="/manager/fbs-diagnostics">📶 Скорость сканирования</a>
   <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
   <a href="/manager/partners">🤝 Партнёры</a>
+  <a href="/manager/integrations">🔌 Интеграции</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
@@ -2092,6 +2093,7 @@ h1{margin:0;font-size:28px}.small{font-size:12px;color:#6b7785}.kpis{display:gri
   <a href="/fbs-journal">📋 Журнал FBS</a>
   <a href="/history">🔎 История ШК</a>
   <a class="active" href="/receiving-monitor">📥 Приёмка</a>
+  <a href="/manager/integrations">🔌 Интеграции</a>
   <a href="/badges">🪪 Бейджи</a>
   <a href="/manager#qr" onclick="sessionStorage.setItem('openExitQr','1')">🔐 QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
