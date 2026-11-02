@@ -63,7 +63,7 @@ def integrations_list_api():
 @integrations_bp.get("/manager/integrations")
 def integrations_page():
     if not manager_access():
-        return redirect("/manager/login")
+        return redirect("/manager-login")
     cards = []
     for item in _catalog():
         if item["adapter"] == "existing":
