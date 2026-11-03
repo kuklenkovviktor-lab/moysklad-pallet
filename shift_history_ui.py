@@ -2,7 +2,7 @@
 
 SHIFT_HISTORY_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#e9eef3"><title>ONIX WMS · История смен</title>
+<meta name="theme-color" content="#09121e"><title>ONIX WMS · История смен</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#e9eef3;color:#25313d;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif}
@@ -19,8 +19,8 @@ button.secondary{background:#e4edf2;color:#314657}
 button:disabled{opacity:.5;cursor:progress}
 .presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
 .summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
-.stat{background:#edf2f6;border-radius:11px;padding:11px;min-width:0}
-.stat .value{font-size:23px;font-weight:850;margin-top:5px}
+.stat{background:#1b3045;color:#f1f6ff;border:1px solid #345069;border-radius:11px;padding:11px;min-width:0}
+.stat .small{color:#9eb5ca}.stat .value{font-size:23px;font-weight:850;margin-top:5px;color:#fff;font-variant-numeric:tabular-nums}
 .status{font-size:13px;min-height:20px;margin-top:10px}.err{color:#a23d3d}
 .table-wrap{overflow-x:auto}
 table{border-collapse:collapse;width:100%;min-width:930px;background:#fff}
@@ -74,6 +74,7 @@ tr.has-warning{background:#fffaf0}
 const fromEl=document.getElementById('dateFrom'),toEl=document.getElementById('dateTo');
 const empEl=document.getElementById('employee'),statusEl=document.getElementById('status'),btn=document.getElementById('show');
 let allEmployees=[],busy=false,renderedRows=[];
+let currentPeriodIsToday=true;
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function fmtN(n){return Number(n||0).toLocaleString('ru-RU')}
 function duration(seconds){
@@ -158,7 +159,9 @@ async function load(){
   updateEmployees(data.employees);document.getElementById('summary').innerHTML=renderSummary(data.totals);
   document.getElementById('rows').innerHTML=renderTable(data.rows);
   statusEl.textContent='Период: '+humanDate(data.from)+' – '+humanDate(data.to)+
-   ' · строк: '+data.rows.length+(data.totals.quality_warning?' · ⚠ Есть неполные данные':'');
+   ' · строк: '+data.rows.length+(data.totals.quality_warning?' · ⚠ Есть неполные данные':'')+
+   (data.rows.length===0?' · Нет записей в этом экземпляре WMS за выбранный период':'')+
+   ' · обновлено '+new Date().toLocaleTimeString('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'});
  }catch(e){statusEl.textContent=e.message;statusEl.className='status err'}
  finally{busy=false;btn.disabled=false}
 }
@@ -170,4 +173,12 @@ document.getElementById('rows').addEventListener('click',e=>{
 btn.addEventListener('click',load);
 document.querySelectorAll('button[data-days]').forEach(b=>b.addEventListener('click',()=>period(Number(b.dataset.days))));
 fromEl.value=toEl.value=dateToday();load();
+// Refresh today's summary without overwriting filters or making duplicate requests.
+setInterval(()=>{
+ if(document.visibilityState!=='visible'||busy)return;
+ if(fromEl.value<=dateToday()&&toEl.value>=dateToday())load();
+},30000);
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible'&&!busy&&fromEl.value<=dateToday()&&toEl.value>=dateToday())load();
+});
 </script></body></html>"""
