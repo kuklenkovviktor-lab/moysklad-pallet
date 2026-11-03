@@ -1751,6 +1751,29 @@ STATS_PAGE = """<!doctype html>
 .wbbar{display:none;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 14px;background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px}.wbstate{display:flex;align-items:center;gap:9px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:#a7b2bb;flex:0 0 auto}.dot.ok{background:#4f8a64}.dot.warn{background:#c08a32}.dot.err{background:#ad5757}.wbbar button{border:0;border-radius:9px;background:#48647a;color:#fff;padding:8px 11px;font-weight:750;cursor:pointer}.wbbar button:disabled{opacity:.55;cursor:wait}
 .modal{position:fixed;inset:0;background:rgba(20,30,40,.48);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.open{display:flex}.modal-card{width:min(430px,96vw);background:#fff;border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.22);text-align:center}.modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.modal-head h2{margin:0;font-size:21px}.close-btn{border:0;background:#eef3f6;color:#25313d;border-radius:9px;width:38px;height:38px;font-size:22px;cursor:pointer}.qrbox{display:flex;justify-content:center;align-items:center;min-height:290px;margin:14px 0}.ttl{font-size:30px;font-weight:850}.qr-note{font-size:12px;color:#6b7785;margin-top:5px}
 @media(max-width:1000px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid #d7e0e7}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a.logout{margin-top:0}.content{padding:12px}.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:1fr 1fr}.worker>div:first-child{grid-column:1/-1}.progress-head{align-items:flex-start;flex-direction:column}.dev{grid-template-columns:70px 95px 1fr}.dev .object{display:none}}
+
+/* GRIT WMS - desktop command center theme. Scope: STATS_PAGE only. */
+:root{color-scheme:dark;--grit-bg:#09111c;--grit-panel:#122031;--grit-line:#2b4156;--grit-text:#edf5ff;--grit-muted:#99aec3;--grit-blue:#238fe0;--grit-orange:#ff922e}
+body{background:var(--grit-bg);color:var(--grit-text)}
+.app{grid-template-columns:230px minmax(0,1fr)}.sidebar{background:linear-gradient(180deg,#0b1725,#0c1b2a);border-color:#263a50;padding:18px 12px}.brand{border-color:#283e52;padding-bottom:19px}.brand b{display:flex;align-items:center;gap:8px;font-size:20px}.brand img{width:34px;height:34px;object-fit:cover}.brand span,.small{color:var(--grit-muted)}
+.side-nav{gap:3px}.side-nav a{background:transparent;color:#d3dfeb;border-color:transparent;border-radius:9px;font-weight:650;min-height:39px;padding:8px 11px}.side-nav a:hover{background:#213549}.side-nav a.active{background:linear-gradient(100deg,#126bbb,#17539a);border:1px solid #287fc5;color:#fff}.side-nav a.logout{background:#2e2029;color:#e8b8b8}
+.content{padding:20px 24px}.wrap{max-width:1650px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:14px}
+.card,.kpi,.mini{background:linear-gradient(145deg,#162639,#0f1c2a);border:1px solid var(--grit-line);border-radius:12px;box-shadow:none;color:var(--grit-text)}
+.card{padding:17px 18px}.head{grid-column:1/-1;margin:0;padding:0 2px 15px;background:transparent;border:0;border-bottom:1px solid #294055;border-radius:0}.head h1{font-size:27px;letter-spacing:-.4px}.head .small{font-size:13px;margin-top:5px}
+.kpis{grid-column:1/-1;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0}.kpi{min-width:0;padding:17px 18px;border-left:2px solid #2c93e0}.kpi:last-child{border-left-color:var(--grit-orange)}.kpi .v{font-size:31px;color:#fff}.kpi .l{color:#a6bdd0;font-weight:700}
+.progress-card{grid-column:2;grid-row:3;margin:0}.progress-head{flex-direction:column;align-items:stretch;gap:12px}.progress-main .done{font-size:36px}.progress-main .plan{font-size:14px;color:#a6bed3}.progress{height:12px;background:#28394a}.progress>div{background:linear-gradient(90deg,#238fe0,#ff922e)}.plan-edit{flex-wrap:wrap}.plan-edit input{background:#0b1724;color:#fff;border:1px solid #3d566c;flex:1;min-width:95px}.plan-edit button,.wbbar button{background:#156fae;color:#fff;border:1px solid #348fce}
+.hourly-card{grid-column:1;grid-row:3;margin:0!important;min-width:0}.hourly-card #hourlyChart{height:195px!important}.section-title b{color:#f3f8fd}.section-link{color:#5bbaff}
+.grid2{grid-column:1/-1;grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr);gap:14px;margin:0}.worker{border-color:#304456}.worker b{color:#fff}.worker .small{color:#9db1c5}
+.mini{background:#1b2d41}.mini .t{color:#9cb2c6}
+#completedCard{grid-column:1/-1;margin:0!important}.deviations-card{grid-column:1/-1}.dev{border-color:#304456}.empty{color:#a5b8ca}.warn{color:#ffb152}.danger{color:#ff8484}
+.wbbar{grid-column:1/-1;background:#15273a;color:#f0f7ff;border-color:#2d516b;margin:0}
+.processes,.quick-actions{grid-column:1/-1}.process-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:14px}
+.process-link{display:flex;flex-direction:column;gap:10px;background:#1a2c40;color:#e6f2fc;border:1px solid #344c63;border-radius:9px;text-decoration:none;padding:14px;min-height:94px;min-width:0}.process-link:hover{background:#223d56;border-color:#379ce6}.process-link.important{background:#292018;border-color:#e28a34}.process-name{font-size:14px;font-weight:750}.process-sub{font-size:12px;color:#a4bbce}
+.quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}.quick-grid a{background:#193047;color:#edf6ff;border:1px solid #36556f;border-radius:9px;text-align:center;text-decoration:none;padding:12px;font-size:13px;font-weight:700}.quick-grid a:hover{background:#215278}
+.modal-card{background:#162739;color:#fff;border:1px solid #38536a}.close-btn{background:#2d4156;color:#fff}
+@media(max-width:1150px){.wrap{grid-template-columns:1fr}.hourly-card,.progress-card{grid-column:1;grid-row:auto}.grid2{grid-template-columns:1fr}.process-grid{grid-template-columns:repeat(3,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.content{padding:12px}.process-grid,.quick-grid{grid-template-columns:repeat(2,1fr)}.worker{grid-template-columns:repeat(2,minmax(0,1fr))}.worker>div:first-child{grid-column:1/-1}}
+
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="app">
 <aside class="sidebar">
@@ -1776,7 +1799,7 @@ STATS_PAGE = """<!doctype html>
 </aside>
 
 <main class="content"><div class="wrap">
- <div class="card head"><h1>🖥️ GRIT WMS</h1><div class="small">Оперативная картина склада. Обновление каждые 10 секунд.</div></div>
+ <div class="card head"><h1>Операционный центр склада</h1><div class="small">GRIT WMS · Управление складскими процессами в реальном времени · Обновление каждые 10 секунд</div></div>
 
  <div id="wbBar" class="wbbar">
   <div class="wbstate"><span id="wbDot" class="dot"></span><div><b id="wbTitle">WB-защита</b><div class="small" id="wbText"></div></div></div>
@@ -1805,12 +1828,21 @@ STATS_PAGE = """<!doctype html>
   <div class="small" id="progressText">Задай план на день, чтобы видеть остаток и процент выполнения.</div>
  </div>
 
- <div class="card" style="margin-bottom:12px">
-  <div class="section-title"><b>FBS по часам</b><span class="small">собрано заказов за каждый час</span></div>
+ <div class="card hourly-card">
+  <div class="section-title"><b>Сборка FBS по часам</b><span class="small">собрано заказов за каждый час</span></div>
   <div id="hourlyChart" style="height:170px;display:flex;align-items:flex-end;gap:5px;padding-top:10px"></div>
  </div>
 
- <div class="grid2">
+ <section class="card processes" aria-label="Ключевые складские процессы">
+ <div class="section-title"><b>Ключевые складские процессы</b><span class="small">Рабочие модули</span></div>
+ <div class="process-grid">
+ <a class="process-link" href="/receiving-monitor"><span class="process-name">📥 Приёмка</span><span class="process-sub">Поставки и операции</span></a>
+ <a class="process-link" href="/manager/replenishment"><span class="process-name">📦 Пополнение</span><span class="process-sub">Задания по ячейкам</span></a>
+ <a class="process-link important" href="/fbs-journal"><span class="process-name">▣ Сборка FBS</span><span class="process-sub">Заказы и сканы</span></a>
+ <a class="process-link" href="/manager/warehouse-map"><span class="process-name">◈ Карта склада</span><span class="process-sub">Адресное хранение</span></a>
+ <a class="process-link" href="/manager/shift-history"><span class="process-name">↺ История смен</span><span class="process-sub">Выработка и смены</span></a>
+ </div></section>
+<div class="grid2">
   <div class="card">
    <div class="section-title"><b>Сейчас работают</b><span class="small"><span id="active">0</span> активных · <a class="section-link" href="/manager/shifts">Управление сменами →</a></span></div>
    <div id="workers">Загрузка…</div>
@@ -1831,10 +1863,11 @@ STATS_PAGE = """<!doctype html>
   <div id="completedWorkers"></div>
  </div>
 
- <div class="card">
+ <div class="card deviations-card">
   <div class="section-title"><b>Последние ошибки и отклонения</b><span class="small">только то, что требует внимания</span></div>
   <div id="deviations">Загрузка…</div>
  </div>
+<section class="card quick-actions"><div class="section-title"><b>Быстрые действия</b><span class="small">Действующие разделы</span></div><div class="quick-grid"><a href="/fbs-journal">Журнал FBS</a><a href="/manager/replenishment">Пополнение</a><a href="/receiving-monitor">Приёмка</a><a href="/manager/shift-history">Отчёт по сменам</a></div></section>
 </div></main>
 </div>
 
