@@ -405,6 +405,7 @@ def require_employee_login():
         "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
         "/api/manager/shift-history",
+        "/api/manager/employee-events",
         "/api/manager/shifts/actions",
         "/api/manager/shifts/force-close",
         "/manager/replenishment",

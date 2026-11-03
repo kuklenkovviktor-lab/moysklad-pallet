@@ -161,7 +161,7 @@ class ShiftHistoryTests(unittest.TestCase):
         self.authorize()
         r=self.client.get("/manager/shift-history")
         self.assertEqual(r.status_code, 200)
-        self.assertIn("История смен и производительность", r.get_data(as_text=True))
+        self.assertIn("Аналитика сотрудников", r.get_data(as_text=True))
 
     def test_main_manager_page_links_to_history(self):
         self.assertIn('/manager/shift-history', STATS_PAGE)

@@ -1,184 +1,87 @@
-"""Manager-only shift history screen. Data are loaded from a read-only API."""
-
+"""GRIT manager employee analytics: cards first, personal journal on click."""
 SHIFT_HISTORY_PAGE = """<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#09121e"><title>ONIX WMS · История смен</title>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09121e"><title>GRIT WMS · Аналитика сотрудников</title>
 <style>
-*{box-sizing:border-box}
-body{margin:0;background:#e9eef3;color:#25313d;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif}
-main{max-width:1440px;margin:auto;padding:18px}
-a{color:#48647a}.back{display:inline-block;margin-bottom:12px;text-decoration:none;font-weight:750}
-h1{margin:0 0 5px;font-size:28px}h2{margin:0 0 12px;font-size:17px}
-.small{font-size:12px;color:#647684}.note{font-size:13px;color:#536676;line-height:1.5}
-.panel{padding:18px;background:#f8fafb;border:1px solid #d8e1e7;border-radius:15px;margin:14px 0}
-.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
-label{display:grid;gap:5px;color:#4c5d69;font-size:12px;font-weight:700}
-input,select{height:41px;padding:8px;border:1px solid #c6d4dd;border-radius:9px;background:#fff;color:#25313d;font-size:14px}
-button{height:41px;border:0;background:#48647a;color:white;padding:0 14px;border-radius:9px;font-weight:750;cursor:pointer}
-button.secondary{background:#e4edf2;color:#314657}
-button:disabled{opacity:.5;cursor:progress}
-.presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
-.summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
-.stat{background:#1b3045;color:#f1f6ff;border:1px solid #345069;border-radius:11px;padding:11px;min-width:0}
-.stat .small{color:#9eb5ca}.stat .value{font-size:23px;font-weight:850;margin-top:5px;color:#fff;font-variant-numeric:tabular-nums}
-.status{font-size:13px;min-height:20px;margin-top:10px}.err{color:#a23d3d}
-.table-wrap{overflow-x:auto}
-table{border-collapse:collapse;width:100%;min-width:930px;background:#fff}
-th,td{border-bottom:1px solid #e0e8ed;padding:11px 9px;font-size:13px;text-align:left;vertical-align:top}
-th{background:#eaf0f4;color:#536576;font-size:12px;white-space:nowrap}
-td.num{font-variant-numeric:tabular-nums;font-weight:750}
-tr.has-warning{background:#fffaf0}
-.details-button{height:30px;padding:0 10px;font-size:12px}
-.details-row>td{background:#f5f8fa;padding:13px 18px}
-.details-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.inner{border-top:1px solid #dbe4ea;padding:8px 0;font-size:12px}
-.inner:first-child{border-top:0}
-.warning{color:#965a18;font-size:12px;font-weight:650}
-.empty{text-align:center;color:#6b7785;padding:30px}
-@media(max-width:920px){.summary{grid-template-columns:repeat(3,1fr)}.details-grid{grid-template-columns:1fr}}
-@media(max-width:560px){main{padding:11px}.summary{grid-template-columns:repeat(2,1fr)}.toolbar{align-items:stretch}.toolbar>*{flex:1}.stat .value{font-size:20px}}
-</style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
+*{box-sizing:border-box} :root{color-scheme:dark}body{margin:0;background:#09121e;color:#eef6ff;font:14px/1.45 system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+main{max-width:1600px;margin:auto;padding:24px}h1{font-size:28px;letter-spacing:-.6px;margin:4px 0}h2{font-size:19px;margin:0 0 14px}h3{font-size:16px;margin:0}p{margin:5px 0}a{color:#75c1ff}button,input,select{font:inherit}button{cursor:pointer;border-radius:9px;background:#176dad;color:#fff;border:1px solid #3689cb;padding:10px 14px;font-weight:650}button:hover{background:#247fc1}button:disabled{opacity:.55;cursor:wait}button.secondary{background:#1a3045;color:#dbedff;border-color:#36556f}
+input,select{min-height:41px;border:1px solid #3e5b72;background:#0c1a29;color:#eef6ff;border-radius:9px;padding:8px 12px}input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #ff9637;outline-offset:2px}
+.back{display:inline-block;margin-bottom:9px;text-decoration:none}.subtitle,.muted,.small{color:#a7bed2}.small{font-size:12px}.subtitle{font-size:13px;margin-bottom:18px}
+.panel,.employee-card{background:linear-gradient(135deg,#14273a,#0f1d2b);border:1px solid #304b62;border-radius:13px}
+.panel{padding:18px;margin-bottom:15px}.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.toolbar label{display:grid;gap:5px;font-size:12px;color:#bcd0e2;font-weight:650}.toolbar label input{min-width:156px}.presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.status{margin-top:12px;font-size:12px;color:#9eb5c9;min-height:18px}.err{color:#ff9090}
+.summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:17px}.stat{padding:18px;min-width:0;background:linear-gradient(145deg,#172c42,#102132);border:1px solid #34526d;border-radius:12px}.stat .value{font-size:25px;line-height:1.25;font-weight:750;letter-spacing:-.3px;margin-top:6px;font-variant-numeric:tabular-nums}.stat .small{color:#b9cee0}
+.section-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:18px 0 12px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.employee-card{display:block;width:100%;text-align:left;padding:17px;min-height:235px;color:#f1f7ff;cursor:pointer;transition:border-color .15s,transform .15s}.employee-card:hover{border-color:#58aee9;transform:translateY(-1px);background:linear-gradient(140deg,#1b344b,#102237)}.employee-card.selected{border-color:#ff952d;box-shadow:inset 0 0 0 1px #ff952d}.person-head{display:flex;align-items:center;gap:12px;margin-bottom:15px}.avatar{width:42px;height:42px;flex:none;display:grid;place-items:center;border-radius:50%;background:#27445e;color:#d9edff;font-size:21px}.person-name{font-size:19px;font-weight:750;line-height:1.2}.person-sub{font-size:11px;color:#a6bdd0}.order-figure{margin-left:auto;text-align:right}.order-figure strong{font-size:23px;display:block;font-variant-numeric:tabular-nums}.order-figure span{font-size:11px;color:#acc5d8}
+.person-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.person-metric{padding:9px;background:#1b3449;border:1px solid #2c4960;border-radius:8px;min-width:0}.person-metric span{display:block;font-size:11px;color:#a9c1d5}.person-metric b{font-size:14px;font-weight:720;display:block;margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.mix{margin-top:13px}.mix-title{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#b4cbdd}.track{height:7px;background:#2a4358;border-radius:10px;overflow:hidden;display:flex;margin-top:5px}.track .pick{height:100%;background:#3c9be9}.track .repl{height:100%;background:#ff972d}.card-foot{font-size:11px;color:#92b0c7;margin-top:12px}.card-empty{color:#a6bdcf;padding:25px;text-align:center;grid-column:1/-1}
+.journal{border-color:#4a7599;scroll-margin-top:16px}.journal-top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.journal-headline{font-size:21px;font-weight:760}.journal-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:15px 0}.journal-toolbar select{min-width:175px}.detail-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:14px 0}.detail-stats .person-metric{padding:13px}
+.tabs{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}.tabs button.active{background:#ff922e;color:#111b25;border-color:#ff922e}
+.event-list{display:grid;gap:7px}.event{display:grid;grid-template-columns:140px 165px 1fr;gap:12px;border:1px solid #2d465a;background:#102133;border-radius:8px;padding:12px}.event time{color:#a9c2d7;font-size:12px}.event b{font-size:13px}.event .small{overflow-wrap:anywhere}.load-more{margin-top:12px}
+.block-label{font-weight:700;margin:19px 0 10px}.details-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.detail-box{background:#102234;border:1px solid #304b63;border-radius:10px;padding:13px}.detail-row{padding:9px 0;border-bottom:1px solid #2d465a;font-size:12px}.detail-row:last-child{border:0}.warning{color:#ffb55a;font-size:12px}.hidden{display:none!important}
+@media(max-width:1250px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.summary{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:780px){main{padding:12px}.cards{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-stats{grid-template-columns:repeat(2,1fr)}.details-columns{grid-template-columns:1fr}.event{grid-template-columns:1fr;gap:3px}.section-head{align-items:flex-start;flex-direction:column}}
+@media(max-width:430px){.person-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat .value{font-size:20px}.toolbar label{width:100%}.toolbar input{width:100%}}
+</style><link rel="icon" href="/favicon.svg" type="image/svg+xml"></head>
 <body><main>
-<a class="back" href="/manager">← Панель управления</a>
-<h1>История смен и производительность</h1>
-<p class="note">Подтверждённая сборка WB FBS, время операций и завершённые пополнения. Даты считаются по Москве. Данные берутся из истории ONIX, без изменения склада или МойСклада.</p>
+<a class="back" href="/manager">← Операционный центр</a>
+<h1>Аналитика сотрудников</h1><p class="subtitle">Команда на одном экране. Выбери сотрудника, чтобы открыть полную доступную историю его операций.</p>
 <section class="panel">
-  <div class="toolbar">
-    <label>С даты <input id="dateFrom" type="date"></label>
-    <label>По дату <input id="dateTo" type="date"></label>
-    <label>Сотрудник <select id="employee"><option value="">Все сотрудники</option></select></label>
-    <button type="button" id="show">Показать</button>
-  </div>
-  <div class="presets">
-    <button type="button" class="secondary" data-days="1">Сегодня</button>
-    <button type="button" class="secondary" data-days="0">Вчера</button>
-    <button type="button" class="secondary" data-days="7">7 дней</button>
-    <button type="button" class="secondary" data-days="31">31 день</button>
-  </div>
-  <div class="status" id="status" role="status"></div>
+ <div class="toolbar"><label>С даты<input type="date" id="dateFrom"></label><label>По дату<input type="date" id="dateTo"></label><button type="button" id="show">Показать</button></div>
+ <div class="presets"><button class="secondary" data-days="1">Сегодня</button><button class="secondary" data-days="0">Вчера</button><button class="secondary" data-days="7">7 дней</button><button class="secondary" data-days="31">31 день</button></div>
+ <div id="status" class="status" role="status">Загружаю данные…</div>
 </section>
-<section class="panel">
-  <h2>Итог за выбранный период</h2>
-  <div id="summary" class="summary"></div>
-  <p class="small">Скорость = все подтверждённые заказы FBS / суммарное зафиксированное время сборки. «н/д» означает, что достоверно рассчитать скорость нельзя.</p>
-</section>
-<section class="panel">
-  <h2>По дням и сотрудникам</h2>
-  <div class="table-wrap">
-    <table><thead><tr><th>Дата</th><th>Сотрудник</th><th>WB FBS</th><th>Заказов/час</th><th>Сборка</th><th>Пополнение</th><th>Заданий</th><th>Смены</th><th>Подробности</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="9" class="empty">Загружаю историю…</td></tr></tbody></table>
-  </div>
-  <p class="note">Пополнения считаются отдельно: количество по завершённым заданиям, время по записанным операциям. Если сотрудник не переключал режим, расхождение возможно.</p>
+<section class="summary" id="summary" aria-label="Итоги по команде"></section>
+<div class="section-head"><h2>Сотрудники <span id="peopleCount"></span></h2><label class="small">Сортировка <select id="sortBy"><option value="orders">По заказам WB FBS</option><option value="name">По имени</option><option value="speed">По скорости</option><option value="tasks">По заданиям</option></select></label></div>
+<section id="cards" class="cards" aria-label="Карточки сотрудников"></section>
+<section id="journal" class="panel journal hidden" aria-label="Персональный журнал">
+ <div class="journal-top"><div><div class="small">Персональная статистика</div><div id="journalName" class="journal-headline"></div></div><button class="secondary" id="closeJournal">Закрыть</button></div>
+ <div id="detailStats" class="detail-stats"></div>
+ <div class="tabs" role="group" aria-label="Типы событий">
+  <button type="button" class="active" data-kind="all">Все события</button>
+  <button type="button" class="secondary" data-kind="fbs">Сканирования FBS</button>
+  <button type="button" class="secondary" data-kind="operation">Складские события</button>
+ </div>
+ <div class="small">События отсортированы по времени. Отображаются по 100 записей на страницу. Отдельно ниже приведены интервалы работы, смены и завершённые задания. Записи без фиксации в WMS не выдумываются.</div>
+ <div id="eventsStatus" class="status" role="status"></div><div id="events" class="event-list"></div><button id="moreEvents" class="load-more secondary hidden" type="button">Загрузить ещё 100 событий</button>
+ <div class="block-label">Время по операциям и заданиям</div><div id="detailRows" class="details-columns"></div>
 </section>
 </main><script>
-const fromEl=document.getElementById('dateFrom'),toEl=document.getElementById('dateTo');
-const empEl=document.getElementById('employee'),statusEl=document.getElementById('status'),btn=document.getElementById('show');
-let allEmployees=[],busy=false,renderedRows=[];
-let currentPeriodIsToday=true;
-function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function fmtN(n){return Number(n||0).toLocaleString('ru-RU')}
-function duration(seconds){
- if(seconds==null)return 'н/д';
- const minutes=Math.round(Number(seconds)/60);
- return Math.floor(minutes/60)+' ч '+String(minutes%60).padStart(2,'0')+' мин';
+const $=id=>document.getElementById(id),fromEl=$('dateFrom'),toEl=$('dateTo');
+let report=null,people=[],selectedId='',eventPage=0,eventKind='all',loading=false,eventsBusy=false;
+function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;':'&quot;',"'":'&#39;'}[c]))}
+function num(n){return Number(n||0).toLocaleString('ru-RU')}
+function dur(n){let m=Math.round(Number(n||0)/60);return Math.floor(m/60)+' ч '+String(m%60).padStart(2,'0')+' мин'}
+function stamp(s){if(!s)return '—';try{return new Date(s).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return s}}
+function day(s){return s.split('-').reverse().join('.')}
+function today(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
+function plusDays(d,n){const x=new Date(d+'T12:00:00Z');x.setUTCDate(x.getUTCDate()+n);return x.toISOString().slice(0,10)}
+function setPeriod(n){let d=today(),end=n===0?plusDays(d,-1):d;fromEl.value=n<=1?end:plusDays(end,1-n);toEl.value=end;load()}
+function aggregate(rows){let t={orders:0,picking:0,repl:0,tasks:0,units:0,shifts:0,warning:false};for(const r of rows){t.orders+=r.orders;t.picking+=r.picking_seconds;t.repl+=r.replenishment_seconds;t.tasks+=r.replenishment_tasks;t.units+=r.replenishment_units;t.shifts+=r.shifts.length;if(r.time_unreliable)t.warning=true}t.speed=t.picking>0&&!t.warning?Math.round(t.orders*36000/t.picking)/10:null;return t}
+function stat(label,value){return '<div class="stat"><div class="small">'+esc(label)+'</div><div class="value">'+esc(value)+'</div></div>'}
+function renderSummary(){const t=report.totals;const speed=t.orders_per_hour==null?'н/д':t.orders_per_hour+' /ч';$('summary').innerHTML=stat('Сотрудников',report.employees.filter(x=>x.active||report.rows.some(r=>r.employee_id===x.id)).length)+stat('WB FBS, всего',num(t.orders))+stat('Средняя скорость',speed)+stat('Время сборки',dur(t.picking_seconds))+stat('Пополнение',dur(t.replenishment_seconds))}
+function buildPeople(){const groups=new Map;for(const r of report.rows){if(!groups.has(r.employee_id))groups.set(r.employee_id,[]);groups.get(r.employee_id).push(r)}people=report.employees.filter(e=>e.active||groups.has(e.id)).map(e=>({id:e.id,name:e.name,active:e.active,rows:groups.get(e.id)||[],t:aggregate(groups.get(e.id)||[])}))}
+function renderCards(){const sort=$('sortBy').value;const sorted=[...people].sort((a,b)=>sort==='name'?a.name.localeCompare(b.name,'ru'):sort==='speed'?(b.t.speed||0)-(a.t.speed||0):sort==='tasks'?b.t.tasks-a.t.tasks:b.t.orders-a.t.orders);
+ $('peopleCount').textContent='('+sorted.length+')';
+ $('cards').innerHTML=sorted.length?sorted.map(p=>{const t=p.t,total=t.picking+t.repl,pc=total?Math.round(t.picking/total*100):0,rc=total?100-pc:0;return '<button type="button" class="employee-card'+(selectedId===p.id?' selected':'')+'" data-employee="'+esc(p.id)+'" aria-label="Открыть журнал: '+esc(p.name)+'"><div class="person-head"><div class="avatar">♙</div><div><div class="person-name">'+esc(p.name)+'</div><div class="person-sub">'+(p.active?'Сотрудник склада':'Неактивен')+'</div></div><div class="order-figure"><span>WB FBS</span><strong>'+num(t.orders)+'</strong></div></div><div class="person-grid"><div class="person-metric"><span>Заказов/ч</span><b>'+(t.speed==null?'н/д':t.speed)+'</b></div><div class="person-metric"><span>Сборка</span><b>'+dur(t.picking)+'</b></div><div class="person-metric"><span>Пополнение</span><b>'+dur(t.repl)+'</b></div><div class="person-metric"><span>Заданий</span><b>'+num(t.tasks)+'</b></div><div class="person-metric"><span>Смен</span><b>'+num(t.shifts)+'</b></div><div class="person-metric"><span>Пополнено, шт.</span><b>'+num(t.units)+'</b></div></div><div class="mix"><div class="mix-title"><span>Доля зафиксированного времени</span><span>'+(total?'Сборка '+pc+'% · Пополнение '+rc+'%':'Нет данных')+'</span></div><div class="track"><div class="pick" style="width:'+pc+'%"></div><div class="repl" style="width:'+rc+'%"></div></div></div><div class="card-foot">'+(t.warning?'⚠ Есть сомнительные интервалы · ':'')+'Открыть персональный журнал →</div></button>'}).join(''):'<div class="card-empty">Нет сотрудников для отображения</div>';
 }
-function humanDate(ymd){return ymd.split('-').reverse().join('.')}
-function humanStamp(iso){if(!iso)return '—';try{return new Date(iso).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return iso}}
-function dateToday(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
-function plusDays(day,amount){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+amount);return d.toISOString().slice(0,10)}
-function period(days){
- const today=dateToday(),end=days===0?plusDays(today,-1):today;
- fromEl.value=days<=1?end:plusDays(end,1-days);toEl.value=end;
- load();
+function details(){
+ const p=people.find(x=>x.id===selectedId);if(!p)return;
+ const t=p.t;$('journalName').textContent=p.name;$('detailStats').innerHTML='<div class="person-metric"><span>WB FBS</span><b>'+num(t.orders)+'</b></div><div class="person-metric"><span>Скорость</span><b>'+(t.speed==null?'н/д':t.speed+' /ч')+'</b></div><div class="person-metric"><span>Сборка</span><b>'+dur(t.picking)+'</b></div><div class="person-metric"><span>Пополнение</span><b>'+dur(t.repl)+'</b></div>';
+ $('detailRows').innerHTML=p.rows.length?p.rows.map(r=>'<div class="detail-box"><b>'+day(r.date)+'</b><div class="small">WB FBS: '+num(r.orders)+' · '+(r.orders_per_hour==null?'Скорость н/д':r.orders_per_hour+' заказов/ч')+'</div><div class="small">Сборка '+dur(r.picking_seconds)+' · Пополнение '+dur(r.replenishment_seconds)+'</div><div class="block-label">Смены</div>'+(r.shifts.length?r.shifts.map(v=>'<div class="detail-row">'+stamp(v.started_at)+' → '+(v.ended_at?stamp(v.ended_at):'Открыта')+' · FBS: '+num(v.orders)+'</div>').join(''):'<div class="small">Нет записей</div>')+'<div class="block-label">Интервалы операций</div>'+(r.activities.length?r.activities.map(v=>'<div class="detail-row">'+esc(v.label)+' · '+stamp(v.started_at)+'–'+stamp(v.ended_at)+' · '+dur(v.seconds)+'</div>').join(''):'<div class="small">Нет записей</div>')+'<div class="block-label">Завершённые пополнения</div>'+(r.tasks.length?r.tasks.map(v=>'<div class="detail-row">'+esc(v.article)+' · '+esc(v.location)+' · '+num(v.quantity)+' шт. · '+stamp(v.completed_at)+'</div>').join(''):'<div class="small">Нет записей</div>')+(r.warnings.length?'<div class="block-label warning">Качество данных</div>'+r.warnings.map(v=>'<div class="warning">'+esc(v)+'</div>').join(''):'')+'</div>').join(''):'<div class="small">За период нет операций</div>';
 }
-function metric(label,value){return '<div class="stat"><div class="small">'+esc(label)+'</div><div class="value">'+esc(value)+'</div></div>'}
-function renderSummary(t){
- return metric('Собрано WB FBS',fmtN(t.orders))+
- metric('Средняя скорость',t.orders_per_hour==null?'н/д':t.orders_per_hour+' /ч')+
- metric('Время сборки',duration(t.picking_seconds))+
- metric('Пополнение, время',duration(t.replenishment_seconds))+
- metric('Пополнений',fmtN(t.replenishment_tasks))+
- metric('Пополнено, шт.',fmtN(t.replenishment_units));
-}
-function shiftDetails(x){
- return (x.shifts||[]).map(s=>'<div class="inner">'+
-  esc(humanStamp(s.started_at))+' → '+esc(s.ended_at?humanStamp(s.ended_at):'не закрыта')+
-  ' · '+esc(s.status==='open'?'открыта':'закрыта')+
-  ' · FBS за день '+fmtN(s.orders)+'</div>').join('')||
-  '<div class="small">Смены, пересекающиеся с этим днём, не найдены.</div>';
-}
-function actDetails(x){
- return (x.activities||[]).map(a=>'<div class="inner">'+esc(a.label)+
-  ' · '+esc(humanStamp(a.started_at))+'–'+esc(humanStamp(a.ended_at))+
-  ' · '+duration(a.seconds)+'</div>').join('')||
-  '<div class="small">Нет записанных интервалов операций.</div>';
-}
-function taskDetails(x){
- return (x.tasks||[]).map(t=>'<div class="inner"><b>'+esc(t.article)+'</b> · '+
-  esc(t.location)+' · '+fmtN(t.quantity)+' шт. · '+esc(humanStamp(t.completed_at))+'</div>').join('')||
-  '<div class="small">Завершённых заданий нет.</div>';
-}
-function detailContent(x){
- return '<div class="details-grid">'+
-  '<div><h2>Смены</h2>'+shiftDetails(x)+'<h2 style="margin-top:16px">Операции</h2>'+actDetails(x)+'</div>'+
-  '<div><h2>Завершённые пополнения</h2>'+taskDetails(x)+
-  ((x.warnings||[]).length?'<h2 style="margin-top:16px">Предупреждения</h2>'+
-   x.warnings.map(w=>'<div class="warning">⚠ '+esc(w)+'</div>').join(''):'')+
-  (x.debt_orders?'<p class="small">Из заказов FBS закрытие долга: '+fmtN(x.debt_orders)+'</p>':'')+
-  '</div></div>';
-}
-function renderTable(rows){
- renderedRows=rows;
- if(!rows.length)return '<tr><td colspan="9" class="empty">По выбранным параметрам операций не найдено.</td></tr>';
- return rows.map((x,i)=>'<tr class="'+(x.warnings.length?'has-warning':'')+'">'+
- '<td>'+esc(humanDate(x.date))+'</td><td><b>'+esc(x.employee)+'</b>'+
- (x.warnings.length?'<div class="warning">⚠ Проверь данные</div>':'')+'</td>'+
- '<td class="num">'+fmtN(x.orders)+'</td>'+
- '<td class="num">'+(x.orders_per_hour==null?'н/д':esc(x.orders_per_hour))+'</td>'+
- '<td>'+duration(x.picking_seconds)+'</td><td>'+duration(x.replenishment_seconds)+'</td>'+
- '<td class="num">'+fmtN(x.replenishment_tasks)+'</td><td class="num">'+fmtN(x.shifts.length)+'</td>'+
- '<td><button type="button" class="details-button" data-index="'+i+'" aria-expanded="false">Подробнее</button></td>'+
- '</tr><tr class="details-row" id="details-'+i+'" hidden><td colspan="9">'+detailContent(x)+'</td></tr>').join('');
-}
-function updateEmployees(list){
- allEmployees=list||[];const prev=empEl.value;
- empEl.innerHTML='<option value="">Все сотрудники</option>'+
- allEmployees.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+(x.active?'':' (неактивен)')+'</option>').join('');
- if(allEmployees.some(e=>e.id===prev))empEl.value=prev;
-}
-async function load(){
- if(busy)return;
- if(!fromEl.value||!toEl.value||fromEl.value>toEl.value){statusEl.textContent='Укажи корректные даты.';statusEl.className='status err';return}
- const q=new URLSearchParams({from:fromEl.value,to:toEl.value});
- if(empEl.value)q.set('employee_id',empEl.value);
- busy=true;btn.disabled=true;statusEl.textContent='Загружаю историю…';statusEl.className='status';
- try{
-  const resp=await fetch('/api/manager/shift-history?'+q.toString(),{cache:'no-store'});
-  if(resp.status===403){location.href='/manager-login';return}
-  const data=await resp.json();if(!resp.ok)throw Error(data.error||'Ошибка запроса');
-  updateEmployees(data.employees);document.getElementById('summary').innerHTML=renderSummary(data.totals);
-  document.getElementById('rows').innerHTML=renderTable(data.rows);
-  statusEl.textContent='Период: '+humanDate(data.from)+' – '+humanDate(data.to)+
-   ' · строк: '+data.rows.length+(data.totals.quality_warning?' · ⚠ Есть неполные данные':'')+
-   (data.rows.length===0?' · Нет записей в этом экземпляре WMS за выбранный период':'')+
-   ' · обновлено '+new Date().toLocaleTimeString('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'});
- }catch(e){statusEl.textContent=e.message;statusEl.className='status err'}
- finally{busy=false;btn.disabled=false}
-}
-document.getElementById('rows').addEventListener('click',e=>{
- const b=e.target.closest('button[data-index]');if(!b)return;
- const row=document.getElementById('details-'+b.dataset.index);if(!row)return;
- row.hidden=!row.hidden;b.setAttribute('aria-expanded',String(!row.hidden));b.textContent=row.hidden?'Подробнее':'Свернуть';
-});
-btn.addEventListener('click',load);
-document.querySelectorAll('button[data-days]').forEach(b=>b.addEventListener('click',()=>period(Number(b.dataset.days))));
-fromEl.value=toEl.value=dateToday();load();
-// Refresh today's summary without overwriting filters or making duplicate requests.
-setInterval(()=>{
- if(document.visibilityState!=='visible'||busy)return;
- if(fromEl.value<=dateToday()&&toEl.value>=dateToday())load();
-},30000);
-document.addEventListener('visibilitychange',()=>{
- if(document.visibilityState==='visible'&&!busy&&fromEl.value<=dateToday()&&toEl.value>=dateToday())load();
-});
+function openPerson(id){selectedId=id;renderCards();details();$('journal').classList.remove('hidden');eventKind='all';document.querySelectorAll('button[data-kind]').forEach(b=>{b.classList.toggle('active',b.dataset.kind==='all');b.classList.toggle('secondary',b.dataset.kind!=='all')});eventPage=0;$('events').innerHTML='';loadEvents(true);$('journal').scrollIntoView({behavior:'smooth',block:'start'})}
+async function loadEvents(reset=false){if(!selectedId||eventsBusy)return;eventsBusy=true;const page=reset?1:eventPage+1;$('eventsStatus').textContent='Загрузка событий…';$('moreEvents').disabled=true;
+ try{const q=new URLSearchParams({from:fromEl.value,to:toEl.value,employee_id:selectedId,kind:eventKind,page:String(page)});const res=await fetch('/api/manager/employee-events?'+q.toString(),{cache:'no-store'});if(res.status===403){location.href='/manager-login';return}const data=await res.json();if(!res.ok)throw Error(data.error||'Ошибка запроса');if(reset)$('events').innerHTML='';eventPage=page;
+ $('events').insertAdjacentHTML('beforeend',data.rows.map(x=>'<div class="event"><time>'+stamp(x.occurred_at)+'</time><b>'+esc(x.label)+'</b><div><div>'+esc(x.article||x.product_name||x.object_code||'Операция')+(x.quantity!=null?' · '+num(x.quantity)+' шт.':'')+'</div><div class="small">'+esc([x.product_name,x.object_code,x.document,x.result].filter(Boolean).join(' · '))+'</div></div></div>').join(''));
+ $('eventsStatus').textContent=data.rows.length?'Страница '+page+' · событий на странице: '+data.rows.length:'Событий этого типа за период нет';$('moreEvents').classList.toggle('hidden',!data.has_more);
+ }catch(e){$('eventsStatus').textContent=e.message;$('eventsStatus').className='status err'}finally{eventsBusy=false;$('moreEvents').disabled=false}}
+async function load(){if(loading)return;if(!fromEl.value||!toEl.value||fromEl.value>toEl.value){$('status').textContent='Проверь даты';return}loading=true;$('show').disabled=true;$('status').textContent='Обновляю статистику…';try{const q=new URLSearchParams({from:fromEl.value,to:toEl.value});const res=await fetch('/api/manager/shift-history?'+q.toString(),{cache:'no-store'});if(res.status===403){location.href='/manager-login';return}const d=await res.json();if(!res.ok)throw Error(d.error||'Ошибка');report=d;buildPeople();renderSummary();renderCards();$('status').textContent='Период: '+day(d.from)+' – '+day(d.to)+' · часовой пояс Москва'+(d.totals.quality_warning?' · Есть неполные данные':'');if(selectedId&&people.some(x=>x.id===selectedId)){details();eventPage=0;$('events').innerHTML='';loadEvents(true)}else{$('journal').classList.add('hidden');selectedId='';}}catch(e){$('status').textContent=e.message;$('status').className='status err'}finally{loading=false;$('show').disabled=false}}
+$('cards').addEventListener('click',e=>{const b=e.target.closest('button[data-employee]');if(b)openPerson(b.dataset.employee)});
+$('closeJournal').addEventListener('click',()=>{$('journal').classList.add('hidden');selectedId='';renderCards()});
+$('sortBy').addEventListener('change',()=>{if(report)renderCards()});
+$('show').addEventListener('click',load);
+document.querySelectorAll('button[data-days]').forEach(b=>b.addEventListener('click',()=>setPeriod(Number(b.dataset.days))));
+document.querySelectorAll('button[data-kind]').forEach(b=>b.addEventListener('click',()=>{eventKind=b.dataset.kind;document.querySelectorAll('button[data-kind]').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('secondary',x!==b)});eventPage=0;$('events').innerHTML='';loadEvents(true)}));
+$('moreEvents').addEventListener('click',()=>loadEvents(false));
+setPeriod(7);
 </script></body></html>"""
