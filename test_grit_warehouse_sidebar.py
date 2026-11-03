@@ -17,7 +17,8 @@ def test_sidebar_asset_is_real_public_first_party_asset():
     svg=Path("grit_warehouse_sidebar.svg").read_text(encoding="utf-8")
     app=Path("app.py").read_text(encoding="utf-8")
     assert svg.startswith('<svg')
-    assert "data:image/webp;base64," in svg\n    assert "width=\"230\" height=\"246\"" in svg
+    assert "data:image/webp;base64," in svg
+    assert "width=\"230\" height=\"246\"" in svg
     assert '@app.get("/grit-warehouse-sidebar.svg")' in app
     assert 'image_path.read_bytes()' in app
     assert '"/grit-warehouse-sidebar.svg"' in app.split("public_paths = {",1)[1].split("}",1)[0]
