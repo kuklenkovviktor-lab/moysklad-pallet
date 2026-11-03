@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import json
 import uuid
 import math
@@ -292,6 +293,16 @@ _GRIT_DESKTOP_PAGES = frozenset({
     "/fbs-journal", "/receiving-monitor", "/history", "/badges",
 })
 
+@app.get("/grit-warehouse-sidebar.svg")
+def grit_warehouse_sidebar_asset():
+    """Public brand illustration; no warehouse data or secrets."""
+    image_path = Path(__file__).with_name("grit_warehouse_sidebar.svg")
+    response = Response(image_path.read_bytes(), mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.get("/grit-ui.css")
 def grit_ui_stylesheet():
     resp = Response(GRIT_CSS, mimetype="text/css")
@@ -370,6 +381,7 @@ def require_employee_login():
         "/sw.js",
         "/manifest.webmanifest",
         "/grit-logo.png",
+        "/grit-warehouse-sidebar.svg",
         "/grit-ui.css",
         "/pwa-icon-192.png",
         "/pwa-icon-512.png",
