@@ -48,7 +48,7 @@ input,select{min-height:41px;border:1px solid #3e5b72;background:#0c1a29;color:#
 </main><script>
 const $=id=>document.getElementById(id),fromEl=$('dateFrom'),toEl=$('dateTo');
 let report=null,people=[],selectedId='',eventPage=0,eventKind='all',loading=false,eventsBusy=false;
-function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;':'&quot;',"'":'&#39;'}[c]))}
+function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function num(n){return Number(n||0).toLocaleString('ru-RU')}
 function dur(n){let m=Math.round(Number(n||0)/60);return Math.floor(m/60)+' ч '+String(m%60).padStart(2,'0')+' мин'}
 function stamp(s){if(!s)return '—';try{return new Date(s).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(_){return s}}
