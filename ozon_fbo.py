@@ -18,7 +18,7 @@ _ready = False
 
 MANAGER_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Ozon FBO</title><style>
+<title>GRIT WMS · Ozon FBO</title><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
 main{max-width:1160px;margin:auto;padding:18px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:15px;padding:17px;margin:13px 0}
 h1{margin:15px 0 8px}h2{font-size:18px;margin:0 0 12px}a{color:#48647a}
@@ -126,7 +126,7 @@ loadSupplies().catch(e=>{document.getElementById('supplies').textContent=e.messa
 
 WORKER_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Ozon FBO · Задания</title><style>
+<title>GRIT WMS · Ozon FBO · Задания</title><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#263643;margin:0}
 main{max-width:840px;margin:auto;padding:15px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:15px;padding:15px;margin:12px 0}
 h1{margin:14px 0}h2{font-size:19px}a{color:#48647a}.small{font-size:13px;color:#657683}

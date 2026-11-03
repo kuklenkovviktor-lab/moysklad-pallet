@@ -66,7 +66,7 @@ def cell_state(tasks, last_complete=None, now=None):
 WAREHOUSE_MAP_PAGE = r"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ONIX WMS · Карта склада</title>
+<title>GRIT WMS · Карта склада</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#e9eef3;color:#25313d;font:14px system-ui,-apple-system,Segoe UI,sans-serif}
 .wrap{max-width:1500px;margin:0 auto;padding:18px}

@@ -176,7 +176,7 @@ def manager_diagnostic_page():
 
 DIAGNOSTICS_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ONIX · Диагностика сканов</title>
+<title>GRIT WMS · Диагностика сканов</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#e9eef3;color:#263744;font-family:system-ui,-apple-system,sans-serif}
 main{max-width:860px;margin:auto;padding:14px}.card{padding:16px;border-radius:14px;background:white;margin:12px 0;border:1px solid #d3dfe7}
@@ -324,7 +324,7 @@ setInterval(flush,10000);render();flush();focus();
 
 
 MANAGER_DIAGNOSTICS_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>ONIX · Замеры сканирования</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>GRIT WMS · Замеры сканирования</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#e9eef3;color:#253744;font-family:system-ui,-apple-system,sans-serif}
 main{max-width:1220px;margin:auto;padding:18px}h1{font-size:25px}h2{font-size:18px}

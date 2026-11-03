@@ -90,7 +90,7 @@ def test_print_page():
     )
     return Response("""<!doctype html><html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Тест USB-печати</title>
+<title>GRIT WMS · Тест USB-печати</title>
 <style>body{font:16px system-ui,sans-serif;background:#e9eef3;color:#223443;margin:30px}
 main{max-width:780px;margin:auto;background:#fff;border-radius:14px;padding:24px}
 button{padding:14px 20px;border:0;border-radius:8px;background:#365f79;color:white;font-size:16px}

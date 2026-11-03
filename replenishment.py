@@ -92,7 +92,7 @@ def _open_location_task(cur, line, exclude_id=None):
 
 MANAGER_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Пополнение: руководитель</title><style>
+<title>GRIT WMS · Пополнение: руководитель</title><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
 main{max-width:1100px;margin:auto;padding:16px}h1{margin:12px 0}h2{font-size:18px;margin:0 0 12px}
 a{color:#49667b}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:16px;margin:12px 0}
@@ -277,7 +277,7 @@ getTasks().catch(function(e){document.getElementById('queue').textContent=e.mess
 
 WORKER_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Пополнение</title><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
+<title>GRIT WMS · Пополнение</title><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
 main{max-width:760px;margin:auto;padding:13px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin:10px 0}
 h1{margin:12px 0}a{color:#49667b}.small{color:#667989;font-size:12px}.task{padding:14px 0;border-top:1px solid #d7e0e7}.task:first-child{border-top:0}
