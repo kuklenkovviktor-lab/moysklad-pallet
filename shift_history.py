@@ -1,4 +1,4 @@
-"""Read-only, manager-only history of ONIX WMS shifts and productivity."""
+"""Read-only, manager-only history of GRIT WMS shifts and productivity."""
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -285,4 +285,64 @@ def history_api():
         ensure_db()
         return jsonify(build_report(start_date, end_date, start, stop, employee_id))
     except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@shift_history_bp.get("/api/manager/employee-events")
+def employee_events_api():
+    """Chronological, paginated employee event journal. No writes or guessed metrics."""
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    try:
+        _, _, start, stop = _bounds(request.args)
+        employee_id = str(request.args.get("employee_id") or "").strip()
+        if not employee_id or len(employee_id) > 100:
+            raise ValueError("Выбери сотрудника")
+        kind = str(request.args.get("kind") or "all").strip()
+        if kind not in ("all", "fbs", "operation"):
+            raise ValueError("Неизвестный тип операции")
+        page = int(request.args.get("page") or "1")
+        if not 1 <= page <= 500:
+            raise ValueError("Страница должна быть от 1 до 500")
+        ensure_db()
+        if not query_all("SELECT id FROM employees WHERE id=?", (employee_id,)):
+            raise ValueError("Сотрудник не найден")
+        start_iso, stop_iso = start.isoformat(), stop.isoformat()
+        params = []
+        segments = []
+        if kind in ("all", "fbs"):
+            segments.append(
+                "SELECT scanned_at AS occurred_at, 'fbs' AS category, "
+                "CASE WHEN scan_type='debt' THEN 'Долг WB FBS' ELSE 'Сборка WB FBS' END AS label, "
+                "article,product_name,barcode AS object_code,1 AS quantity,"
+                "scan_type AS result, '' AS document_name "
+                "FROM scans WHERE employee_id=? AND scanned_at>=? AND scanned_at<?"
+            )
+            params.extend((employee_id, start_iso, stop_iso))
+        if kind in ("all", "operation"):
+            segments.append(
+                "SELECT created_at AS occurred_at,operation_type AS category,"
+                "event_type AS label,article,product_name,object_code,quantity,"
+                "result,document_name "
+                "FROM operation_events WHERE employee_id=? AND created_at>=? AND created_at<?"
+            )
+            params.extend((employee_id, start_iso, stop_iso))
+        union = " UNION ALL ".join(segments)
+        limit = 100
+        rows = query_all(
+            "SELECT occurred_at,category,label,article,product_name,object_code,"
+            "quantity,result,document_name FROM (" + union +
+            ") events ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
+            tuple(params) + (limit + 1, (page - 1) * limit),
+        )
+        data = [
+            {
+                "occurred_at": x[0], "category": x[1], "label": x[2],
+                "article": x[3], "product_name": x[4], "object_code": x[5],
+                "quantity": x[6], "result": x[7], "document": x[8],
+            }
+            for x in rows[:limit]
+        ]
+        return jsonify(rows=data, page=page, has_more=len(rows) > limit, page_size=limit)
+    except (ValueError, TypeError) as exc:
         return jsonify(error=str(exc)), 400
