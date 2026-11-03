@@ -32,6 +32,7 @@ from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
 from integrations import integrations_bp
+from grit_theme import GRIT_CSS
 from fbs_pdf_import import fbs_pdf_bp
 from onix_print_bridge import print_bridge_bp
 from ozon_fbo import ozon_fbo_bp
@@ -280,6 +281,38 @@ def _start_wms_initializer():
     thread = threading.Thread(target=_wms_initializer, name="wms-startup", daemon=True)
     thread.start()
 
+
+# Centralized theme is injected only into authenticated desktop HTML pages.
+# Do not restyle employee terminals, QR scanners, label printing, or partner printouts.
+_GRIT_DESKTOP_PAGES = frozenset({
+    "/manager", "/manager/shifts", "/manager/shift-history",
+    "/manager/fbs-pdf", "/manager/warehouse-map", "/manager/replenishment",
+    "/manager/cell-audit", "/manager/fbs-diagnostics", "/manager/ozon-fbo",
+    "/manager/partners", "/manager/integrations", "/manager/onix-print-test",
+    "/fbs-journal", "/receiving-monitor", "/history", "/badges",
+})
+
+@app.get("/grit-ui.css")
+def grit_ui_stylesheet():
+    resp = Response(GRIT_CSS, mimetype="text/css")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+@app.after_request
+def grit_desktop_theme(response):
+    if request.path not in _GRIT_DESKTOP_PAGES:
+        return response
+    if response.status_code != 200 or not response.mimetype.startswith("text/html"):
+        return response
+    html = response.get_data(as_text=True)
+    if "</head>" not in html.lower() or "grit-ui.css" in html:
+        return response
+    # No mutation of form, script, SVG/QR payloads, or route handlers.
+    html = html.replace("</head>", '<link rel="stylesheet" href="/grit-ui.css?v=1"></head>', 1)
+    response.set_data(html)
+    return response
+
 @app.before_request
 def require_employee_login():
     # Gunicorn workers are forked processes. Start the initializer inside the
@@ -337,6 +370,7 @@ def require_employee_login():
         "/sw.js",
         "/manifest.webmanifest",
         "/grit-logo.png",
+        "/grit-ui.css",
         "/pwa-icon-192.png",
         "/pwa-icon-512.png",
         "/supervisor-terminal",
