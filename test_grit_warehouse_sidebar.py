@@ -8,7 +8,7 @@ def test_manager_page_has_sidebar_art_below_logout():
     assert 'Выйти из ПК' in sidebar
     assert 'class="sidebar-art"' in sidebar
     assert sidebar.index('Выйти из ПК') < sidebar.index('class="sidebar-art"')
-    assert 'grit-warehouse-sidebar.svg?v=1' in page
+    assert 'grit-warehouse-sidebar.svg?v=2' in page
     assert 'pointer-events:none' in page
     assert 'overflow-y:auto' in page
     assert '.sidebar-art{display:none}' in page
@@ -17,7 +17,8 @@ def test_sidebar_asset_is_real_public_first_party_asset():
     svg=Path("grit_warehouse_sidebar.svg").read_text(encoding="utf-8")
     app=Path("app.py").read_text(encoding="utf-8")
     assert svg.startswith('<svg')
-    assert 'fill="#ff9b28"' in svg
+    assert "data:image/webp;base64," in svg
+    assert "width=\"230\" height=\"246\"" in svg
     assert '@app.get("/grit-warehouse-sidebar.svg")' in app
     assert 'image_path.read_bytes()' in app
     assert '"/grit-warehouse-sidebar.svg"' in app.split("public_paths = {",1)[1].split("}",1)[0]
