@@ -7,13 +7,13 @@ from pathlib import Path
 def test_desktop_page_allowlist_and_public_stylesheet():
     app = Path("app.py").read_text(encoding="utf-8")
     routes = app.split("_GRIT_DESKTOP_PAGES = frozenset({",1)[1].split("})",1)[0]
-    for p in ("/manager", "/fbs-journal", "/receiving-monitor", "/history",
+    for p in ("/fbs-journal", "/receiving-monitor", "/history",
               "/manager/replenishment", "/manager/warehouse-map",
               "/manager/cell-audit", "/manager/fbs-diagnostics",
               "/manager/shift-history", "/manager/fbs-pdf", "/manager/ozon-fbo",
               "/manager/integrations", "/manager/partners"):
         assert '"'+p+'"' in routes
-    for excluded in ("/login", "/replenishment", "/partners/uploads",
+    for excluded in ("/manager", "/login", "/replenishment", "/partners/uploads",
                      "/partners/shipments", "/pwa-icon-192.png", "/manager-login"):
         assert '"'+excluded+'"' not in routes
     assert '"/grit-ui.css"' in app.split("public_paths = {",1)[1].split("}",1)[0]

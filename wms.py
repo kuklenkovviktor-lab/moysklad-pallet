@@ -1736,7 +1736,7 @@ document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='E
 
 STATS_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Панель управления</title>
+<meta name="theme-color" content="#09111c"><title>GRIT WMS · Панель управления</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#e9eef3;margin:0;color:#25313d}
@@ -1774,27 +1774,50 @@ body{background:var(--grit-bg);color:var(--grit-text)}
 @media(max-width:1150px){.wrap{grid-template-columns:1fr}.hourly-card,.progress-card{grid-column:1;grid-row:auto}.grid2{grid-template-columns:1fr}.process-grid{grid-template-columns:repeat(3,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.content{padding:12px}.process-grid,.quick-grid{grid-template-columns:repeat(2,1fr)}.worker{grid-template-columns:repeat(2,minmax(0,1fr))}.worker>div:first-child{grid-column:1/-1}}
 
+
+/* Final GRIT dashboard component design: desktop and mobile. */
+:root{color-scheme:dark;--grit-panel:#101f2f;--grit-line:#34516a;--grit-muted:#a7bed1}
+body{font-size:14px;line-height:1.45;font-weight:450;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.app{grid-template-columns:240px minmax(0,1fr)}.sidebar{padding:17px 12px}.brand{padding:0 8px 16px;margin-bottom:13px}.brand b{font-size:20px;letter-spacing:.15px}.brand span{display:block;font-size:12px;padding-top:4px}
+.side-nav{gap:3px}.side-nav a{display:flex;gap:12px;padding:9px 11px;min-height:41px;font-weight:570;font-size:13.5px;letter-spacing:0;white-space:normal}.side-nav a.active{font-weight:710}.side-nav a.logout{margin-top:10px;color:#ff9c5a}
+.ui-icon{display:inline-block;flex:0 0 20px;width:20px;height:20px;vertical-align:middle}.icon-defs{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
+.content{padding:20px 24px 30px}.wrap{gap:14px}.card,.kpi{border-radius:13px;background:linear-gradient(145deg,#142538 0%,#0e1a28 100%);border:1px solid #314c63;box-shadow:0 5px 16px rgba(0,0,0,.09)}
+.card{padding:18px 19px}.head{background:transparent;border:0;border-bottom:1px solid #294258;border-radius:0;padding:0 0 14px}.head h1{font-size:clamp(23px,2vw,30px);font-weight:750;line-height:1.2;letter-spacing:-.65px}.head .small{margin-top:7px;font-size:13px;line-height:1.55}
+.kpis{gap:12px}.kpi{min-height:102px;padding:18px;display:flex;flex-direction:column;justify-content:center;border-left:1px solid #34516a}.kpi:last-child{border-color:#a0602c}.kpi-heading{display:flex;align-items:center;gap:10px}.kpi-icon{width:25px;height:25px;flex:none;color:#56b5fa}.kpi:last-child .kpi-icon{color:#ffa044}.kpi .l{font-size:12px;color:#c1d4e4;font-weight:590;line-height:1.35}.kpi .v{font-size:34px;margin:6px 0 0 35px;font-weight:760;letter-spacing:-.8px}
+.section-title{margin-bottom:15px;gap:14px}.section-title b{font-size:16px;font-weight:715}.title-with-icon{display:inline-flex;align-items:center;gap:10px}.title-with-icon .ui-icon{color:#69bafb}.deviations-card .title-with-icon .ui-icon{color:#ffac52}
+.small{color:#a9bfd0;font-size:12px}.hourly-card,.progress-card{min-height:245px}.hourly-card .hourly-chart{height:187px!important;position:relative;display:flex;align-items:flex-end;gap:5px;padding-top:10px}.hour-cell{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px}.hour-bar{width:100%;background:linear-gradient(180deg,#41a9f5,#176198);border-radius:4px 4px 1px 1px;min-height:2px}.hour-value{font-size:10px;font-weight:700;color:#dfebf9}.hour-label{font-size:9px;color:#96b0c5}.hourly-chart.is-empty{padding:0 0 20px}.empty-hours{position:absolute;inset:0 0 22px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;text-align:center}.empty-hours .ui-icon{width:32px;height:32px;color:#6c879f;margin-bottom:7px}.empty-hours strong{font-size:15px;font-weight:650}.empty-hours span{font-size:12px;color:#9db2c5}
+.hour-ticks{display:flex;justify-content:space-between;position:absolute;bottom:0;left:0;right:0;border-top:1px solid #405c73;color:#91adc3;font-size:9px;padding-top:5px}
+.progress-card .progress-label{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;color:#e8f3ff}.progress-label .ui-icon{color:#68baff}.progress-main .done{font-weight:800}.progress-card .plan-edit{margin-top:12px}.plan-edit input{min-height:40px;font-size:13px}.plan-edit button{min-height:40px;font-size:13px}.progress-card .progress{margin-top:15px}
+.process-grid{gap:12px}.process-link{display:flex;justify-content:center;gap:10px;min-height:84px;border-radius:10px;padding:15px}.process-link.important{border-color:#ef9031;background:linear-gradient(140deg,#302319,#211c1a)}.process-link:hover{transform:translateY(-1px)}.process-name{display:flex;align-items:center;gap:10px;font-weight:680;font-size:14px}.process-name .ui-icon{color:#84b7e4;width:23px;height:23px}.process-link.important .process-name .ui-icon{color:#ff9c42}.process-sub{font-size:12px;margin-left:33px}
+.grid2 .card{min-height:138px}.worker{gap:9px}.worker b{font-weight:700}.mini{border:1px solid #35516a}.mini .n{font-weight:750}
+.empty-state{display:flex;align-items:center;justify-content:center;flex-direction:column;min-height:95px;text-align:center;gap:4px;color:#aec5d8}.empty-state strong{color:#e0edfa;font-size:14px;font-weight:650}.empty-state span{font-size:12px}.empty-icon{width:28px;height:28px;color:#607f9a;margin-bottom:5px}
+.quick-grid a{min-height:50px;display:flex;justify-content:center;align-items:center;letter-spacing:.1px;font-weight:660}.quick-grid a:hover{background:#204b6a}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b43;outline-offset:2px}.modal-card{background:#162538;color:#f1f6ff}.modal-card .small{color:#b1c7d8}
+@media(max-width:1160px){.app{grid-template-columns:210px minmax(0,1fr)}.content{padding:16px}.wrap{grid-template-columns:1fr}.hourly-card,.progress-card{grid-column:1;grid-row:auto}.grid2{grid-template-columns:1fr}.side-nav a{font-size:12px;gap:8px}.kpis{grid-template-columns:repeat(2,1fr)}.process-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:780px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a{min-height:40px}.content{padding:12px}.head h1{font-size:23px}.card{padding:15px}.process-grid,.quick-grid{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:27px}.kpi{min-height:95px}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:repeat(2,1fr)}.worker>div:first-child{grid-column:1/-1}}
+@media(max-width:480px){.process-grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.kpi{padding:12px}.kpi .v{margin-left:0}.kpi-heading{align-items:flex-start}.section-title{flex-wrap:wrap}.receiving-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.mini{padding:8px}.mini .n{font-size:22px}}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" class="icon-defs" aria-hidden="true"><defs><symbol id="ic-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol><symbol id="ic-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h3M8 17h3"/></symbol><symbol id="ic-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h6"/></symbol><symbol id="ic-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 11h6M9 15h6"/></symbol><symbol id="ic-barcode" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5v14M6 6v12M10 5v14M13 6v12M17 5v14M20 6v12"/></symbol><symbol id="ic-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></symbol><symbol id="ic-boxes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 5 3v6l-5 3-5-3V6zM7 13l-5 3v5l5 2 5-2v-5zM17 13l-5 3v5l5 2 5-2v-5z"/></symbol><symbol id="ic-map" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></symbol><symbol id="ic-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4m6 0h4a1 1 0 0 1 1 1v4m0 6v4a1 1 0 0 1-1 1h-4m-6 0H5a1 1 0 0 1-1-1v-4M4 12h16"/></symbol><symbol id="ic-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h3v-7H3zM10 18h3V6h-3zM17 18h3V3h-3z"/></symbol><symbol id="ic-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10"/></symbol><symbol id="ic-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 4 5"/></symbol><symbol id="ic-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 1 0-7-7l-2 2m3 6a5 5 0 0 0-7-.2l-3 3a5 5 0 1 0 7 7l2-2"/></symbol><symbol id="ic-badge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="2"/><circle cx="12" cy="10" r="2"/><path d="M8 17c1-3 7-3 8 0M8 2h8"/></symbol><symbol id="ic-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM21 14v3h-2M14 21h4m3-2v2"/></symbol><symbol id="ic-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M14 7l5 5-5 5M19 12H9"/></symbol><symbol id="ic-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="m16 8 5-5"/></symbol><symbol id="ic-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 10 18H2zM12 9v5M12 17v.2"/></symbol><symbol id="ic-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></symbol><symbol id="ic-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/></symbol><symbol id="ic-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></symbol><symbol id="ic-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></symbol><symbol id="ic-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11v11H3zM14 10h4l3 4v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></symbol></defs></svg>
 <div class="app">
 <aside class="sidebar">
  <div class="brand"><b><img src="/grit-logo.png?v=2" width="24" height="24" alt="" style="vertical-align:middle;border-radius:5px;margin-right:6px">GRIT WMS</b><span>Панель управления</span></div>
  <nav class="side-nav">
-  <a class="active" href="/manager">🖥️ Главная</a>
-  <a href="/manager/shift-history">📊 История смен</a>
-  <a href="/manager/fbs-pdf">📄 Загрузка PDF FBS</a>
-  <a href="/fbs-journal">📋 Журнал FBS</a>
-  <a href="/history">🔎 История ШК</a>
-  <a href="/receiving-monitor">📥 Приёмка</a>
-   <a href="/manager/replenishment">📦 Пополнение</a>
-   <a href="/manager/warehouse-map">🗺️ Карта склада</a>
-   <a href="/manager/cell-audit">📷 Обход ячеек</a>
-   <a href="/manager/fbs-diagnostics">📶 Скорость сканирования</a>
-  <a href="/manager/ozon-fbo">📦 Ozon FBO</a>
-  <a href="/manager/partners">🤝 Партнёры</a>
-  <a href="/manager/integrations">🔌 Интеграции</a>
-  <a href="/badges">🪪 Бейджи</a>
-  <a href="#" onclick="openExitQr();return false">🔐 QR выхода</a>
-  <a class="logout" href="#" onclick="managerLogout();return false">🚪 Выйти из ПК</a>
+  <a class="active" href="/manager"><svg class="ui-icon" aria-hidden="true"><use href="#ic-home"></use></svg>Главная</a>
+  <a href="/manager/shift-history"><svg class="ui-icon" aria-hidden="true"><use href="#ic-calendar"></use></svg>История смен</a>
+  <a href="/manager/fbs-pdf"><svg class="ui-icon" aria-hidden="true"><use href="#ic-file"></use></svg>Загрузка PDF FBS</a>
+  <a href="/fbs-journal"><svg class="ui-icon" aria-hidden="true"><use href="#ic-clipboard"></use></svg>Журнал FBS</a>
+  <a href="/history"><svg class="ui-icon" aria-hidden="true"><use href="#ic-barcode"></use></svg>История ШК</a>
+  <a href="/receiving-monitor"><svg class="ui-icon" aria-hidden="true"><use href="#ic-download"></use></svg>Приёмка</a>
+   <a href="/manager/replenishment"><svg class="ui-icon" aria-hidden="true"><use href="#ic-boxes"></use></svg>Пополнение</a>
+   <a href="/manager/warehouse-map"><svg class="ui-icon" aria-hidden="true"><use href="#ic-map"></use></svg>Карта склада</a>
+   <a href="/manager/cell-audit"><svg class="ui-icon" aria-hidden="true"><use href="#ic-scan"></use></svg>Обход ячеек</a>
+   <a href="/manager/fbs-diagnostics"><svg class="ui-icon" aria-hidden="true"><use href="#ic-activity"></use></svg>Скорость сканирования</a>
+  <a href="/manager/ozon-fbo"><svg class="ui-icon" aria-hidden="true"><use href="#ic-package"></use></svg>Ozon FBO</a>
+  <a href="/manager/partners"><svg class="ui-icon" aria-hidden="true"><use href="#ic-users"></use></svg>Партнёры</a>
+  <a href="/manager/integrations"><svg class="ui-icon" aria-hidden="true"><use href="#ic-link"></use></svg>Интеграции</a>
+  <a href="/badges"><svg class="ui-icon" aria-hidden="true"><use href="#ic-badge"></use></svg>Бейджи</a>
+  <a href="#" onclick="openExitQr();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>QR выхода</a>
+  <a class="logout" href="#" onclick="managerLogout();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-logout"></use></svg>Выйти из ПК</a>
  </nav>
 </aside>
 
@@ -1807,16 +1830,16 @@ body{background:var(--grit-bg);color:var(--grit-text)}
  </div>
 
  <div class="kpis">
-  <div class="kpi"><div class="l">WB FBS собрано сегодня</div><div class="v" id="todayOrders">0</div></div>
-  <div class="kpi"><div class="l">Осталось по плану</div><div class="v" id="remaining">—</div></div>
-  <div class="kpi"><div class="l">Приёмка сегодня, шт.</div><div class="v" id="receivingUnits">0</div></div>
-  <div class="kpi"><div class="l">Отклонения сегодня</div><div class="v" id="deviationCount">0</div></div>
+  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-package"></use></svg><div class="l">WB FBS собрано сегодня</div></div><div class="v" id="todayOrders">0</div></div>
+  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-target"></use></svg><div class="l">Осталось по плану</div></div><div class="v" id="remaining">—</div></div>
+  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-download"></use></svg><div class="l">Приёмка сегодня, шт.</div></div><div class="v" id="receivingUnits">0</div></div>
+  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-alert"></use></svg><div class="l">Отклонения сегодня</div></div><div class="v" id="deviationCount">0</div></div>
  </div>
 
  <div class="card progress-card">
   <div class="progress-head">
    <div>
-    <div class="small">Прогресс WB FBS</div>
+    <div class="small progress-label"><svg class="ui-icon" aria-hidden="true"><use href="#ic-target"></use></svg> Прогресс WB FBS</div>
     <div class="progress-main"><span class="done" id="progressDone">0</span><span class="plan" id="progressPlan">/ план не задан</span></div>
    </div>
    <div class="plan-edit">
@@ -1829,27 +1852,27 @@ body{background:var(--grit-bg);color:var(--grit-text)}
  </div>
 
  <div class="card hourly-card">
-  <div class="section-title"><b>Сборка FBS по часам</b><span class="small">собрано заказов за каждый час</span></div>
-  <div id="hourlyChart" style="height:170px;display:flex;align-items:flex-end;gap:5px;padding-top:10px"></div>
+  <div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-layers"></use></svg>Сборка FBS по часам</b><span class="small">собрано заказов за каждый час</span></div>
+  <div id="hourlyChart" class="hourly-chart" aria-label="Количество заказов FBS по часам"></div>
  </div>
 
  <section class="card processes" aria-label="Ключевые складские процессы">
- <div class="section-title"><b>Ключевые складские процессы</b><span class="small">Рабочие модули</span></div>
+ <div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-layers"></use></svg>Ключевые складские процессы</b><span class="small">Рабочие модули</span></div>
  <div class="process-grid">
- <a class="process-link" href="/receiving-monitor"><span class="process-name">📥 Приёмка</span><span class="process-sub">Поставки и операции</span></a>
- <a class="process-link" href="/manager/replenishment"><span class="process-name">📦 Пополнение</span><span class="process-sub">Задания по ячейкам</span></a>
- <a class="process-link important" href="/fbs-journal"><span class="process-name">▣ Сборка FBS</span><span class="process-sub">Заказы и сканы</span></a>
- <a class="process-link" href="/manager/warehouse-map"><span class="process-name">◈ Карта склада</span><span class="process-sub">Адресное хранение</span></a>
- <a class="process-link" href="/manager/shift-history"><span class="process-name">↺ История смен</span><span class="process-sub">Выработка и смены</span></a>
+ <a class="process-link" href="/receiving-monitor"><span class="process-name"><svg class="ui-icon" aria-hidden="true"><use href="#ic-download"></use></svg>Приёмка</span><span class="process-sub">Поставки и операции</span></a>
+ <a class="process-link" href="/manager/replenishment"><span class="process-name"><svg class="ui-icon" aria-hidden="true"><use href="#ic-boxes"></use></svg>Пополнение</span><span class="process-sub">Задания по ячейкам</span></a>
+ <a class="process-link important" href="/fbs-journal"><span class="process-name"><svg class="ui-icon" aria-hidden="true"><use href="#ic-package"></use></svg>Сборка FBS</span><span class="process-sub">Заказы и сканы</span></a>
+ <a class="process-link" href="/manager/warehouse-map"><span class="process-name"><svg class="ui-icon" aria-hidden="true"><use href="#ic-map"></use></svg>Карта склада</span><span class="process-sub">Адресное хранение</span></a>
+ <a class="process-link" href="/manager/shift-history"><span class="process-name"><svg class="ui-icon" aria-hidden="true"><use href="#ic-calendar"></use></svg>История смен</span><span class="process-sub">Выработка и смены</span></a>
  </div></section>
 <div class="grid2">
   <div class="card">
-   <div class="section-title"><b>Сейчас работают</b><span class="small"><span id="active">0</span> активных · <a class="section-link" href="/manager/shifts">Управление сменами →</a></span></div>
-   <div id="workers">Загрузка…</div>
+   <div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-users"></use></svg>Сейчас работают</b><span class="small"><span id="active">0</span> активных · <a class="section-link" href="/manager/shifts">Управление сменами →</a></span></div>
+   <div id="workers" aria-live="polite"><div class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#ic-users"></use></svg><strong>Загрузка сотрудников</strong><span>Проверяем активные смены</span></div></div>
   </div>
 
   <div class="card">
-   <div class="section-title"><b>Приёмка сегодня</b><a class="section-link" href="/receiving-monitor">Открыть приёмку →</a></div>
+   <div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-download"></use></svg>Приёмка сегодня</b><a class="section-link" href="/receiving-monitor">Открыть приёмку →</a></div>
    <div class="receiving-grid">
     <div class="mini"><div class="n" id="receivingOps">0</div><div class="t">операций</div></div>
     <div class="mini"><div class="n" id="receivingWorkers">0</div><div class="t">сотрудников</div></div>
@@ -1864,10 +1887,10 @@ body{background:var(--grit-bg);color:var(--grit-text)}
  </div>
 
  <div class="card deviations-card">
-  <div class="section-title"><b>Последние ошибки и отклонения</b><span class="small">только то, что требует внимания</span></div>
-  <div id="deviations">Загрузка…</div>
+  <div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-alert"></use></svg>Последние ошибки и отклонения</b><span class="small">только то, что требует внимания</span></div>
+  <div id="deviations" aria-live="polite"><div class="empty-state"><strong>Загрузка событий</strong></div></div>
  </div>
-<section class="card quick-actions"><div class="section-title"><b>Быстрые действия</b><span class="small">Действующие разделы</span></div><div class="quick-grid"><a href="/fbs-journal">Журнал FBS</a><a href="/manager/replenishment">Пополнение</a><a href="/receiving-monitor">Приёмка</a><a href="/manager/shift-history">Отчёт по сменам</a></div></section>
+<section class="card quick-actions"><div class="section-title"><b class="title-with-icon"><svg class="ui-icon" aria-hidden="true"><use href="#ic-activity"></use></svg>Быстрые действия</b><span class="small">Действующие разделы</span></div><div class="quick-grid"><a href="/fbs-journal">Журнал FBS</a><a href="/manager/replenishment">Пополнение</a><a href="/receiving-monitor">Приёмка</a><a href="/manager/shift-history">Отчёт по сменам</a></div></section>
 </div></main>
 </div>
 
@@ -1909,12 +1932,18 @@ function renderEmployeeShift(x,completed){
 function deviationLabel(v){return ({product_mismatch:'Не тот товар',wb_order_missing:'Заказ WB не найден',duplicate_wb:'Повторный ШК WB',wb_same_as_product:'Товарный ШК вместо WB',product_not_found:'Неизвестный товар',logout_denied:'Неверный QR выхода',scan_rejected:'Скан отклонён'})[v]||v}
 function deviationClass(v){return ['product_mismatch','duplicate_wb','wb_same_as_product','product_not_found'].includes(v)?'danger':'warn'}
 function renderHourly(rows){
- const hours=Array.from({length:24},(_,i)=>({h:i,n:0}));
+ const hours=Array.from({length:24},(_,h)=>({h,n:0}));
  rows.forEach(x=>{const d=new Date(x.scanned_at);if(!isNaN(d))hours[d.getHours()].n++});
- const max=Math.max(1,...hours.map(x=>x.n)),box=document.getElementById('hourlyChart');
+ const max=Math.max(1,...hours.map(x=>x.n)),total=hours.reduce((n,x)=>n+x.n,0),box=document.getElementById('hourlyChart');
+ if(!total){
+  box.classList.add('is-empty');
+  box.innerHTML='<div class="empty-hours"><svg class="ui-icon" aria-hidden="true"><use href="#ic-activity"></use></svg><strong>Нет данных за сегодня</strong><span>Сборка заказов ещё не началась</span></div><div class="hour-ticks"><span>00</span><span>04</span><span>08</span><span>12</span><span>16</span><span>20</span><span>23</span></div>';
+  return;
+ }
+ box.classList.remove('is-empty');
  box.innerHTML=hours.map(x=>{
-  const pct=Math.max(x.n?6:1,Math.round(x.n/max*100));
-  return '<div title="'+String(x.h).padStart(2,'0')+':00 · '+x.n+'" style="flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px"><div style="font-size:9px;font-weight:800">'+(x.n||'')+'</div><div style="width:100%;height:'+pct+'%;min-height:2px;background:#607f95;border-radius:5px 5px 2px 2px"></div><div style="font-size:8px;color:#6b7785">'+String(x.h).padStart(2,'0')+'</div></div>';
+  const pct=Math.max(x.n?5:1,Math.round(x.n/max*100));
+  return '<div class="hour-cell" title="'+String(x.h).padStart(2,'0')+':00 · '+x.n+'"><div class="hour-value">'+(x.n||'')+'</div><div class="hour-bar" style="height:'+pct+'%"></div><div class="hour-label">'+String(x.h).padStart(2,'0')+'</div></div>';
  }).join('');
 }
 
@@ -1963,7 +1992,7 @@ async function load(){
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
- box.innerHTML=d.workers.length?d.workers.map(x=>renderEmployeeShift(x,false)).join(''):'<div class="empty">Нет активных смен</div>';
+ box.innerHTML=d.workers.length?d.workers.map(x=>renderEmployeeShift(x,false)).join(''):'<div class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#ic-users"></use></svg><strong>Нет активных смен</strong><span>Сотрудники появятся после начала работы</span></div>';
  const completed=d.completed||[];
  document.getElementById('completedCard').style.display=completed.length?'':'none';
  document.getElementById('completedWorkers').innerHTML=completed.map(x=>renderEmployeeShift(x,true)).join('');
@@ -1972,7 +2001,7 @@ async function load(){
  document.getElementById('receivingWorkers').textContent=r.workers||0;
  document.getElementById('receivingCompleted').textContent=r.completed||0;
 
- document.getElementById('deviations').innerHTML=dev.rows.length?dev.rows.slice(0,8).map(x=>'<div class="dev"><div>'+esc(fmt(x.created_at))+'</div><div><b>'+esc(x.employee)+'</b></div><div class="why '+deviationClass(x.event_type)+'">'+esc(deviationLabel(x.event_type))+'</div><div class="object">'+esc(x.article||x.object_code||x.result||'—')+'</div></div>').join(''):'<div class="empty">Отклонений сегодня нет ✅</div>';
+ document.getElementById('deviations').innerHTML=dev.rows.length?dev.rows.slice(0,8).map(x=>'<div class="dev"><div>'+esc(fmt(x.created_at))+'</div><div><b>'+esc(x.employee)+'</b></div><div class="why '+deviationClass(x.event_type)+'">'+esc(deviationLabel(x.event_type))+'</div><div class="object">'+esc(x.article||x.object_code||x.result||'—')+'</div></div>').join(''):'<div class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#ic-check"></use></svg><strong>Отклонений сегодня нет</strong><span>Новых ошибок и предупреждений не зарегистрировано</span></div>';
 }
 
 async function savePlan(){

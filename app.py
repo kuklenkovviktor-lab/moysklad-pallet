@@ -285,7 +285,7 @@ def _start_wms_initializer():
 # Centralized theme is injected only into authenticated desktop HTML pages.
 # Do not restyle employee terminals, QR scanners, label printing, or partner printouts.
 _GRIT_DESKTOP_PAGES = frozenset({
-    "/manager", "/manager/shifts", "/manager/shift-history",
+    "/manager/shifts", "/manager/shift-history",
     "/manager/fbs-pdf", "/manager/warehouse-map", "/manager/replenishment",
     "/manager/cell-audit", "/manager/fbs-diagnostics", "/manager/ozon-fbo",
     "/manager/partners", "/manager/integrations", "/manager/onix-print-test",
