@@ -19,6 +19,10 @@ background:linear-gradient(145deg,#16283b,#101c2a)!important;color:var(--g-text)
 body .kpi,body .mini,body .metric>div,body .metric .value,body .badge:not(.print-target),body .linebtn,body .row-card{
 background:#1b3045!important;border-color:#345069!important;color:var(--g-text)!important}
 body .kpi .v,body .mini .n,body .metric b{color:#fff!important}
+/* Shift history: these cards are .stat, not .kpi or .metric. */
+body .summary .stat{background:#1b3045!important;border:1px solid #345069!important;color:#f1f6ff!important}
+body .summary .stat .small{color:#9eb5ca!important}
+body .summary .stat .value{color:#ffffff!important;font-variant-numeric:tabular-nums}
 body h1,body h2,body h3,body h4,body strong,body .section-title b{color:#f3f8fd!important}
 body a{color:#75bef9}
 body a:hover{color:#b9e0ff}
