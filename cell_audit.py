@@ -253,7 +253,7 @@ def cell_audit_assignments():
 
 CELL_AUDIT_PAGE = r"""<!doctype html><html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Обход ячеек</title>
+<title>GRIT WMS · Обход ячеек</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{margin:0;font:16px system-ui,-apple-system,Segoe UI,sans-serif;color:#23394a;background:#e8eef3}
