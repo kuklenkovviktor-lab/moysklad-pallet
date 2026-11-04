@@ -1,0 +1,26 @@
+name: GRIT worker UI regression checks
+on:
+  pull_request:
+    paths:
+      - 'wms.py'
+      - 'replenishment.py'
+      - 'test_grit_worker_ui_polish.py'
+      - '.github/workflows/grit-worker-ui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'wms.py'
+      - 'replenishment.py'
+      - 'test_grit_worker_ui_polish.py'
+      - '.github/workflows/grit-worker-ui.yml'
+jobs:
+  worker-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m py_compile wms.py replenishment.py
+      - run: python -m unittest -v test_grit_worker_ui_polish
