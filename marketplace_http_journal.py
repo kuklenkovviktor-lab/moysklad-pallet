@@ -24,6 +24,7 @@ def ensure_sync_journal():
             error_code TEXT NOT NULL,
             wait_seconds REAL NOT NULL
         )""")
+        db.cursor().execute("""CREATE INDEX IF NOT EXISTS idx_grit_marketplace_sync_created\n            ON grit_marketplace_sync_log(created_at)""")
         db.commit()
 
 
@@ -46,6 +47,10 @@ class PersistentJournal:
                 (entry["id"], entry["at"], entry["platform"], entry["seller"],
                  entry["mode"], entry["status"], entry["attempts"], entry["orders"],
                  entry["http_status"], entry["error_code"], entry["wait_seconds"]))
+            # Keep the journal bounded; don't grow the production database forever.
+            db.cursor().execute("""DELETE FROM grit_marketplace_sync_log WHERE id NOT IN
+                (SELECT id FROM grit_marketplace_sync_log
+                 ORDER BY created_at DESC LIMIT 2000)""")
             db.commit()
         return entry
 
