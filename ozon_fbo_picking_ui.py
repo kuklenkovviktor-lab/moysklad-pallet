@@ -245,28 +245,58 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&employee&
 
 MANAGER_PICK_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX · Ozon FBO · Контроль сборки</title><style>
-*{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#25313d;margin:0}
-main{max-width:1250px;margin:auto;padding:15px}.card{padding:17px;border:1px solid #d7e0e7;border-radius:15px;background:#f7f9fb;margin:12px 0}
-h1{margin:12px 0}a{color:#48647a}table{width:100%;border-collapse:collapse;min-width:800px}
-th,td{padding:10px;border-bottom:1px solid #dce5eb;text-align:left;font-size:13px}
-th{background:#e6eef2}.scroll{overflow:auto}button{border:0;background:#48647a;color:#fff;padding:9px;border-radius:8px;cursor:pointer}
-button:disabled{opacity:.5}.secondary{background:#dce8ef;color:#314657}.small{font-size:13px;color:#6b7785}
-.progress{background:#dae5ea;border-radius:30px;height:9px;overflow:hidden;min-width:100px}.progress>div{background:#9caab3;height:100%;transition:width .2s}
-.progress.is-started>div{background:#547c92}.progress.is-done>div{background:#349267}
-.status-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:800;white-space:nowrap}
-.status-badge.is-planned{background:#e7edf1;color:#5b6a76}
-.status-badge.is-started{background:#deebf5;color:#35668c}
-.status-badge.is-done{background:#d8efe1;color:#226c48}
-tbody tr.is-done{background:#f0f8f3}
-tbody tr.is-done td{border-bottom-color:#d7eade}
-tbody tr.is-done td:first-child{box-shadow:inset 3px 0 0 #49a474}
-#audit{margin-top:12px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
-</style></head><body><main><a href="/manager/ozon-fbo">← Поставки Ozon FBO</a>
-<h1>📦 Монитор сборки Ozon FBO</h1><p class="small">Подтверждённые сканирования. Обновление каждые 15 секунд. Никаких списаний в МойСклад.</p>
-<div class="card scroll"><table><thead><tr><th>Поставка / направление</th><th>ШК грузоместа</th><th>Исполнитель</th><th>Собрано</th><th>Статус</th><th>Действия</th></tr></thead>
-<tbody id="rows"><tr><td colspan="6">Загрузка…</td></tr></tbody></table></div>
-<div class="card"><h2>История грузоместа</h2><div id="audit" class="small">Нажми «История» в строке грузоместа.</div></div>
+<title>GRIT WMS · Монитор сборки Ozon FBO</title>
+<meta name="theme-color" content="#09121e"><style>
+:root{color-scheme:dark;--bg:#09121e;--panel:#122438;--panel-deep:#101e2d;--line:#314d64;--text:#eef6ff;--muted:#a4bbce;--blue:#2b92e5;--orange:#ff983b;--green:#55d3a1}
+*{box-sizing:border-box}
+body{font:14px/1.48 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+main{max-width:1600px;margin:0 auto;padding:24px 28px 40px}
+a{color:#77c0ff;text-decoration:none}a:hover{text-decoration:underline}
+.back{display:inline-flex;gap:8px;align-items:center;font-size:13px;margin-bottom:13px}
+h1{font-size:clamp(23px,2vw,30px);line-height:1.25;margin:0 0 8px;font-weight:760;letter-spacing:-.55px}
+h2{font-size:18px;margin:0 0 13px;letter-spacing:-.2px}
+.heading{display:flex;align-items:center;gap:12px}.heading svg{width:29px;height:29px;color:#55b7f9;flex:none}
+.small{color:var(--muted);font-size:12.5px}
+.intro{margin:0 0 22px;font-size:13px}
+.card{background:linear-gradient(140deg,#14273b,#0f1e2e);border:1px solid var(--line);border-radius:13px;padding:18px;margin:15px 0;box-shadow:0 6px 16px rgba(0,0,0,.08)}
+.monitor-card{padding:12px 15px 15px}
+.monitor-title{display:flex;align-items:center;gap:10px;margin:3px 0 14px;padding:0 4px}
+.monitor-title svg{width:20px;height:20px;color:#78bfff;flex:none}
+.monitor-title h2{font-size:16px;margin:0}
+.monitor-title .small{margin-left:auto;text-align:right}
+table{width:100%;border-collapse:collapse;min-width:930px;background:transparent}
+th,td{padding:12px 14px;border-bottom:1px solid #294158;text-align:left;font-size:13px;vertical-align:middle}
+th{background:#1b3449;color:#c9e0f0;font-weight:730;font-size:12px;letter-spacing:.08px;white-space:nowrap}
+td{color:#e6f0fa}td b{font-weight:730;color:#f6faff}td .small{font-size:11.5px;margin-top:4px}
+tbody tr{background:transparent;transition:background .12s}tbody tr:hover{background:#1e364a}
+tbody tr.is-done{background:rgba(47,127,101,.07)}tbody tr.is-done:hover{background:rgba(47,127,101,.17)}
+tbody tr.is-done td:first-child{box-shadow:inset 3px 0 0 #37b889}
+tbody tr.is-done td{border-bottom-color:#2e4e50}
+.scroll{overflow-x:auto;scrollbar-color:#3b5d76 #0e1c2b}
+button{border:1px solid #438ac1;background:#176eae;color:#f7fbff;padding:9px 13px;border-radius:9px;min-height:37px;cursor:pointer;font-size:12.5px;font-weight:700;white-space:nowrap}
+button:hover{background:#2488cf}
+button:disabled{opacity:.5;cursor:wait}
+button.secondary{background:#203a50;color:#cae7ff;border:1px solid #365976}
+button.secondary:hover{background:#2a516c}
+button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.progress{background:#294257;border-radius:25px;height:9px;overflow:hidden;min-width:115px;margin-top:7px}
+.progress>div{background:#6b89a2;height:100%;transition:width .2s}
+.progress.is-started>div{background:linear-gradient(90deg,#1b80c8,#4ab5f6)}
+.progress.is-done>div{background:linear-gradient(90deg,#238968,#57d6a0)}
+.status-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 11px;border-radius:7px;font-size:11.5px;font-weight:750;white-space:nowrap}
+.status-badge.is-planned{background:#26394a;color:#b1c9d9;border:1px solid #3f586a}
+.status-badge.is-started{background:#173c5b;color:#91d1ff;border:1px solid #275c83}
+.status-badge.is-done{background:#173e36;color:#81e9b9;border:1px solid #2c6a57}
+#audit{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:12px;line-height:1.75;color:#d5e6f5;min-height:48px}
+.audit-card{border-left:3px solid #2c97dc}
+.meta-label{color:#9ebad0;font-size:12px;margin-left:6px}
+@media(max-width:800px){main{padding:15px}.card{padding:12px}.monitor-card{padding:10px}.monitor-title .small{display:none}th,td{padding:10px}}
+@media(prefers-reduced-motion:reduce){.progress>div,tbody tr{transition:none}}
+</style></head><body><main><a class="back" href="/manager/ozon-fbo">← Поставки Ozon FBO</a>
+<h1 class="heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10"/></svg>Монитор сборки Ozon FBO</h1><p class="small intro">Подтверждённые сканирования · Обновление каждые 15 секунд · Без списаний в МойСклад</p>
+<div class="card monitor-card"><div class="monitor-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18h3v-7H3zM10 18h3V6h-3zM17 18h3V3h-3z"/></svg><h2>Грузоместа и прогресс сборки</h2><span class="small">Фактические данные Ozon FBO</span></div><div class="scroll"><table><thead><tr><th>Поставка / направление</th><th>ШК грузоместа</th><th>Исполнитель</th><th>Собрано</th><th>Статус</th><th>Действия</th></tr></thead>
+<tbody id="rows"><tr><td colspan="6">Загрузка…</td></tr></tbody></table></div></div>
+<div class="card audit-card"><h2>История грузоместа</h2><div id="audit" class="small">Нажми «История» в строке грузоместа.</div></div>
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let list=[];
