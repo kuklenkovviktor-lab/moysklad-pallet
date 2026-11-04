@@ -4,12 +4,17 @@ Phase one intentionally does not accept or persist API secrets. Live integration
 remain controlled by their existing environment/configuration and services.
 """
 import os
+import hmac
+import json
+import secrets
 from html import escape
 
-from flask import Blueprint, Response, jsonify, redirect, request
+from flask import Blueprint, Response, jsonify, redirect, request, session
 
 from wms import manager_access
 from marketplace_lab import AdapterError, DOCUMENTATION, SOURCES, run_scenario
+from marketplace_http import BASES, MarketplaceHTTPError, mock_sync
+from marketplace_http_journal import PersistentJournal
 
 integrations_bp = Blueprint("integrations", __name__)
 
@@ -95,7 +100,7 @@ p{line-height:1.5}small,.muted{color:#607388;line-height:1.5}.notice{padding:14p
 <h1>Интеграции</h1></div><a href="/manager">← Панель управления</a></header>
 <div class="notice">Первый этап: реестр интеграций. Токены не отображаются и не сохраняются на этой странице.
 Новые сервисы нельзя подключить до реализации и проверки их адаптеров. Уже работающие соединения не изменены.</div>
-<p><a href="/manager/integrations/lab">🧪 Открыть лабораторию маркетплейсов (без API-ключей)</a></p>\n<section class="grid">""" + "".join(cards) + """</section></main></body></html>"""
+<p><a href="/manager/integrations/lab">🧪 Открыть лабораторию маркетплейсов (без API-ключей)</a></p><p><a href="/manager/integrations/http">🌐 HTTP-адаптеры и журнал синхронизации (тестовый контур)</a></p>\n<section class="grid">""" + "".join(cards) + """</section></main></body></html>"""
     return Response(html, content_type="text/html; charset=utf-8")
 
 
@@ -191,3 +196,130 @@ E('buttons').addEventListener('click',e=>{const b=e.target.closest('button[data-
 run('normal');
 </script></body></html>""";
     return Response(html, content_type="text/html; charset=utf-8")
+
+
+@integrations_bp.get("/api/manager/integrations/http/journal")
+def http_sync_journal_api():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    try:
+        entries = PersistentJournal().recent(limit=40)
+    except Exception:
+        return jsonify(error="Не удалось прочитать журнал синхронизации"), 503
+    return jsonify(entries=entries, mode="metadata_only", durable=True)
+
+
+@integrations_bp.post("/api/manager/integrations/http/mock")
+def http_mock_run_api():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    expected = session.get("grit_mp_http_csrf", "")
+    given = request.headers.get("X-GRIT-CSRF", "")
+    if not expected or not hmac.compare_digest(str(expected), str(given)):
+        return jsonify(error="Недействительный токен формы"), 403
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Ожидается JSON"), 400
+    provider = body.get("provider")
+    scenario = body.get("scenario", "ok")
+    if not isinstance(provider, str) or provider not in BASES:
+        return jsonify(error="Неизвестный маркетплейс"), 400
+    if not isinstance(scenario, str) or scenario not in {
+        "ok", "unauthorized", "rate_limit", "rate_limit_long", "server_error", "invalid_json"
+    }:
+        return jsonify(error="Неизвестный тест"), 400
+    try:
+        result = mock_sync(provider, scenario, journal=PersistentJournal())
+        # Do not return raw headers, auth or full fake payloads.
+        return jsonify(ok=True, provider=provider, scenario=scenario,
+                       count=result["count"], attempts=result["attempts"],
+                       no_real_network=True)
+    except MarketplaceHTTPError as exc:
+        # Controlled failure scenarios are valuable test results, not HTTP 500.
+        return jsonify(ok=False, provider=provider, scenario=scenario,
+                       error_code=exc.category, status=exc.status,
+                       retry_after=exc.retry_after, no_real_network=True)
+    except Exception:
+        return jsonify(error="Не удалось выполнить тест HTTP-адаптера"), 503
+
+
+@integrations_bp.get("/manager/integrations/http")
+def http_lab_page():
+    if not manager_access():
+        return redirect("/manager-login")
+    token = secrets.token_urlsafe(32)
+    session["grit_mp_http_csrf"] = token
+    html = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09121e">
+<title>GRIT WMS · HTTP-адаптеры маркетплейсов</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#09121e;color:#e9f3fd;font:14px/1.5 system-ui,-apple-system,Arial,sans-serif}
+main{max-width:1230px;padding:24px;margin:auto}
+a{color:#83c7fc}h1{font-size:27px;margin:14px 0 4px}h2{font-size:18px;margin:0 0 12px}
+p,.sub{color:#abc2d6;font-size:13px}
+.card{padding:18px;background:linear-gradient(145deg,#162a3d,#102031);border:1px solid #35536c;border-radius:12px;margin:15px 0}
+.banner{border-left:4px solid #ff9638}
+.controls{display:flex;align-items:end;flex-wrap:wrap;gap:12px}
+label{display:grid;gap:6px;color:#bdd4e6;font-size:12px;font-weight:650}
+select,button{font:inherit;border-radius:9px;min-height:42px;padding:9px 12px}
+select{background:#10253a;color:#f3f8ff;border:1px solid #49687e;min-width:170px}
+button{background:#1978b9;color:#fff;border:1px solid #4599d3;cursor:pointer;font-weight:700}
+button:disabled{opacity:.5;cursor:wait}button:hover{background:#238aca}
+button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #ff993b;outline-offset:2px}
+.scroll{overflow:auto}table{width:100%;min-width:880px;border-collapse:collapse}
+th,td{padding:11px;border-bottom:1px solid #29485e;text-align:left;font-size:12px}
+th{background:#1d3449;color:#c7ddee}
+code{color:#ffc082}.ok{color:#62dca3}.err{color:#ff9696}
+@media(max-width:650px){main{padding:12px}.controls{align-items:stretch;flex-direction:column}.controls select,.controls button{width:100%}}
+</style></head><body><main>
+<a href="/manager/integrations">← Интеграции GRIT</a>
+<h1>HTTP-адаптеры маркетплейсов</h1>
+<p>Wildberries · Ozon · Яндекс Маркет</p>
+<section class="card banner"><strong>ТЕСТОВЫЙ КОНТУР · ВНЕШНЯЯ СЕТЬ ОТКЛЮЧЕНА</strong>
+<p>Запускаются настоящие обработчики HTTP-запросов через подменённый транспорт. Селлерские ключи не нужны. Никаких операций с реальными заказами. Журнал тестов сохраняется отдельно от складских заказов.</p>
+<p>Реальные чтения доступны только через серверный программный интерфейс после отдельного явного включения и предоставления разрешённых учётных данных. На этой странице включить их невозможно.</p></section>
+<section class="card"><h2>Тест HTTP-клиента</h2>
+<div class="controls"><label>Маркетплейс<select id="provider"><option value="wildberries">Wildberries</option><option value="ozon">Ozon</option><option value="yandex">Яндекс Маркет</option></select></label>
+<label>Сценарий<select id="scenario"><option value="ok">Успешный ответ 200</option><option value="rate_limit">429 → повтор → 200</option><option value="rate_limit_long">429, длительная задержка</option><option value="unauthorized">401, нет доступа</option><option value="server_error">503, сбой API</option><option value="invalid_json">200, повреждённый JSON</option></select></label>
+<button id="run">Запустить проверку</button></div>
+<p id="result" role="status">Выбери сценарий и нажми «Запустить проверку».</p></section>
+<section class="card"><h2>Журнал синхронизации · метаданные</h2>
+<p>Сохраняются время, маркетплейс, тестовый продавец, исход, HTTP-статус, попытки и количество заказов. Токены, покупатели и ответы API не записываются.</p>
+<button id="reload" type="button">Обновить журнал</button>
+<div class="scroll"><table><thead><tr><th>Время UTC</th><th>Площадка</th><th>Режим</th><th>Результат</th><th>HTTP</th><th>Попытки</th><th>Заказы</th><th>Код ошибки</th></tr></thead>
+<tbody id="entries"><tr><td colspan="8">Загрузка…</td></tr></tbody></table></div></section>
+</main><script>
+const TOKEN=__CSRF_TOKEN__;
+const E=id=>document.getElementById(id);
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function loadJournal(){
+ try{
+  const r=await fetch('/api/manager/integrations/http/journal',{cache:'no-store'});
+  if(r.status===403){location.href='/manager-login';return}
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка журнала');
+  E('entries').innerHTML=d.entries.length?d.entries.map(x=>'<tr><td>'+esc(x.at)+'</td><td>'+esc(x.platform)+'</td><td>'+esc(x.mode)+'</td><td class="'+(x.status==='ok'?'ok':'err')+'">'+esc(x.status)+'</td><td>'+esc(x.http_status||'—')+'</td><td>'+esc(x.attempts)+'</td><td>'+esc(x.orders)+'</td><td>'+esc(x.error_code||'—')+'</td></tr>').join(''):'<tr><td colspan="8">Запусков пока нет</td></tr>';
+ }catch(e){E('entries').innerHTML='<tr><td colspan="8">'+esc(e.message)+'</td></tr>'}
+}
+E('run').addEventListener('click',async()=>{
+ E('run').disabled=true;E('result').textContent='Выполняется тест…';
+ try{
+  const r=await fetch('/api/manager/integrations/http/mock',{
+   method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-GRIT-CSRF':TOKEN},
+   body:JSON.stringify({provider:E('provider').value,scenario:E('scenario').value})
+  });
+  if(r.status===403){location.href='/manager-login';return}
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка');
+  E('result').className=d.ok?'ok':'err';
+  E('result').textContent=d.ok?'Успешно: '+d.count+' заказов, попыток '+d.attempts:
+   'Контролируемая ошибка: '+d.error_code+' (HTTP '+(d.status||'—')+')';
+  await loadJournal();
+ }catch(e){E('result').className='err';E('result').textContent=e.message}
+ finally{E('run').disabled=false}
+});
+E('reload').addEventListener('click',loadJournal);
+loadJournal();
+</script></body></html>""".replace("__CSRF_TOKEN__", json.dumps(token))
+    response = Response(html, content_type="text/html; charset=utf-8")
+    response.headers["Cache-Control"] = "no-store"
+    return response
