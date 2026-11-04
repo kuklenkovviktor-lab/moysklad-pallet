@@ -228,11 +228,11 @@ def manager_partners():
     rows = "".join(f"<tr><td>{escape(name)}</td><td>{escape(created[:16])}</td><td>{'Активен' if active else 'Отключён'}</td></tr>"
                    for name, created, active in partners)
     return page("GRIT WMS · Управление партнёрами", f"""<p><a href="/manager">← Панель руководителя</a></p>
-      <section><h2>Создать ограниченный доступ партнёру</h2><p>{escape(notice)}</p>
+      <section class="grit-manager-partners-card"><h2>Создать ограниченный доступ партнёру</h2><p>{escape(notice)}</p>
       <form method="post"><input type="hidden" name="csrf" value="{csrf()}"><input name="name" placeholder="Поставщик / логин" required minlength="2" maxlength="100">
         <input name="password" placeholder="Пароль (от 12 символов)" required minlength="12" autocomplete="new-password">
         <button>Создать партнёра</button></form></section>
-      <section><h2>Партнёры</h2><table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
+      <section class="grit-manager-partners-card"><h2>Партнёры</h2><table><tr><th>Логин</th><th>Создан</th><th>Статус</th></tr>{rows}</table></section>""")
 
 
 def parse_excel(file):
