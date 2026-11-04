@@ -136,5 +136,35 @@ class MarketHTTPTests(unittest.TestCase):
             self.assertIn(endpoint, allowed)
 
 
+    def test_durable_journal_uses_only_dedicated_table(self):
+        import importlib.util
+        import sqlite3
+        import sys
+        import tempfile
+        import types
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / "grit-lab-metadata.sqlite")
+            fake = types.ModuleType("wms")
+            fake.db_connect = lambda: sqlite3.connect(path)
+            fake.sql = lambda query: query
+            spec = importlib.util.spec_from_file_location(
+                "isolated_grit_sync_journal", "marketplace_http_journal.py")
+            mod = importlib.util.module_from_spec(spec)
+            with patch.dict(sys.modules, {"wms": fake}):
+                spec.loader.exec_module(mod)
+            mod.PersistentJournal().record(
+                "ozon", "DEMO-SELLER", "mock", "ok", 2, 1, 200, "", 0.4)
+            row = mod.PersistentJournal().recent(1)[0]
+            self.assertEqual(row["platform"], "ozon")
+            self.assertEqual(row["orders"], 1)
+            self.assertEqual(row["attempts"], 2)
+            with sqlite3.connect(path) as db:
+                tables = {r[0] for r in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                self.assertEqual(tables, {"grit_marketplace_sync_log"})
+
+
 if __name__ == "__main__":
     unittest.main()
