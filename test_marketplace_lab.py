@@ -14,7 +14,7 @@ class MarketplaceLabTests(unittest.TestCase):
         result = run_scenario("normal")
         self.assertTrue(result["passed"])
         self.assertEqual(len(result["orders"]), 4)
-        self.assertEqual(result["total_units"], 8)  # WB 2 + Ozon 3 + Yandex 4
+        self.assertEqual(result["total_units"], 9)  # WB 2 + Ozon 3 + Yandex 4
         self.assertEqual({o["platform"] for o in result["orders"]},
                          {"wildberries", "ozon", "yandex"})
         self.assertTrue(all(o["source"] == "synthetic_fixture" for o in result["orders"]))
