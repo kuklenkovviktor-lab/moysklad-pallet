@@ -289,6 +289,39 @@ button{background:#48647a;color:white;border:0;padding:11px 13px;border-radius:9
 .scaninput{flex:1 1 160px;min-width:150px;width:auto}
 #cameraOverlay{display:none;position:fixed;inset:0;z-index:1000;background:#e9eef3;overflow:auto;padding:12px}
 #repReader{max-width:650px;margin:16px auto}#cameraOverlay button{display:block;margin:15px auto}
+/* GRIT warehouse-worker skin. Restrict to replenishment worker page only. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#14283b;--g-line:#355168;--g-blue:#2388ca;--g-orange:#ff9b3c}
+body{background:var(--g-bg);color:#eff7ff;min-height:100dvh}
+main{padding:max(13px,env(safe-area-inset-top)) max(13px,env(safe-area-inset-right)) max(15px,env(safe-area-inset-bottom)) max(13px,env(safe-area-inset-left))}
+h1{font-size:clamp(23px,5vw,30px);letter-spacing:-.025em;color:#f6faff}
+h2{font-size:17px;color:#f2f8ff}
+a{color:#87caff}#returnToPicking{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font-weight:700}
+.small{color:#adc4d7;line-height:1.5}
+.card{background:linear-gradient(145deg,#182e42,#112132);border:1px solid var(--g-line);box-shadow:none}
+.task{border-color:#355168;padding:16px 0}
+.task b{color:#fff;overflow-wrap:anywhere}
+.urgent{display:inline-block;background:#4a3326;color:#ffc07d;border:1px solid #8a5932;padding:2px 7px;border-radius:6px;font-size:12px;font-weight:800}
+.actions{gap:9px;align-items:stretch}
+input,select{background:#0d1f30;color:#f3faff;border:1px solid #53758f;min-height:45px;min-width:0;max-width:100%;border-radius:9px}
+input::placeholder{color:#9eb6ca}
+button{background:#1977b8;color:#fff;border:1px solid #388fcb;min-height:45px}
+button:hover{background:#238dd0}
+button.secondary{background:#263e53;color:#e9f4fc;border:1px solid #486b85}
+button:disabled{opacity:.55}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--g-orange);outline-offset:2px}
+.scanbox{background:#1d354a;border:1px solid #3b5b73;padding:14px}
+.scanbox b{color:#f5f9ff}
+.ok{color:#70e6aa}.bad{color:#ff999c}
+#msg:not(:empty){padding:12px;border-radius:9px;background:#1b2d40;border:1px solid #415e78;margin-top:12px;font-weight:700}
+#cameraOverlay{background:#09121e;color:#eef7ff;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+#repReader{background:#15293b;border-radius:12px;overflow:hidden}
+@media(max-width:520px){
+ .card{padding:13px}
+ .actions input.scaninput,.actions select{flex:1 1 100%;width:100%}
+ .actions button{flex:1 1 auto}
+ #refreshList{float:none!important;margin-left:8px}
+}
+@media print{body{background:#fff;color:#000}.card{background:#fff;color:#000;border-color:#aaa}.small,.task b,h1,h2{color:#000}}
 </style></head><body><main>
 <a id="returnToPicking" href="/fbs">← Вернуться к сборке</a><h1>📦 Пополнение</h1>
 <div class="small">Авторизация по бейджу сотрудника. Начало и завершение задач фиксируются автоматически. Сборка FBS не меняется.</div>
