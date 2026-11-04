@@ -1215,6 +1215,38 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
  .manual-entry.open{flex-wrap:wrap}
  .manual-entry.open #scanButton{width:100%}
 }
+/* GRIT worker UX: visible scan stages, safe-area touch targets and clear feedback.
+   Presentation only: never change barcode capture or server transaction logic. */
+:root{--bg:#09121e;--panel:#14283a;--panel2:#1b354b;--line:#35536b;--accent:#1a72b2;--accent2:#25445e}
+#topbar{border-bottom:1px solid var(--line);padding-bottom:10px;min-height:36px}
+#topbar .brand{color:#ff9c43;font-size:12px;letter-spacing:.065em}
+#topbar .who{color:#e5f2fd}
+.scan-stage{background:linear-gradient(145deg,#19354a,#112435);border:1px solid #35536b;border-left:4px solid #288fe0;transition:border-color .16s ease,background-color .16s ease}
+#scanCard:has(#resetProduct:not(.hidden)) .scan-stage{border-left-color:#ff9c43;background:linear-gradient(145deg,#342c26,#16283b)}
+#scanCard:has(#resetProduct:not(.hidden)) .scan-icon{color:#ffb56e}
+#scanStage{color:#f5faff;text-wrap:balance}
+#productInfo{color:#bfd2e1}
+#productInfo b{color:#fff;overflow-wrap:anywhere}
+#result{min-height:0;line-height:1.45}
+#result .ok,#result .err{padding:11px 13px;font-size:13px;font-weight:650;border:1px solid transparent}
+#result .ok{background:#173e35;color:#b6f2d3;border-color:#33765c}
+#result .err{background:#49292d;color:#ffd2d0;border-color:#8f5259}
+.stat{border:1px solid #324c63;background:#162e42}
+.stat .big{color:#fff;font-variant-numeric:tabular-nums}
+#activityToggle{border:1px solid #3e6480;background:#24435e;color:#f1f8ff}
+#activityMenu{border:1px solid #35536b}
+.activities button,.utility-grid button,.nav a{min-height:44px}
+#backToPicking{border:1px solid #4c8c76}
+.manual-entry.open #barcode{background:#101f2e;color:#f1f8ff;border:2px solid #5b91b8;min-height:44px}
+.manual-entry.open #barcode::placeholder{color:#b7c8d8}
+#scanCard #resetProduct{min-height:36px;max-width:130px;font-size:11px;border:1px solid #63819a}
+button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #ff9c43;outline-offset:2px}
+@media (orientation:landscape) and (max-height:600px){
+ #topbar{padding-bottom:6px;min-height:28px}
+ .scan-stage{min-height:115px}
+ #result .ok,#result .err{padding:7px 10px;font-size:12px}
+}
+@media (prefers-reduced-motion:reduce){.scan-stage{transition:none}}
 </style>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body>
