@@ -54,6 +54,25 @@ body .section-link{color:#75bdf8!important}
 /* Interactive SVG warehouse map preserves its coordinate and state colors. */
 body svg{max-width:100%}
 @media(max-width:760px){body .content{padding:12px!important}body .wrap{padding-left:12px!important;padding-right:12px!important}}
+
+/* Manager-only partner administration: avoid invisible headings on white portal sections. */
+body section.grit-manager-partners-card{
+ background:linear-gradient(145deg,#16283b,#101c2a)!important;
+ border:1px solid #30465c!important;
+ border-radius:13px!important;
+ box-shadow:0 5px 18px rgba(0,0,0,.13)!important;
+ color:#f1f6ff!important;
+ padding:22px!important;
+}
+body section.grit-manager-partners-card h2{color:#f1f6ff!important;font-size:18px;font-weight:720}
+body section.grit-manager-partners-card p{color:#b6cadb!important}
+body section.grit-manager-partners-card form{display:grid;gap:12px}
+body section.grit-manager-partners-card input{min-height:43px!important}
+body section.grit-manager-partners-card button{justify-self:start;min-height:41px;padding:9px 16px!important}
+body section.grit-manager-partners-card table{width:100%;border-collapse:collapse}
+body section.grit-manager-partners-card th,body section.grit-manager-partners-card td{padding:12px 14px;text-align:left}
+@media(max-width:650px){body section.grit-manager-partners-card{padding:14px!important}}
+
 /* Printed staff credentials and pallet labels must remain high-contrast on white. */
 @media print{
  :root{color-scheme:light}
