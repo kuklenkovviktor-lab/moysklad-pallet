@@ -409,6 +409,8 @@ def require_employee_login():
         "/manager/partners",
         "/manager/integrations",
         "/api/manager/integrations",
+        "/manager/integrations/lab",
+        "/api/manager/integrations/lab",
         "/api/partners/accounts",
         "/manager",
         "/manager/shifts",
