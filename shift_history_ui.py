@@ -21,6 +21,28 @@ input,select{min-height:41px;border:1px solid #3e5b72;background:#0c1a29;color:#
 @media(max-width:1250px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.summary{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:780px){main{padding:12px}.cards{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-stats{grid-template-columns:repeat(2,1fr)}.details-columns{grid-template-columns:1fr}.event{grid-template-columns:1fr;gap:3px}.section-head{align-items:flex-start;flex-direction:column}}
 @media(max-width:430px){.person-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat .value{font-size:20px}.toolbar label{width:100%}.toolbar input{width:100%}}
+
+/* Operational staff cards: GRIT visual system */
+.employee-card{position:relative;min-height:257px;border-color:#35526b;box-shadow:0 8px 24px rgba(0,0,0,.10);overflow:hidden}
+.employee-card::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:#278ad7}
+.employee-card.selected::before{background:#ff952d}
+.person-head{align-items:center;margin-bottom:17px}
+.avatar{width:46px;height:46px;background:linear-gradient(135deg,#254d6b,#153247);border:1px solid #3a6d91;border-radius:13px}
+.avatar svg{height:26px;width:26px;fill:none;stroke:#afd8f6;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.person-name{font-size:20px;letter-spacing:-.3px}
+.person-sub{font-size:12px;display:flex;align-items:center;gap:6px;margin-top:5px}
+.person-sub::before{content:"";width:7px;height:7px;border-radius:50%;background:#529ed2;display:inline-block}
+.person-sub.has-operations::before{background:#53d2a0}
+.person-sub.is-inactive::before{background:#8395a3}
+.order-figure strong{font-size:28px;line-height:1.2;color:#fff}
+.person-metric{padding:11px;background:#192e43}
+.person-metric span,.mix-title,.card-foot{font-size:12px}
+.person-metric b{font-size:16px}
+.card-foot{color:#85c5ff;font-weight:620;margin-top:14px}
+.mix{margin-top:14px}.track{height:8px}
+.section-head h2{font-size:21px}.journal{scroll-margin-top:20px}
+.event{grid-template-columns:142px 175px 1fr}.event b{color:#f1f6ff;font-weight:650}
+@media(prefers-reduced-motion:reduce){.employee-card{transition:none}.employee-card:hover{transform:none}}
 </style><link rel="icon" href="/favicon.svg" type="image/svg+xml"></head>
 <body><main>
 <a class="back" href="/manager">← Операционный центр</a>
@@ -47,7 +69,7 @@ input,select{min-height:41px;border:1px solid #3e5b72;background:#0c1a29;color:#
 </section>
 </main><script>
 const $=id=>document.getElementById(id),fromEl=$('dateFrom'),toEl=$('dateTo');
-let report=null,people=[],selectedId='',eventPage=0,eventKind='all',loading=false,eventsBusy=false;
+let report=null,people=[],selectedId='',eventPage=0,eventKind='all',loading=false,eventsBusy=false,eventController=null,eventRequestId=0;
 function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function num(n){return Number(n||0).toLocaleString('ru-RU')}
 function dur(n){let m=Math.round(Number(n||0)/60);return Math.floor(m/60)+' ч '+String(m%60).padStart(2,'0')+' мин'}
@@ -62,7 +84,7 @@ function renderSummary(){const t=report.totals;const speed=t.orders_per_hour==nu
 function buildPeople(){const groups=new Map;for(const r of report.rows){if(!groups.has(r.employee_id))groups.set(r.employee_id,[]);groups.get(r.employee_id).push(r)}people=report.employees.filter(e=>e.active||groups.has(e.id)).map(e=>({id:e.id,name:e.name,active:e.active,rows:groups.get(e.id)||[],t:aggregate(groups.get(e.id)||[])}))}
 function renderCards(){const sort=$('sortBy').value;const sorted=[...people].sort((a,b)=>sort==='name'?a.name.localeCompare(b.name,'ru'):sort==='speed'?(b.t.speed||0)-(a.t.speed||0):sort==='tasks'?b.t.tasks-a.t.tasks:b.t.orders-a.t.orders);
  $('peopleCount').textContent='('+sorted.length+')';
- $('cards').innerHTML=sorted.length?sorted.map(p=>{const t=p.t,total=t.picking+t.repl,pc=total?Math.round(t.picking/total*100):0,rc=total?100-pc:0;return '<button type="button" class="employee-card'+(selectedId===p.id?' selected':'')+'" data-employee="'+esc(p.id)+'" aria-label="Открыть журнал: '+esc(p.name)+'"><div class="person-head"><div class="avatar">♙</div><div><div class="person-name">'+esc(p.name)+'</div><div class="person-sub">'+(p.active?'Сотрудник склада':'Неактивен')+'</div></div><div class="order-figure"><span>WB FBS</span><strong>'+num(t.orders)+'</strong></div></div><div class="person-grid"><div class="person-metric"><span>Заказов/ч</span><b>'+(t.speed==null?'н/д':t.speed)+'</b></div><div class="person-metric"><span>Сборка</span><b>'+dur(t.picking)+'</b></div><div class="person-metric"><span>Пополнение</span><b>'+dur(t.repl)+'</b></div><div class="person-metric"><span>Заданий</span><b>'+num(t.tasks)+'</b></div><div class="person-metric"><span>Смен</span><b>'+num(t.shifts)+'</b></div><div class="person-metric"><span>Пополнено, шт.</span><b>'+num(t.units)+'</b></div></div><div class="mix"><div class="mix-title"><span>Доля зафиксированного времени</span><span>'+(total?'Сборка '+pc+'% · Пополнение '+rc+'%':'Нет данных')+'</span></div><div class="track"><div class="pick" style="width:'+pc+'%"></div><div class="repl" style="width:'+rc+'%"></div></div></div><div class="card-foot">'+(t.warning?'⚠ Есть сомнительные интервалы · ':'')+'Открыть персональный журнал →</div></button>'}).join(''):'<div class="card-empty">Нет сотрудников для отображения</div>';
+ $('cards').innerHTML=sorted.length?sorted.map(p=>{const t=p.t,total=t.picking+t.repl,pc=total?Math.round(t.picking/total*100):0,rc=total?100-pc:0;return '<button type="button" class="employee-card'+(selectedId===p.id?' selected':'')+'" data-employee="'+esc(p.id)+'" aria-label="Открыть журнал: '+esc(p.name)+'"><div class="person-head"><div class="avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c0-4.3 3-6.5 7.5-6.5s7.5 2.2 7.5 6.5"/></svg></div><div><div class="person-name">'+esc(p.name)+'</div><div class="person-sub">'+(p.active?(p.rows.length?'Есть операции за период':'Нет операций за период'):'Учётная запись отключена')+'</div></div><div class="order-figure"><span>WB FBS</span><strong>'+num(t.orders)+'</strong></div></div><div class="person-grid"><div class="person-metric"><span>Заказов/ч</span><b>'+(t.speed==null?'н/д':t.speed)+'</b></div><div class="person-metric"><span>Сборка</span><b>'+dur(t.picking)+'</b></div><div class="person-metric"><span>Пополнение</span><b>'+dur(t.repl)+'</b></div><div class="person-metric"><span>Заданий</span><b>'+num(t.tasks)+'</b></div><div class="person-metric"><span>Смен</span><b>'+num(t.shifts)+'</b></div><div class="person-metric"><span>Пополнено, шт.</span><b>'+num(t.units)+'</b></div></div><div class="mix"><div class="mix-title"><span>Доля зафиксированного времени</span><span>'+(total?'Сборка '+pc+'% · Пополнение '+rc+'%':'Нет данных')+'</span></div><div class="track"><div class="pick" style="width:'+pc+'%"></div><div class="repl" style="width:'+rc+'%"></div></div></div><div class="card-foot">'+(t.warning?'⚠ Есть сомнительные интервалы · ':'')+'Открыть персональный журнал →</div></button>'}).join(''):'<div class="card-empty">Нет сотрудников для отображения</div>';
 }
 function details(){
  const p=people.find(x=>x.id===selectedId);if(!p)return;
@@ -70,14 +92,45 @@ function details(){
  $('detailRows').innerHTML=p.rows.length?p.rows.map(r=>'<div class="detail-box"><b>'+day(r.date)+'</b><div class="small">WB FBS: '+num(r.orders)+' · '+(r.orders_per_hour==null?'Скорость н/д':r.orders_per_hour+' заказов/ч')+'</div><div class="small">Сборка '+dur(r.picking_seconds)+' · Пополнение '+dur(r.replenishment_seconds)+'</div><div class="block-label">Смены</div>'+(r.shifts.length?r.shifts.map(v=>'<div class="detail-row">'+stamp(v.started_at)+' → '+(v.ended_at?stamp(v.ended_at):'Открыта')+' · FBS: '+num(v.orders)+'</div>').join(''):'<div class="small">Нет записей</div>')+'<div class="block-label">Интервалы операций</div>'+(r.activities.length?r.activities.map(v=>'<div class="detail-row">'+esc(v.label)+' · '+stamp(v.started_at)+'–'+stamp(v.ended_at)+' · '+dur(v.seconds)+'</div>').join(''):'<div class="small">Нет записей</div>')+'<div class="block-label">Завершённые пополнения</div>'+(r.tasks.length?r.tasks.map(v=>'<div class="detail-row">'+esc(v.article)+' · '+esc(v.location)+' · '+num(v.quantity)+' шт. · '+stamp(v.completed_at)+'</div>').join(''):'<div class="small">Нет записей</div>')+(r.warnings.length?'<div class="block-label warning">Качество данных</div>'+r.warnings.map(v=>'<div class="warning">'+esc(v)+'</div>').join(''):'')+'</div>').join(''):'<div class="small">За период нет операций</div>';
 }
 function openPerson(id){selectedId=id;renderCards();details();$('journal').classList.remove('hidden');eventKind='all';document.querySelectorAll('button[data-kind]').forEach(b=>{b.classList.toggle('active',b.dataset.kind==='all');b.classList.toggle('secondary',b.dataset.kind!=='all')});eventPage=0;$('events').innerHTML='';loadEvents(true);$('journal').scrollIntoView({behavior:'smooth',block:'start'})}
-async function loadEvents(reset=false){if(!selectedId||eventsBusy)return;eventsBusy=true;const page=reset?1:eventPage+1;$('eventsStatus').textContent='Загрузка событий…';$('moreEvents').disabled=true;
- try{const q=new URLSearchParams({from:fromEl.value,to:toEl.value,employee_id:selectedId,kind:eventKind,page:String(page)});const res=await fetch('/api/manager/employee-events?'+q.toString(),{cache:'no-store'});if(res.status===403){location.href='/manager-login';return}const data=await res.json();if(!res.ok)throw Error(data.error||'Ошибка запроса');if(reset)$('events').innerHTML='';eventPage=page;
- $('events').insertAdjacentHTML('beforeend',data.rows.map(x=>'<div class="event"><time>'+stamp(x.occurred_at)+'</time><b>'+esc(x.label)+'</b><div><div>'+esc(x.article||x.product_name||x.object_code||'Операция')+(x.quantity!=null?' · '+num(x.quantity)+' шт.':'')+'</div><div class="small">'+esc([x.product_name,x.object_code,x.document,x.result].filter(Boolean).join(' · '))+'</div></div></div>').join(''));
- $('eventsStatus').textContent=data.rows.length?'Страница '+page+' · событий на странице: '+data.rows.length:'Событий этого типа за период нет';$('moreEvents').classList.toggle('hidden',!data.has_more);
- }catch(e){$('eventsStatus').textContent=e.message;$('eventsStatus').className='status err'}finally{eventsBusy=false;$('moreEvents').disabled=false}}
-async function load(){if(loading)return;if(!fromEl.value||!toEl.value||fromEl.value>toEl.value){$('status').textContent='Проверь даты';return}loading=true;$('show').disabled=true;$('status').textContent='Обновляю статистику…';try{const q=new URLSearchParams({from:fromEl.value,to:toEl.value});const res=await fetch('/api/manager/shift-history?'+q.toString(),{cache:'no-store'});if(res.status===403){location.href='/manager-login';return}const d=await res.json();if(!res.ok)throw Error(d.error||'Ошибка');report=d;buildPeople();renderSummary();renderCards();$('status').textContent='Период: '+day(d.from)+' – '+day(d.to)+' · часовой пояс Москва'+(d.totals.quality_warning?' · Есть неполные данные':'');if(selectedId&&people.some(x=>x.id===selectedId)){details();eventPage=0;$('events').innerHTML='';loadEvents(true)}else{$('journal').classList.add('hidden');selectedId='';}}catch(e){$('status').textContent=e.message;$('status').className='status err'}finally{loading=false;$('show').disabled=false}}
+function cancelEventRequest(){
+ eventRequestId++;
+ if(eventController){eventController.abort();eventController=null}
+ eventsBusy=false;
+ $('moreEvents').disabled=false;
+}
+async function loadEvents(reset=false){
+ if(!selectedId||(!reset&&eventsBusy))return;
+ if(reset)cancelEventRequest();
+ eventsBusy=true;
+ const requestId=++eventRequestId,employeeId=selectedId,kind=eventKind;
+ const page=reset?1:eventPage+1,controller=new AbortController();
+ eventController=controller;
+ $('eventsStatus').className='status';
+ $('eventsStatus').textContent='Загрузка событий…';
+ $('moreEvents').disabled=true;
+ try{
+  const q=new URLSearchParams({from:fromEl.value,to:toEl.value,employee_id:employeeId,kind,page:String(page)});
+  const res=await fetch('/api/manager/employee-events?'+q.toString(),{cache:'no-store',signal:controller.signal});
+  if(res.status===403){location.href='/manager-login';return}
+  const data=await res.json();
+  if(requestId!==eventRequestId||selectedId!==employeeId||eventKind!==kind)return;
+  if(!res.ok)throw Error(data.error||'Ошибка запроса');
+  if(reset)$('events').innerHTML='';
+  eventPage=page;
+  $('events').insertAdjacentHTML('beforeend',data.rows.map(x=>'<div class="event"><time>'+stamp(x.occurred_at)+'</time><b>'+esc(x.label)+'</b><div><div>'+esc(x.article||x.product_name||x.object_code||'Операция')+(x.quantity!=null?' · '+num(x.quantity)+' шт.':'')+'</div><div class="small">'+esc([x.product_name,x.object_code,x.document,x.result].filter(Boolean).join(' · '))+'</div></div></div>').join(''));
+  $('eventsStatus').textContent=data.rows.length?'Страница '+page+' · событий на странице: '+data.rows.length:'Событий этого типа за период нет';
+  $('moreEvents').classList.toggle('hidden',!data.has_more);
+ }catch(e){
+  if(e.name==='AbortError'||requestId!==eventRequestId)return;
+  $('eventsStatus').textContent=e.message;
+  $('eventsStatus').className='status err';
+ }finally{
+  if(requestId===eventRequestId){eventsBusy=false;eventController=null;$('moreEvents').disabled=false}
+ }
+}
+async function load(){if(loading)return;if(!fromEl.value||!toEl.value||fromEl.value>toEl.value){$('status').textContent='Проверь даты';return}loading=true;$('show').disabled=true;$('status').textContent='Обновляю статистику…';try{const q=new URLSearchParams({from:fromEl.value,to:toEl.value});const res=await fetch('/api/manager/shift-history?'+q.toString(),{cache:'no-store'});if(res.status===403){location.href='/manager-login';return}const d=await res.json();if(!res.ok)throw Error(d.error||'Ошибка');report=d;buildPeople();renderSummary();renderCards();$('status').textContent='Период: '+day(d.from)+' – '+day(d.to)+' · часовой пояс Москва'+(d.totals.quality_warning?' · Есть неполные данные':'');if(selectedId&&people.some(x=>x.id===selectedId)){details();eventPage=0;$('events').innerHTML='';loadEvents(true)}else{cancelEventRequest();$('journal').classList.add('hidden');selectedId='';}}catch(e){$('status').textContent=e.message;$('status').className='status err'}finally{loading=false;$('show').disabled=false}}
 $('cards').addEventListener('click',e=>{const b=e.target.closest('button[data-employee]');if(b)openPerson(b.dataset.employee)});
-$('closeJournal').addEventListener('click',()=>{$('journal').classList.add('hidden');selectedId='';renderCards()});
+$('closeJournal').addEventListener('click',()=>{cancelEventRequest();$('journal').classList.add('hidden');selectedId='';renderCards()});
 $('sortBy').addEventListener('change',()=>{if(report)renderCards()});
 $('show').addEventListener('click',load);
 document.querySelectorAll('button[data-days]').forEach(b=>b.addEventListener('click',()=>setPeriod(Number(b.dataset.days))));
