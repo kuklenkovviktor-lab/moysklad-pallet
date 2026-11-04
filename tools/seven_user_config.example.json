@@ -1,0 +1,250 @@
+{
+  "base_url": "https://grit-staging.example.invalid",
+  "isolated_database_confirmed": false,
+  "external_integrations_disabled": false,
+  "actors": [
+    {
+      "name": "loadtest-1",
+      "role": "picking",
+      "badge": "ONIX-BADGE-9001",
+      "scans": [
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_0",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_0",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_1",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_1",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_2",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_2",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_3",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_3",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_4",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_4",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_5",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_5",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_6",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_6",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_7",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_7",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_8",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_8",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_0_9",
+          "product_barcode": "GRIT_TEST_PRODUCT_0_9",
+          "article": "GRIT-TEST"
+        }
+      ]
+    },
+    {
+      "name": "loadtest-2",
+      "role": "picking",
+      "badge": "ONIX-BADGE-9002",
+      "scans": [
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_0",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_0",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_1",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_1",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_2",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_2",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_3",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_3",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_4",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_4",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_5",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_5",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_6",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_6",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_7",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_7",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_8",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_8",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_1_9",
+          "product_barcode": "GRIT_TEST_PRODUCT_1_9",
+          "article": "GRIT-TEST"
+        }
+      ]
+    },
+    {
+      "name": "loadtest-3",
+      "role": "picking",
+      "badge": "ONIX-BADGE-9003",
+      "scans": [
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_0",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_0",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_1",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_1",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_2",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_2",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_3",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_3",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_4",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_4",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_5",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_5",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_6",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_6",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_7",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_7",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_8",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_8",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_2_9",
+          "product_barcode": "GRIT_TEST_PRODUCT_2_9",
+          "article": "GRIT-TEST"
+        }
+      ]
+    },
+    {
+      "name": "loadtest-4",
+      "role": "picking",
+      "badge": "ONIX-BADGE-9004",
+      "scans": [
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_0",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_0",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_1",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_1",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_2",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_2",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_3",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_3",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_4",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_4",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_5",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_5",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_6",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_6",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_7",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_7",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_8",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_8",
+          "article": "GRIT-TEST"
+        },
+        {
+          "wb_barcode": "GRIT_TEST_WB_3_9",
+          "product_barcode": "GRIT_TEST_PRODUCT_3_9",
+          "article": "GRIT-TEST"
+        }
+      ]
+    },
+    {
+      "name": "loadtest-5",
+      "role": "receiving",
+      "badge": "ONIX-BADGE-9005"
+    },
+    {
+      "name": "loadtest-6",
+      "role": "replenishment",
+      "badge": "ONIX-BADGE-9006"
+    },
+    {
+      "name": "loadtest-7",
+      "role": "manager",
+      "badge": "ONIX-BADGE-9007"
+    }
+  ]
+}
