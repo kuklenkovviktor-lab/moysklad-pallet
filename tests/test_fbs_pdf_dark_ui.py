@@ -17,7 +17,8 @@ class PdfContrastTests(unittest.TestCase):
     def test_upload_stays_read_only(self):
         self.assertIn("/api/manager/fbs-pdf/preview", FBS_PDF_PAGE)
         self.assertIn('Создание заданий отключено', FBS_PDF_PAGE)
-        self.assertNotIn("/api/manager/fbs-pdf/physical-test-import", FBS_PDF_PAGE)
+        self.assertIn("/api/manager/fbs-pdf/physical-test-import", FBS_PDF_PAGE)
+        self.assertIn("d.physical_test_enabled && d.wb_report && d.wb_report.valid_structure", FBS_PDF_PAGE)
 
     def test_grit_brand(self):
         self.assertIn("GRIT WMS · Загрузка PDF FBS", FBS_PDF_PAGE)
