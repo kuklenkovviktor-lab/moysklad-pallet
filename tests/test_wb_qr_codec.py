@@ -31,6 +31,22 @@ class WbQrCodecTests(unittest.TestCase):
         cyrillic=code.translate(str.maketrans(us+us.upper(),ru+ru.upper()))
         self.assertEqual(canonical_wb_sticker(cyrillic), "59500000011")
 
+    def test_real_iphone_russian_hid_prefix_semicolon(self):
+        # iOS Russian layout turns '*' into ';' as well as Latin letters
+        # into Cyrillic. The earlier fix covered letters but missed '*'.
+        us="qwertyuiop[]asdfghjkl;'zxcvbnm,."
+        ru="йцукенгшщзхъфывапролджэячсмитьбю"
+        for numeric in (59500000011, 59000000001, 59123456789):
+            code=make_wb_qr(numeric,0x36)
+            raw=";" + code[1:].translate(str.maketrans(us+us.upper(),ru+ru.upper()))
+            with self.subTest(number=numeric,raw=raw):
+                self.assertEqual(canonical_wb_sticker(raw),str(numeric))
+
+    def test_semicolon_bad_payload_must_not_match_anything(self):
+        for code in (";somethingelse",";none", ";ВвяаЬ", ";invalid!!!", ";ВвяаЬ442X"):
+            with self.subTest(code=code):
+                self.assertEqual(canonical_wb_sticker(code),code)
+
     def test_unknown_not_fabricated(self):
         for raw in ("", "not-wb", "*zz", "*notQRxx!", "2038719088932", "59112233445extra", "*%%%%%%%%"):
             with self.subTest(raw=raw):
