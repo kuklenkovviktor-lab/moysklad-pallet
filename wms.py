@@ -2486,7 +2486,19 @@ def normalize_badge_input(value):
     # HID scanners can prepend AIM symbology identifiers such as ]C0 / ]C1.
     if len(code) >= 3 and code[0] == "]" and code[1].isalpha() and code[2].isdigit():
         code = code[3:]
-    return code.replace("\r", "").replace("\n", "").replace("\t", "").strip()
+    code = code.replace("\r", "").replace("\n", "").replace("\t", "").strip()
+
+    # iOS physical Bluetooth HID keyboard may use Russian layout.
+    # Decode ONLY a full WMS-BADGE token, never arbitrary product codes.
+    if code.casefold().startswith("цьы-ифвпу-"):
+        ru_keys = "йцукенгшщзхъфывапролджэячсмитьбю"
+        us_keys = "qwertyuiop[]asdfghjkl;'zxcvbnm,."
+        decoded = code.lower().translate(str.maketrans(ru_keys, us_keys))
+        suffix = decoded[len("wms-badge-"):]
+        if (decoded.startswith("wms-badge-") and len(suffix) == 32
+                and all(ch in "0123456789abcdef" for ch in suffix)):
+            return "WMS-BADGE-" + suffix
+    return code
 
 
 @wms_bp.post("/api/auth/login")
