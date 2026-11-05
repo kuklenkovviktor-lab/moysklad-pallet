@@ -2462,6 +2462,23 @@ def fbs_product_info():
         if not barcode:
             return jsonify(error="Пустой ШК товара"), 400
 
+        # Isolated physical test: resolve scanned product from validated PDF.
+        # No MoySklad HTTP request and no access to real warehouse catalog.
+        from fbs_pdf_physical_test import physical_test_enabled
+        if physical_test_enabled():
+            from wms import query_all
+            for test_article, skus in query_all(
+                "SELECT article, skus_json FROM wb_orders WHERE order_id LIKE 'pdf-physical:%'"
+            ):
+                try:
+                    known = json.loads(skus or "[]")
+                except (ValueError, TypeError):
+                    known = []
+                if barcode in known:
+                    return jsonify(ok=True, barcode=barcode, article=test_article,
+                                   name="Тестовый товар " + test_article)
+            return jsonify(error="ШК товара отсутствует в тестовом PDF"), 404
+
         product, pack = find_fbs_product_by_barcode(barcode)
         if not product:
             employee = get_session_employee()
