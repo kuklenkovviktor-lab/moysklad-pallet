@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("SECRET_KEY", "pdf-test-flask-secret")
 os.environ.setdefault("WMS_BADGE_SECRET", "pdf-test-badge-secret")
@@ -121,6 +122,112 @@ class PdfUploadTests(unittest.TestCase):
         self.assertIn(2500,sample)
         self.assertIn(4999,sample)
         self.assertEqual(_sample_indices(2),[0,1])
+
+    def test_manager_import_pdf_then_employee_scans_strictly(self):
+        """End-to-end HTTP test: manager PDF -> opt-in shift -> scan rejection."""
+        sticker_a="59800011001"
+        sticker_b="59800011002"
+        barcode_a="2038719091772"
+        barcode_b="2038719091773"
+        expected={"valid_structure":True,"unique_sticker_barcodes":2,
+                  "products":[
+                      {"article":"TEST_PDF_A","wb_article":"123456789",
+                       "product_barcode":barcode_a,"stickers":[{"barcode":sticker_a}]},
+                      {"article":"TEST_PDF_B","wb_article":"123456790",
+                       "product_barcode":barcode_b,"stickers":[{"barcode":sticker_b}]},
+                  ]}
+        valid={"wb_report":expected,"sha256":"a"*64}
+        from wms import query_one
+        before_wb=query_one("SELECT COUNT(*) FROM wb_orders")[0]
+        with patch("fbs_pdf_import.inspect_pdf",return_value=valid):
+            for expected_new in (2,0):
+                response=self.client.post(
+                    "/api/manager/fbs-pdf/import",
+                    data={"file":(io.BytesIO(b"%PDF-1.4"),"test.pdf")},
+                    content_type="multipart/form-data",
+                )
+                self.assertEqual(response.status_code,200,response.json)
+                self.assertEqual(response.json["orders_imported"],expected_new)
+                self.assertFalse(response.json["stock_changed"])
+        self.assertEqual(query_one("SELECT COUNT(*) FROM wb_orders")[0],before_wb)
+        self.assertEqual(query_one(
+            "SELECT product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?",
+            (sticker_a,))[0],barcode_a)
+
+        worker=app.app.test_client()
+        with worker.session_transaction() as session:
+            session.clear()
+            session["employee_id"]="ilya"
+        shift_response=worker.post("/api/fbs/start",json={})
+        self.assertEqual(shift_response.status_code,200,shift_response.json)
+        shift_id=shift_response.json["shift_id"]
+        off=worker.get("/api/fbs/pdf-mode",query_string={"shift_id":shift_id})
+        self.assertEqual(off.status_code,200,off.json)
+        self.assertFalse(off.json["enabled"])
+        enabled=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":True})
+        self.assertEqual(enabled.status_code,200,enabled.json)
+        self.assertTrue(enabled.json["enabled"])
+        with patch("app.find_fbs_product_by_barcode",side_effect=AssertionError("must not call MoySklad")):
+            a=worker.post("/api/fbs/product-info",json={"barcode":barcode_a,"shift_id":shift_id})
+        self.assertEqual(a.status_code,200,a.json)
+        self.assertEqual(a.json["article"],"TEST_PDF_A")
+        args={"shift_id":shift_id,"product_barcode":barcode_b,
+              "barcode":sticker_a,"article":"TEST_PDF_B","product_name":"Test"}
+        wrong=worker.post("/api/fbs/scan",json=args)
+        self.assertEqual(wrong.status_code,409,wrong.json)
+        self.assertEqual(wrong.json["reason"],"pdf_product_mismatch")
+        missing=worker.post("/api/fbs/scan",json={**args,"barcode":"59800011999"})
+        self.assertEqual(missing.status_code,409,missing.json)
+        self.assertEqual(missing.json["reason"],"pdf_order_missing")
+        good=worker.post("/api/fbs/scan",json={
+            **args,"barcode":sticker_a,"product_barcode":barcode_a,"article":"TEST_PDF_A"
+        })
+        self.assertEqual(good.status_code,200,good.json)
+        duplicate=worker.post("/api/fbs/scan",json={
+            **args,"barcode":sticker_a,"product_barcode":barcode_a,"article":"TEST_PDF_A"
+        })
+        self.assertEqual(duplicate.status_code,409,duplicate.json)
+        self.assertEqual(query_one("SELECT COUNT(*) FROM scans WHERE barcode=?",(sticker_a,))[0],1)
+        disabled=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":False})
+        self.assertEqual(disabled.status_code,200,disabled.json)
+        self.assertFalse(disabled.json["enabled"])
+
+    def test_pdf_import_requires_manager_and_rejects_conflicting_mapping(self):
+        from pdf_fbs_registry import prepare_pdf_orders
+        good={"valid_structure":True,"unique_sticker_barcodes":1,
+              "products":[{"article":"TEST_1","wb_article":"123456789",
+                           "product_barcode":"2038719091761",
+                           "stickers":[{"barcode":"59800011888"}]}]}
+        self.assertEqual(len(prepare_pdf_orders(good)),1)
+        with self.client.session_transaction() as s:
+            s.clear()
+        denied=self.client.post("/api/manager/fbs-pdf/import",
+            data={"file":(io.BytesIO(b"dummy"),"label.pdf")},
+            content_type="multipart/form-data")
+        self.assertEqual(denied.status_code,403)
+        with self.client.session_transaction() as s:
+            s["manager_web"]=True
+        with patch("fbs_pdf_import.inspect_pdf",return_value={
+            "wb_report":good,"sha256":"b"*64
+        }):
+            first=self.client.post("/api/manager/fbs-pdf/import",
+                data={"file":(io.BytesIO(b"dummy"),"label.pdf")},
+                content_type="multipart/form-data")
+        self.assertEqual(first.status_code,200,first.json)
+        conflict={"valid_structure":True,"unique_sticker_barcodes":1,
+              "products":[{"article":"TEST_2","wb_article":"123456789",
+                           "product_barcode":"2038719091788",
+                           "stickers":[{"barcode":"59800011888"}]}]}
+        with patch("fbs_pdf_import.inspect_pdf",return_value={
+            "wb_report":conflict,"sha256":"c"*64
+        }):
+            rejected=self.client.post("/api/manager/fbs-pdf/import",
+                data={"file":(io.BytesIO(b"dummy"),"label.pdf")},
+                content_type="multipart/form-data")
+        self.assertEqual(rejected.status_code,422,rejected.json)
+        self.assertEqual(query_one(
+            "SELECT article FROM pdf_fbs_orders WHERE wb_barcode=?",
+            ("59800011888",))[0],"TEST_1")
 
     def test_manager_screen_explains_no_write_semantics(self):
         response=self.client.get("/manager/fbs-pdf")
