@@ -216,7 +216,7 @@ async function loadPdfRegistryStatus(){
   const data=await response.json();
   document.getElementById('pdfRegistryStatus').textContent=
    'В реестре PDF: '+data.orders_total+' заказов. '+(data.orders_total>0?
-     'PDF-контроль у сборщика включён автоматически, если он не отключал его вручную.':
+     'Проверка соответствия товара и заказа выполняется автоматически при сборке.':
      'Сначала проверь и сохрани PDF. Пока заказов нет, работает обычная сборка.');
  }catch(e){}
 }
@@ -235,7 +235,7 @@ document.getElementById('importPdf').addEventListener('click',async()=>{
   msg.className='good';msg.textContent='✓ В реестре PDF: '+result.orders_in_file+
    ' заказов из файла; новых '+result.orders_imported+
    ', уже существовали '+result.orders_existing+
-   '. PDF-контроль на телефоне включится автоматически, если не был отключён вручную.';
+   '. Контроль пересорта работает автоматически, без переключателей у сотрудников.';
   await loadPdfRegistryStatus();
  }catch(e){msg.className='error';msg.textContent=e.message}
  finally{b.disabled=false}
