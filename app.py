@@ -421,6 +421,8 @@ def require_employee_login():
         "/manager/fbs-pdf",
         "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
+        "/api/manager/fbs-pdf/import",
+        "/api/manager/fbs-pdf/status",
         "/api/manager/shift-history",
         "/api/manager/employee-events",
         "/api/manager/shifts/actions",
@@ -2461,6 +2463,22 @@ def fbs_product_info():
         barcode = str(data.get("barcode", "")).strip()
         if not barcode:
             return jsonify(error="Пустой ШК товара"), 400
+
+        # PDF control is opt-in per employee shift and must never query MoySklad.
+        from wms import pdf_picking_active
+        shift_id = str(data.get("shift_id") or "").strip()
+        if pdf_picking_active(shift_id, employee["id"]):
+            mapped = query_all(
+                "SELECT DISTINCT article, product_barcode "
+                "FROM pdf_fbs_orders WHERE product_barcode=? LIMIT 2",
+                (barcode,),
+            )
+            if len(mapped) > 1:
+                return jsonify(error="ШК товара неоднозначен в импортированных PDF"), 409
+            if not mapped:
+                return jsonify(error="Товар отсутствует в загруженных PDF"), 404
+            return jsonify(ok=True, barcode=barcode, article=mapped[0][0],
+                           name="PDF: " + mapped[0][0], source="pdf")
 
         product, pack = find_fbs_product_by_barcode(barcode)
         if not product:
