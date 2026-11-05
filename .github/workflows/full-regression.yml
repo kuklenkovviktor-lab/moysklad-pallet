@@ -1,0 +1,20 @@
+name: Complete Python and scanner regression
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt pytest==8.4.2
+      # Includes root-level pytest functions as well as unittest suites.
+      - run: python -m pytest -q -p no:cacheprovider
+      - run: node tests/test_fbs_outbox.cjs
+      - run: node tests/test_replenishment_scan_focus.cjs
