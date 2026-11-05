@@ -287,6 +287,23 @@ def init_wms_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS pdf_fbs_orders (
+            wb_barcode TEXT PRIMARY KEY,
+            article TEXT NOT NULL,
+            product_barcode TEXT NOT NULL,
+            wb_article TEXT,
+            source_sha256 TEXT NOT NULL,
+            imported_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pdf_fbs_shift_modes (
+            shift_id TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS replenishment_tasks (
             id TEXT PRIMARY KEY,
             article TEXT NOT NULL,
@@ -474,6 +491,7 @@ def init_wms_db():
     # Dashboard/read indexes. These keep live monitoring fast as scan/event
     # history grows instead of forcing full-table scans every refresh.
     for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_pdf_fbs_product_barcode ON pdf_fbs_orders(product_barcode)",
         "CREATE INDEX IF NOT EXISTS idx_scans_scanned_at ON scans(scanned_at)",
         "CREATE INDEX IF NOT EXISTS idx_scans_employee_scanned_at ON scans(employee_id, scanned_at)",
         "CREATE INDEX IF NOT EXISTS idx_shifts_active_started ON shifts(ended_at, started_at)",
@@ -3522,6 +3540,50 @@ def start_shift():
     return jsonify(ok=True, shift_id=shift_id, resumed=False)
 
 
+def pdf_picking_active(shift_id, employee_id):
+    """PDF control is bound to server-side shift state, never a client flag."""
+    if not shift_id or not employee_id:
+        return False
+    row = query_one(
+        "SELECT m.enabled FROM pdf_fbs_shift_modes m "
+        "JOIN shifts s ON s.id=m.shift_id "
+        "WHERE m.shift_id=? AND s.employee_id=? AND s.ended_at IS NULL",
+        (shift_id, employee_id),
+    )
+    return bool(row and row[0])
+
+
+@wms_bp.route("/api/fbs/pdf-mode", methods=["GET", "POST"])
+def fbs_pdf_mode():
+    ensure_db()
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    data = (request.get_json(silent=True) or {}) if request.method == "POST" else request.args
+    shift_id = str(data.get("shift_id") or "").strip()
+    shift = query_one("SELECT employee_id, ended_at FROM shifts WHERE id=?", (shift_id,))
+    if not shift or shift[1] or shift[0] != employee["id"]:
+        return jsonify(error="Смена не найдена или не принадлежит сотруднику"), 403
+    if request.method == "POST":
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            return jsonify(error="Укажи true или false для режима PDF"), 400
+        if enabled:
+            total = query_one("SELECT COUNT(*) FROM pdf_fbs_orders")
+            if not total or not total[0]:
+                return jsonify(error="Сначала загрузи PDF в менеджерском модуле"), 409
+            active = current_activity(shift_id)
+            if not active or active["type"] != "picking":
+                return jsonify(error="Сначала включи операцию «Сборка»"), 409
+        execute(
+            "INSERT INTO pdf_fbs_shift_modes(shift_id, enabled, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(shift_id) "
+            "DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at",
+            (shift_id, int(enabled), now_iso()),
+        )
+    return jsonify(ok=True, enabled=pdf_picking_active(shift_id, employee["id"]))
+
+
 @wms_bp.post("/api/fbs/scan")
 def fbs_scan():
     ensure_db()
@@ -3589,52 +3651,82 @@ def fbs_scan():
         ), 409
 
     wb_order_id = None
-    expected = query_one(
-        "SELECT order_id, article, skus_json FROM wb_orders WHERE wb_barcode = ? LIMIT 1",
-        (barcode,),
-    )
-    if expected:
-        wb_order_id = str(expected[0])
-        expected_article = str(expected[1] or "").strip()
-        try:
-            expected_skus = [str(x).strip() for x in json.loads(expected[2] or "[]") if str(x).strip()]
-        except Exception:
-            expected_skus = []
+    if pdf_picking_active(shift_id, employee["id"]):
+        pdf_expected = query_one(
+            "SELECT article, product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?",
+            (barcode,),
+        )
+        if not pdf_expected:
+            log_event(
+                shift[0], "fbs", "pdf_order_missing", shift_id=shift_id,
+                object_code=barcode, result="not-in-pdf",
+                article=article or None, product_name=product_name or None,
+            )
+            return jsonify(
+                error="❌ Стикер WB отсутствует в загруженном PDF. Заказ НЕ засчитан.",
+                reason="pdf_order_missing",
+            ), 409
+        expected_article, expected_barcode = pdf_expected
+        if product_barcode != expected_barcode:
+            log_event(
+                shift[0], "fbs", "product_mismatch", shift_id=shift_id,
+                object_code=barcode,
+                result="pdf_expected=" + expected_article + ";scanned=" + product_barcode,
+                article=article or None, product_name=product_name or None,
+            )
+            return jsonify(
+                error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа нужен: " + expected_article,
+                reason="pdf_product_mismatch",
+                expected_article=expected_article,
+            ), 409
+        wb_order_id = "pdf:" + barcode
+    else:
+        expected = query_one(
+            "SELECT order_id, article, skus_json FROM wb_orders WHERE wb_barcode = ? LIMIT 1",
+            (barcode,),
+        )
+        if expected:
+            wb_order_id = str(expected[0])
+            expected_article = str(expected[1] or "").strip()
+            try:
+                expected_skus = [str(x).strip() for x in json.loads(expected[2] or "[]") if str(x).strip()]
+            except Exception:
+                expected_skus = []
 
-        sku_ok = product_barcode in expected_skus if expected_skus else False
-        article_ok = bool(expected_article and article and expected_article == article)
+            sku_ok = product_barcode in expected_skus if expected_skus else False
+            article_ok = bool(expected_article and article and expected_article == article)
 
-        if WB_STRICT_MATCHING and not (sku_ok or (not expected_skus and article_ok)):
+            if WB_STRICT_MATCHING and not (sku_ok or (not expected_skus and article_ok)):
+                log_event(
+                    shift[0],
+                    "fbs",
+                    "product_mismatch",
+                    shift_id=shift_id,
+                    object_code=barcode,
+                    result=f"scanned={article or product_barcode};expected={expected_article or ','.join(expected_skus)}",
+                    article=article or None,
+                    product_name=product_name or None,
+                )
+                expected_text = expected_article or (", ".join(expected_skus[:3]) if expected_skus else "неизвестный товар")
+                return jsonify(
+                    error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа ожидается: " + expected_text,
+                    expected_article=expected_article,
+                    expected_skus=expected_skus,
+                ), 409
+        elif WB_STRICT_MATCHING:
             log_event(
                 shift[0],
                 "fbs",
-                "product_mismatch",
+                "wb_order_missing",
                 shift_id=shift_id,
                 object_code=barcode,
-                result=f"scanned={article or product_barcode};expected={expected_article or ','.join(expected_skus)}",
+                result="not-synced",
                 article=article or None,
                 product_name=product_name or None,
             )
-            expected_text = expected_article or (", ".join(expected_skus[:3]) if expected_skus else "неизвестный товар")
             return jsonify(
-                error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа ожидается: " + expected_text,
-                expected_article=expected_article,
-                expected_skus=expected_skus,
+                error="WB-заказ не найден в локальном справочнике. На ПК обнови синхронизацию WB."
             ), 409
-    elif WB_STRICT_MATCHING:
-        log_event(
-            shift[0],
-            "fbs",
-            "wb_order_missing",
-            shift_id=shift_id,
-            object_code=barcode,
-            result="not-synced",
-            article=article or None,
-            product_name=product_name or None,
-        )
-        return jsonify(
-            error="WB-заказ не найден в локальном справочнике. На ПК обнови синхронизацию WB."
-        ), 409
 
     duplicate = query_one(
         "SELECT s.id, e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
