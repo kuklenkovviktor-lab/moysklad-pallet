@@ -262,6 +262,14 @@ def _wms_initializer():
                 _WMS_STARTUP_STATE["stage"] = "ready"
             _WMS_READY.set()
             print("WMS startup stage: ready", flush=True)
+            # One-time read-only diagnostic of previously rejected PDF scans.
+            # Never block startup or log other employees' credentials.
+            try:
+                from pdf_scan_debug import summarize_rejected_scans
+                summarize_rejected_scans()
+            except Exception as diagnostic_error:
+                print("PDF SCAN DIAGNOSTIC unavailable: " + type(diagnostic_error).__name__, flush=True)
+
             # Build/refresh the permanent FBS catalog in the background after
             # database startup. It must not block workers, login or picking.
             if TOKEN:
