@@ -124,7 +124,7 @@ class PdfUploadTests(unittest.TestCase):
         self.assertEqual(_sample_indices(2),[0,1])
 
     def test_manager_import_pdf_then_employee_scans_strictly(self):
-        """End-to-end HTTP test: manager PDF -> opt-in shift -> scan rejection."""
+        """End-to-end HTTP test: manager PDF -> automatic scan enforcement."""
         sticker_a="59800011001"
         sticker_b="59800011002"
         barcode_a="2038719091772"
@@ -161,19 +161,20 @@ class PdfUploadTests(unittest.TestCase):
         shift_response=worker.post("/api/fbs/start",json={})
         self.assertEqual(shift_response.status_code,200,shift_response.json)
         shift_id=shift_response.json["shift_id"]
-        off=worker.get("/api/fbs/pdf-mode",query_string={"shift_id":shift_id})
-        self.assertEqual(off.status_code,200,off.json)
-        self.assertTrue(off.json["enabled"])
-        self.assertGreaterEqual(off.json["orders_available"],2)
-        # Explicit OFF overrides the automatic default for this shift.
-        opted_out=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":False})
-        self.assertEqual(opted_out.status_code,200,opted_out.json)
-        self.assertFalse(opted_out.json["enabled"])
-        still_out=worker.get("/api/fbs/pdf-mode",query_string={"shift_id":shift_id})
-        self.assertFalse(still_out.json["enabled"])
-        enabled=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":True})
-        self.assertEqual(enabled.status_code,200,enabled.json)
-        self.assertTrue(enabled.json["enabled"])
+        # Employee interface has no PDF toggle or mode API.
+        self.assertNotIn("pdfModeButton", worker.get("/fbs").get_data(as_text=True))
+        self.assertNotIn("togglePdfMode", worker.get("/fbs").get_data(as_text=True))
+        denied_switch=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":False})
+        self.assertEqual(denied_switch.status_code,404)
+        from wms import pdf_picking_active, execute
+        self.assertTrue(pdf_picking_active(shift_id,"ilya"))
+        # A leftover OFF setting from earlier releases cannot bypass protection.
+        execute(
+            "INSERT INTO pdf_fbs_shift_modes (shift_id, enabled, updated_at) "
+            "VALUES (?, 0, ?) ON CONFLICT(shift_id) DO UPDATE SET enabled=0",
+            (shift_id,"2026-11-05T00:00:00+00:00"),
+        )
+        self.assertTrue(pdf_picking_active(shift_id,"ilya"))
         with patch("app.find_fbs_product_by_barcode",side_effect=AssertionError("must not call MoySklad")):
             a=worker.post("/api/fbs/product-info",json={"barcode":barcode_a,"shift_id":shift_id})
         self.assertEqual(a.status_code,200,a.json)
@@ -195,9 +196,6 @@ class PdfUploadTests(unittest.TestCase):
         })
         self.assertEqual(duplicate.status_code,409,duplicate.json)
         self.assertEqual(query_one("SELECT COUNT(*) FROM scans WHERE barcode=?",(sticker_a,))[0],1)
-        disabled=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":False})
-        self.assertEqual(disabled.status_code,200,disabled.json)
-        self.assertFalse(disabled.json["enabled"])
 
     def test_pdf_import_requires_manager_and_rejects_conflicting_mapping(self):
         from pdf_fbs_registry import prepare_pdf_orders
