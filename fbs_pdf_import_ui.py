@@ -215,7 +215,9 @@ async function loadPdfRegistryStatus(){
   if(!response.ok)return;
   const data=await response.json();
   document.getElementById('pdfRegistryStatus').textContent=
-   'Уже в реестре PDF: '+data.orders_total+' заказов. Режим включается отдельно на телефоне у сборщика.';
+   'В реестре PDF: '+data.orders_total+' заказов. '+(data.orders_total>0?
+     'PDF-контроль у сборщика включён автоматически, если он не отключал его вручную.':
+     'Сначала проверь и сохрани PDF. Пока заказов нет, работает обычная сборка.');
  }catch(e){}
 }
 document.getElementById('pdf').addEventListener('change',()=>{
@@ -233,7 +235,7 @@ document.getElementById('importPdf').addEventListener('click',async()=>{
   msg.className='good';msg.textContent='✓ В реестре PDF: '+result.orders_in_file+
    ' заказов из файла; новых '+result.orders_imported+
    ', уже существовали '+result.orders_existing+
-   '. Теперь на телефоне выбери «PDF-контроль» в сборке.';
+   '. PDF-контроль на телефоне включится автоматически, если не был отключён вручную.';
   await loadPdfRegistryStatus();
  }catch(e){msg.className='error';msg.textContent=e.message}
  finally{b.disabled=false}
