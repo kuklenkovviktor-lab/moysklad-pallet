@@ -14,14 +14,17 @@ class GritWorkerPolishTests(unittest.TestCase):
         page = self.wms.split('FBS_PAGE = """', 1)[1].split('"""', 1)[0]
         for token in (
             'id="scanStageBox"', 'id="barcode"', 'id="scanButton"',
-            'id="resetProduct"', 'id="tsdError"', 'function handleScan(code)',
+            'id="tsdError"', 'function handleScan(code)',
             'function acceptProduct(code)', 'function acceptWb(code)',
-            "if(pendingProduct)await acceptWb(code);",
+            "else if(pendingProduct)await acceptWb(code);",
+            'function acceptSkipQr(code)', "'/api/fbs/skip-item'",
             "'/api/fbs/product-info'", "'/api/fbs/scan'",
             "'/api/fbs/stats?shift_id='",
         ):
             self.assertIn(token, page)
-        self.assertIn('#scanCard:has(#resetProduct:not(.hidden)) .scan-stage', page)
+        self.assertIn('#scanCard.awaiting-wb .scan-stage', page)
+        self.assertNotIn('id="resetProduct"', page)
+        self.assertNotIn('clearPendingProduct()', page)
         self.assertIn('button:focus-visible', page)
         self.assertIn('@media (orientation:landscape) and (max-height:600px)', page)
         self.assertEqual(page.count("<style>"), 1)

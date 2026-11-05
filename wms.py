@@ -304,6 +304,28 @@ def init_wms_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS fbs_pending_products (
+            shift_id TEXT PRIMARY KEY,
+            employee_id TEXT NOT NULL,
+            product_barcode TEXT NOT NULL,
+            article TEXT,
+            product_name TEXT,
+            started_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS fbs_skip_tokens (
+            token_hash TEXT PRIMARY KEY,
+            issued_by TEXT NOT NULL,
+            issued_at TEXT NOT NULL,
+            expires_at REAL NOT NULL,
+            consumed_at TEXT,
+            consumed_shift_id TEXT,
+            consumed_employee_id TEXT,
+            consumed_product_barcode TEXT
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS replenishment_tasks (
             id TEXT PRIMARY KEY,
             article TEXT NOT NULL,
@@ -1179,7 +1201,6 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 #scanStage{font-size:clamp(19px,3.9vw,29px);font-weight:750;line-height:1.13;letter-spacing:-.015em}
 #productInfo{font-size:clamp(11px,1.75vw,14px);color:var(--muted);line-height:1.3;max-width:95%;overflow-wrap:anywhere}
 #reader{margin-top:7px;border-radius:8px;overflow:hidden;max-height:150px}
-#scanCard #resetProduct{position:absolute;right:8px;top:7px;width:auto;max-width:115px;padding:5px 7px;font-size:10px;background:#35546c;color:white;z-index:2}
 .manual-entry{position:absolute;left:4px;top:4px;pointer-events:none;height:0}
 #barcode{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;outline:none}
 #scanButton{display:none}
@@ -1244,8 +1265,8 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 #topbar .brand{color:#ff9c43;font-size:12px;letter-spacing:.065em}
 #topbar .who{color:#e5f2fd}
 .scan-stage{background:linear-gradient(145deg,#19354a,#112435);border:1px solid #35536b;border-left:4px solid #288fe0;transition:border-color .16s ease,background-color .16s ease}
-#scanCard:has(#resetProduct:not(.hidden)) .scan-stage{border-left-color:#ff9c43;background:linear-gradient(145deg,#342c26,#16283b)}
-#scanCard:has(#resetProduct:not(.hidden)) .scan-icon{color:#ffb56e}
+#scanCard.awaiting-wb .scan-stage{border-left-color:#ff9c43;background:linear-gradient(145deg,#342c26,#16283b)}
+#scanCard.awaiting-wb .scan-icon{color:#ffb56e}
 #scanStage{color:#f5faff;text-wrap:balance}
 #productInfo{color:#bfd2e1}
 #productInfo b{color:#fff;overflow-wrap:anywhere}
@@ -1261,7 +1282,6 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 #backToPicking{border:1px solid #4c8c76}
 .manual-entry.open #barcode{background:#101f2e;color:#f1f8ff;border:2px solid #5b91b8;min-height:44px}
 .manual-entry.open #barcode::placeholder{color:#b7c8d8}
-#scanCard #resetProduct{min-height:36px;max-width:130px;font-size:11px;border:1px solid #63819a}
 button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #ff9c43;outline-offset:2px}
 @media (orientation:landscape) and (max-height:600px){
  #topbar{padding-bottom:6px;min-height:28px}
@@ -1300,7 +1320,6 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
       <div id="scanStage">СКАНИРУЙ ТОВАР</div>
       <div id="productInfo">Ожидание штрихкода</div>
     </div>
-    <button class="secondary hidden" id="resetProduct" onclick="clearPendingProduct()">↩ Сброс товара</button>
     <div id="reader" class="hidden"></div>
     <div class="manual-entry" id="manualEntry">
       <input id="barcode" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none" placeholder="Сканируй ШК">
@@ -1443,26 +1462,42 @@ async function refresh(){
  if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
  const back=document.getElementById('backToPicking');
  if(back)back.classList.toggle('hidden',d.activity==='picking');
+ await refreshPendingProduct();
 }
 function updateScanStage(){
  const input=document.getElementById('barcode');
- const reset=document.getElementById('resetProduct');
+ document.getElementById('scanCard').classList.toggle('awaiting-wb',!!pendingProduct);
  if(pendingProduct){
   document.getElementById('scanStage').textContent='СКАНИРУЙ ШК WB';
   document.getElementById('productInfo').innerHTML='<b>'+esc(pendingProduct.article||'Без артикула')+'</b> · '+esc(pendingProduct.name||'Товар')+'<br>ШК товара: '+esc(pendingProduct.barcode);
   input.placeholder='Теперь сканируй ШК WB';
-  reset.classList.remove('hidden');
  }else{
   document.getElementById('scanStage').textContent='СКАНИРУЙ ТОВАР';
   document.getElementById('productInfo').textContent='Ожидание штрихкода';
   input.placeholder='Сканируй ШК товара';
-  reset.classList.add('hidden');
  }
 }
-function clearPendingProduct(){
- pendingProduct=null;updateScanStage();
- document.getElementById('result').innerHTML='<div class="ok">Товар сброшен. Сканируй товар заново.</div>';
- const el=document.getElementById('barcode');el.value='';el.focus();
+async function refreshPendingProduct(){
+ if(!shiftId)return;
+ try{
+  const r=await fetch('/api/fbs/pending?shift_id='+encodeURIComponent(shiftId),{cache:'no-store'});
+  if(!r.ok)return;
+  const d=await r.json();
+  pendingProduct=d.pending?{barcode:d.pending.barcode,article:d.pending.article||'',name:d.pending.name||''}:null;
+  updateScanStage();
+ }catch(e){}
+}
+async function acceptSkipQr(code){
+ const r=await fetch('/api/fbs/skip-item',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({shift_id:shiftId,code:code}),cache:'no-store'
+ });
+ const d=await r.json();
+ if(!r.ok){showTsdError(d.error||'Пропуск товара не разрешён');return false}
+ pendingProduct=null;updateScanStage();beep(true);
+ document.getElementById('result').innerHTML=
+  '<div class="ok">Пропуск товара разрешён руководителем. Заказ НЕ засчитан. Сканируй следующий товар.</div>';
+ await refresh();return true;
 }
 async function acceptProduct(code){
  const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
@@ -1492,7 +1527,8 @@ async function handleScan(code){
  code=(code||'').trim();if(!code||busy||!shiftId)return;
  busy=true;
  try{
-  if(pendingProduct)await acceptWb(code);
+  if(pendingProduct && /^97[0-9]{22}$/.test(code))await acceptSkipQr(code);
+  else if(pendingProduct)await acceptWb(code);
   else await acceptProduct(code);
  }finally{
   setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},60);
@@ -1868,6 +1904,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   <a class="active" href="/manager"><svg class="ui-icon" aria-hidden="true"><use href="#ic-home"></use></svg>Главная</a>
   <a href="/manager/shift-history"><svg class="ui-icon" aria-hidden="true"><use href="#ic-calendar"></use></svg>История смен</a>
   <a href="/manager/fbs-pdf"><svg class="ui-icon" aria-hidden="true"><use href="#ic-file"></use></svg>Загрузка PDF FBS</a>
+  <a href="/manager/fbs-skip"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>Пропуск товара · QR</a>
   <a href="/fbs-journal"><svg class="ui-icon" aria-hidden="true"><use href="#ic-clipboard"></use></svg>Журнал FBS</a>
   <a href="/history"><svg class="ui-icon" aria-hidden="true"><use href="#ic-barcode"></use></svg>История ШК</a>
   <a href="/receiving-monitor"><svg class="ui-icon" aria-hidden="true"><use href="#ic-download"></use></svg>Приёмка</a>
@@ -3557,6 +3594,76 @@ def pdf_picking_active(shift_id, employee_id):
     return bool(valid_shift and query_one("SELECT 1 FROM pdf_fbs_orders LIMIT 1"))
 
 
+@wms_bp.get("/manager/fbs-skip")
+def manager_fbs_skip_page():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    from fbs_skip_authorization import MANAGER_SKIP_PAGE
+    return Response(MANAGER_SKIP_PAGE, headers={"Cache-Control": "no-store"}, mimetype="text/html")
+
+
+@wms_bp.post("/api/manager/fbs/skip-qr")
+def manager_create_fbs_skip_qr():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Только руководитель может создать QR"), 403
+    from fbs_skip_authorization import issue_skip_code, qr_png_data_url
+    code, expires_at = issue_skip_code()
+    response = jsonify(ok=True, image=qr_png_data_url(code), expires_at=expires_at)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@wms_bp.get("/api/fbs/pending")
+def fbs_pending_api():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    shift_id = str(request.args.get("shift_id") or "").strip()
+    valid = query_one(
+        "SELECT 1 FROM shifts WHERE id=? AND employee_id=? AND ended_at IS NULL",
+        (shift_id, emp["id"]),
+    )
+    if not valid:
+        return jsonify(error="Смена не принадлежит сотруднику"), 403
+    from fbs_skip_authorization import pending_for_shift
+    return jsonify(ok=True, pending=pending_for_shift(shift_id, emp["id"]))
+
+
+@wms_bp.post("/api/fbs/skip-item")
+def fbs_skip_item():
+    ensure_db()
+    emp = get_session_employee()
+    if not emp:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    data = request.get_json(silent=True) or {}
+    shift_id = str(data.get("shift_id") or "").strip()
+    code = str(data.get("code") or "").strip()
+    valid = query_one(
+        "SELECT 1 FROM shifts WHERE id=? AND employee_id=? AND ended_at IS NULL",
+        (shift_id, emp["id"]),
+    )
+    if not valid:
+        return jsonify(error="Смена не принадлежит сотруднику"), 403
+    active = current_activity(shift_id)
+    if not active or active["type"] != "picking":
+        return jsonify(error="Сейчас включена не сборка"), 409
+    from fbs_skip_authorization import consume_skip_code
+    try:
+        item = consume_skip_code(code, shift_id, emp["id"])
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409
+    log_event(
+        emp["id"], "fbs", "fbs_item_skip", shift_id=shift_id,
+        object_code=item["barcode"], article=item["article"] or None,
+        product_name=item["name"] or None, result="supervisor-one-time-qr",
+        quantity=0,
+    )
+    return jsonify(ok=True, skipped=True, order_counted=False)
+
+
 @wms_bp.post("/api/fbs/scan")
 def fbs_scan():
     ensure_db()
@@ -3606,6 +3713,13 @@ def fbs_scan():
     # Only normalize at the WB-sticker stage; the earlier item scan stays raw.
     # The printed Code128 is decimal, while the QR contains WB's Base64 form.
     pdf_control = pdf_picking_active(shift_id, employee["id"])
+    from fbs_skip_authorization import pending_for_shift
+    pending = pending_for_shift(shift_id, employee["id"])
+    if pdf_control and (not pending or pending["barcode"] != product_barcode):
+        return jsonify(
+            error="Товар не подтверждён текущим сканированием. Проверь скан товара.",
+            reason="pending_product_required",
+        ), 409
     if pdf_control:
         from wb_qr_codec import canonical_wb_sticker
         barcode = canonical_wb_sticker(barcode)
@@ -3742,6 +3856,10 @@ def fbs_scan():
         if duplicate:
             return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[0])), 409
         raise
+
+    # A confirmed WB sticker completes the current item stage.
+    from fbs_skip_authorization import complete_pending_item
+    complete_pending_item(shift_id, employee["id"], product_barcode)
 
     log_event(
         shift[0],

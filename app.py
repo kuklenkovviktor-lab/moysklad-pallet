@@ -420,6 +420,8 @@ def require_employee_login():
         "/manager/shifts",
         "/manager/shift-history",
         "/manager/fbs-pdf",
+        "/manager/fbs-skip",
+        "/api/manager/fbs/skip-qr",
         "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
         "/api/manager/fbs-pdf/import",
@@ -2467,6 +2469,7 @@ def fbs_product_info():
 
         # PDF control is opt-in per employee shift and must never query MoySklad.
         from wms import pdf_picking_active
+        from fbs_skip_authorization import record_pending_item
         shift_id = str(data.get("shift_id") or "").strip()
         if pdf_picking_active(shift_id, employee["id"]):
             mapped = query_all(
@@ -2478,6 +2481,7 @@ def fbs_product_info():
                 return jsonify(error="ШК товара неоднозначен в импортированных PDF"), 409
             if not mapped:
                 return jsonify(error="Товар отсутствует в загруженных PDF"), 404
+            record_pending_item(shift_id, employee["id"], barcode, mapped[0][0], "PDF: " + mapped[0][0])
             return jsonify(ok=True, barcode=barcode, article=mapped[0][0],
                            name="PDF: " + mapped[0][0], source="pdf")
 
@@ -2501,12 +2505,19 @@ def fbs_product_info():
                 error=f"Считан ШК упаковки на {qty_out} шт. Для FBS нужен ШК одной единицы товара."
             ), 409
 
+        if shift_id:
+            record_pending_item(
+                shift_id, employee["id"], barcode,
+                product.get("article") or "", product.get("name") or "",
+            )
         return jsonify(
             ok=True,
             barcode=barcode,
             article=product.get("article"),
             name=product.get("name"),
         )
+    except ValueError as e:
+        return jsonify(error=str(e)), 409
     except FbsCatalogIndexPending as e:
         return jsonify(error=str(e), retryable=True, reason="catalog_indexing"), 503
     except requests.HTTPError as e:
