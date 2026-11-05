@@ -116,6 +116,7 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 <input type="file" id="pdf" accept=".pdf,application/pdf" required></label>
 <p class="small">Максимум 25 МБ · до 10 000 страниц · файл не записывается в базу · информация показывается только тебе в этой вкладке.</p>
 <button type="submit" id="submit">Проверить файл</button>
+<button type="button" id="physicalTestImport" hidden>Загрузить в тестовую сборку</button>
 </form><div id="message" role="status"></div>
 </section>
 <section class="card" id="summary" hidden>
@@ -204,8 +205,20 @@ function render(d){
   (p.excerpt?'<pre>'+esc(p.excerpt)+'</pre>':
   '<p class="small">Извлечь текст этой страницы не удалось.</p>')+
   '</div></details>').join('');
+ document.getElementById('physicalTestImport').hidden=!(d.physical_test_enabled && d.wb_report && d.wb_report.valid_structure && d.wb_report.sticker_pages<=10);
  summary.hidden=false;results.hidden=false;
 }
+document.getElementById('physicalTestImport').addEventListener('click',async()=>{
+ const file=document.getElementById('pdf').files[0];if(!file)return;
+ const b=document.getElementById('physicalTestImport');b.disabled=true;
+ try{
+  const formData=new FormData();formData.append('file',file);
+  const response=await fetch('/api/manager/fbs-pdf/physical-test-import',{method:'POST',body:formData,cache:'no-store'});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'Импорт не выполнен');
+  msg.className='good';msg.textContent='✓ Сохранено '+data.orders_imported+' тестовых заказов. На телефоне открой сборку, сканируй товар, затем стикер WB. Реальные заказы не изменены.';
+ }catch(e){msg.className='error';msg.textContent=e.message}
+ finally{b.disabled=false}
+});
 form.addEventListener('submit',async e=>{
  e.preventDefault();if(button.disabled)return;
  const file=document.getElementById('pdf').files[0];
