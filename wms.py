@@ -875,6 +875,9 @@ function focusHid(){
 function normalizeHidCode(value){
  let code=String(value||'').replace(/[\\r\\n\\t]/g,'').trim();
  if(/^\\][A-Za-z]\\d/.test(code))code=code.slice(3);
+ // iOS HID scanners inherit the Russian physical-keyboard layout.
+ // Only the exact service handshake is mapped: product / badge codes stay untouched.
+ if(code==='ЩТШЧ-ЯУИКФ-КУФВН')return 'ONIX-ZEBRA-READY';
  return code.trim();
 }
 
