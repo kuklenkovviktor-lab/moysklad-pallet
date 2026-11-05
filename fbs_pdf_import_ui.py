@@ -22,7 +22,7 @@ button:disabled{opacity:.5;cursor:wait}
 .metric{background:#edf3f6;border-radius:10px;padding:12px}
 .metric .v{font-weight:850;font-size:25px;margin-top:5px;overflow-wrap:anywhere}
 .metric .l{font-size:12px;color:#627485}
-#summary[hidden],#results[hidden]{display:none}
+#summary[hidden],#results[hidden],#importPdf[hidden]{display:none}
 details{border:1px solid #dce5ec;border-radius:10px;background:#fff;margin:10px 0;overflow:hidden}
 summary{padding:13px;cursor:pointer;font-weight:750}
 .sample{padding:0 13px 14px}
@@ -108,14 +108,16 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 </style></head><body><main id="grit-pdf-workspace">
 <a href="/manager">← Менеджерская панель</a>
 <h1>📄 Загрузка PDF FBS</h1>
-<p class="small">Первый этап: проверяем формат настоящего файла и способность GRIT извлекать его содержимое. Никаких заданий на сборку и пополнение автоматически не создаётся.</p>
+<p class="small">Сначала проверь PDF, затем отдельно подтверди сохранение связок ШК WB с товарами. Никаких заданий на сборку и пополнение автоматически не создаётся.</p>
 <section class="card">
 <h2>Загрузить PDF с этикетками/заказами</h2>
 <form id="form">
 <label for="pdf">Выбери PDF
 <input type="file" id="pdf" accept=".pdf,application/pdf" required></label>
-<p class="small">Максимум 25 МБ · до 10 000 страниц · файл не записывается в базу · информация показывается только тебе в этой вкладке.</p>
+<p class="small">Максимум 25 МБ · до 10 000 страниц. Сам PDF не хранится. После подтверждения в базу записываются только связки заказов и товаров.</p>
 <button type="submit" id="submit">Проверить файл</button>
+<button type="button" id="importPdf" hidden>Сохранить заказы для сборки PDF</button>
+<div class="notice" id="pdfRegistryStatus" aria-live="polite">Проверяю реестр PDF…</div>
 </form><div id="message" role="status"></div>
 </section>
 <section class="card" id="summary" hidden>
@@ -204,14 +206,45 @@ function render(d){
   (p.excerpt?'<pre>'+esc(p.excerpt)+'</pre>':
   '<p class="small">Извлечь текст этой страницы не удалось.</p>')+
   '</div></details>').join('');
+ document.getElementById('importPdf').hidden=!(d.wb_report && d.wb_report.valid_structure);
  summary.hidden=false;results.hidden=false;
 }
+async function loadPdfRegistryStatus(){
+ try{
+  const response=await fetch('/api/manager/fbs-pdf/status',{cache:'no-store'});
+  if(!response.ok)return;
+  const data=await response.json();
+  document.getElementById('pdfRegistryStatus').textContent=
+   'Уже в реестре PDF: '+data.orders_total+' заказов. Режим включается отдельно на телефоне у сборщика.';
+ }catch(e){}
+}
+document.getElementById('pdf').addEventListener('change',()=>{
+ document.getElementById('importPdf').hidden=true;
+});
+document.getElementById('importPdf').addEventListener('click',async()=>{
+ const file=document.getElementById('pdf').files[0];if(!file)return;
+ const b=document.getElementById('importPdf');b.disabled=true;
+ msg.className='';msg.textContent='Сохраняю подтверждённые связки PDF…';
+ try{
+  const data=new FormData();data.append('file',file);
+  const response=await fetch('/api/manager/fbs-pdf/import',{method:'POST',body:data,cache:'no-store'});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error||'Импорт отклонён');
+  msg.className='good';msg.textContent='✓ В реестре PDF: '+result.orders_in_file+
+   ' заказов из файла; новых '+result.orders_imported+
+   ', уже существовали '+result.orders_existing+
+   '. Теперь на телефоне выбери «PDF-контроль» в сборке.';
+  await loadPdfRegistryStatus();
+ }catch(e){msg.className='error';msg.textContent=e.message}
+ finally{b.disabled=false}
+});
+loadPdfRegistryStatus();
 form.addEventListener('submit',async e=>{
  e.preventDefault();if(button.disabled)return;
  const file=document.getElementById('pdf').files[0];
  if(!file){msg.textContent='Выбери PDF';return}
  if(file.size>25*1024*1024){msg.className='error';msg.textContent='PDF больше 25 МБ';return}
- button.disabled=true;summary.hidden=true;results.hidden=true;wbEl.hidden=true;
+ button.disabled=true;summary.hidden=true;results.hidden=true;wbEl.hidden=true;document.getElementById('importPdf').hidden=true;
  msg.className='';msg.textContent='Проверяю PDF…';
  try{
   const formData=new FormData();formData.append('file',file);
@@ -223,7 +256,7 @@ form.addEventListener('submit',async e=>{
   if(r.status===403){location.href='/manager-login';return}
   const data=await r.json();
   if(!r.ok)throw new Error(data.error||'Не удалось прочитать PDF');
-  render(data);msg.className='good';msg.textContent='✓ PDF принят для анализа. Создание заданий отключено.';
+  render(data);msg.className='good';msg.textContent='✓ PDF проверен. Создание заданий отключено. Для сборки отдельно нажми «Сохранить заказы».';
  }catch(err){msg.className='error';msg.textContent=err.name==='AbortError'?
   'Обработка слишком долгая. Попробуй меньший файл для первого теста.':err.message;
  }finally{button.disabled=false}

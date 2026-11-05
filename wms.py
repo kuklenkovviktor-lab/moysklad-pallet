@@ -287,6 +287,23 @@ def init_wms_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS pdf_fbs_orders (
+            wb_barcode TEXT PRIMARY KEY,
+            article TEXT NOT NULL,
+            product_barcode TEXT NOT NULL,
+            wb_article TEXT,
+            source_sha256 TEXT NOT NULL,
+            imported_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pdf_fbs_shift_modes (
+            shift_id TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS replenishment_tasks (
             id TEXT PRIMARY KEY,
             article TEXT NOT NULL,
@@ -474,6 +491,7 @@ def init_wms_db():
     # Dashboard/read indexes. These keep live monitoring fast as scan/event
     # history grows instead of forcing full-table scans every refresh.
     for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_pdf_fbs_product_barcode ON pdf_fbs_orders(product_barcode)",
         "CREATE INDEX IF NOT EXISTS idx_scans_scanned_at ON scans(scanned_at)",
         "CREATE INDEX IF NOT EXISTS idx_scans_employee_scanned_at ON scans(employee_id, scanned_at)",
         "CREATE INDEX IF NOT EXISTS idx_shifts_active_started ON shifts(ended_at, started_at)",
@@ -1168,6 +1186,11 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 .manual-entry.open{position:static;height:auto;display:flex;gap:7px;pointer-events:auto;margin-top:8px}
 .manual-entry.open #barcode{position:static;opacity:1;width:100%;height:40px;padding:9px;background:#eef4f8;color:#203242;border:1px solid #91afc2;border-radius:8px;min-width:0}
 .manual-entry.open #scanButton{display:block;flex:none;min-width:118px;padding:8px;font-size:11px}
+
+.pdf-mode-row{display:flex;align-items:center;gap:9px;background:#162b3e;padding:9px;border:1px solid #36536b;border-radius:9px}
+#pdfModeButton{flex:none;padding:10px 13px;min-height:42px;background:#26435a}
+#pdfModeButton.enabled{background:#126043;border:1px solid #47b789;color:#eafff3}
+#pdfModeInfo{font-size:11px;color:#b4cde1;line-height:1.3}
 #result:empty{display:none}
 #result{margin-top:6px;font-size:11px}
 .ok,.err{border-radius:7px;padding:6px 9px;overflow-wrap:anywhere}
@@ -1271,6 +1294,10 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
 </div>
 
 <div id="work" class="hidden">
+  <div class="pdf-mode-row" role="group" aria-label="Режим сборки">
+    <button id="pdfModeButton" type="button" onclick="togglePdfMode()">PDF-контроль: ВЫКЛ</button>
+    <span id="pdfModeInfo">Обычная сборка</span>
+  </div>
   <div class="card" id="scanCard">
     <div class="scan-stage" id="scanStageBox">
       <svg class="scan-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
@@ -1346,6 +1373,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
 let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
+let pdfModeEnabled=false;
 let fbsFocusInitialized=false,hidScanBuffer='',hidScanLastAt=0,hidScanResetTimer=null;
 
 function beep(ok=true){
@@ -1408,6 +1436,37 @@ async function startShift(){
  const d=await r.json();if(!r.ok){showErr(d.error);return}
  shiftId=d.shift_id;localStorage.setItem('fbs_shift_id',shiftId);await refresh();
 }
+async function refreshPdfMode(){
+ if(!shiftId)return;
+ try{
+  const r=await fetch('/api/fbs/pdf-mode?shift_id='+encodeURIComponent(shiftId),{cache:'no-store'});
+  if(!r.ok)return;
+  const d=await r.json();
+  pdfModeEnabled=!!d.enabled;
+  const btn=document.getElementById('pdfModeButton');
+  btn.textContent='PDF-контроль: '+(pdfModeEnabled?'ВКЛ':'ВЫКЛ');
+  btn.classList.toggle('enabled',pdfModeEnabled);
+  document.getElementById('pdfModeInfo').textContent=pdfModeEnabled?
+   'Только заказы из PDF. Ошибки блокируются.':'Обычная сборка, прежняя логика WB.';
+ }catch(e){}
+}
+async function togglePdfMode(){
+ if(!shiftId)return;
+ if(pendingProduct){showTsdError('Сначала сбрось текущий товар, затем переключи режим.');return}
+ const button=document.getElementById('pdfModeButton');button.disabled=true;
+ try{
+  const response=await fetch('/api/fbs/pdf-mode',{method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({shift_id:shiftId,enabled:!pdfModeEnabled})});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Не удалось переключить режим');
+  await refreshPdfMode();
+  document.getElementById('result').innerHTML=
+   '<div class="ok">'+(pdfModeEnabled?'PDF-контроль включён. Сканируй товар.':'Обычная сборка включена.')+'</div>';
+  focusFbsInput();
+ }catch(e){showTsdError(e.message)}
+ finally{button.disabled=false}
+}
 async function refresh(){
  if(!shiftId)return;
  const r=await fetch('/api/fbs/stats?shift_id='+encodeURIComponent(shiftId)),d=await r.json();
@@ -1424,6 +1483,7 @@ async function refresh(){
  if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
  const back=document.getElementById('backToPicking');
  if(back)back.classList.toggle('hidden',d.activity==='picking');
+ await refreshPdfMode();
 }
 function updateScanStage(){
  const input=document.getElementById('barcode');
@@ -1446,7 +1506,7 @@ function clearPendingProduct(){
  const el=document.getElementById('barcode');el.value='';el.focus();
 }
 async function acceptProduct(code){
- const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code})});
+ const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
  const d=await r.json();
  if(!r.ok){showTsdError(d.error||'Товар не найден');return false}
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
@@ -3522,6 +3582,50 @@ def start_shift():
     return jsonify(ok=True, shift_id=shift_id, resumed=False)
 
 
+def pdf_picking_active(shift_id, employee_id):
+    """PDF control is bound to server-side shift state, never a client flag."""
+    if not shift_id or not employee_id:
+        return False
+    row = query_one(
+        "SELECT m.enabled FROM pdf_fbs_shift_modes m "
+        "JOIN shifts s ON s.id=m.shift_id "
+        "WHERE m.shift_id=? AND s.employee_id=? AND s.ended_at IS NULL",
+        (shift_id, employee_id),
+    )
+    return bool(row and row[0])
+
+
+@wms_bp.route("/api/fbs/pdf-mode", methods=["GET", "POST"])
+def fbs_pdf_mode():
+    ensure_db()
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    data = (request.get_json(silent=True) or {}) if request.method == "POST" else request.args
+    shift_id = str(data.get("shift_id") or "").strip()
+    shift = query_one("SELECT employee_id, ended_at FROM shifts WHERE id=?", (shift_id,))
+    if not shift or shift[1] or shift[0] != employee["id"]:
+        return jsonify(error="Смена не найдена или не принадлежит сотруднику"), 403
+    if request.method == "POST":
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            return jsonify(error="Укажи true или false для режима PDF"), 400
+        if enabled:
+            total = query_one("SELECT COUNT(*) FROM pdf_fbs_orders")
+            if not total or not total[0]:
+                return jsonify(error="Сначала загрузи PDF в менеджерском модуле"), 409
+            active = current_activity(shift_id)
+            if not active or active["type"] != "picking":
+                return jsonify(error="Сначала включи операцию «Сборка»"), 409
+        execute(
+            "INSERT INTO pdf_fbs_shift_modes(shift_id, enabled, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(shift_id) "
+            "DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at",
+            (shift_id, int(enabled), now_iso()),
+        )
+    return jsonify(ok=True, enabled=pdf_picking_active(shift_id, employee["id"]))
+
+
 @wms_bp.post("/api/fbs/scan")
 def fbs_scan():
     ensure_db()
@@ -3589,52 +3693,82 @@ def fbs_scan():
         ), 409
 
     wb_order_id = None
-    expected = query_one(
-        "SELECT order_id, article, skus_json FROM wb_orders WHERE wb_barcode = ? LIMIT 1",
-        (barcode,),
-    )
-    if expected:
-        wb_order_id = str(expected[0])
-        expected_article = str(expected[1] or "").strip()
-        try:
-            expected_skus = [str(x).strip() for x in json.loads(expected[2] or "[]") if str(x).strip()]
-        except Exception:
-            expected_skus = []
+    if pdf_picking_active(shift_id, employee["id"]):
+        pdf_expected = query_one(
+            "SELECT article, product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?",
+            (barcode,),
+        )
+        if not pdf_expected:
+            log_event(
+                shift[0], "fbs", "pdf_order_missing", shift_id=shift_id,
+                object_code=barcode, result="not-in-pdf",
+                article=article or None, product_name=product_name or None,
+            )
+            return jsonify(
+                error="❌ Стикер WB отсутствует в загруженном PDF. Заказ НЕ засчитан.",
+                reason="pdf_order_missing",
+            ), 409
+        expected_article, expected_barcode = pdf_expected
+        if product_barcode != expected_barcode:
+            log_event(
+                shift[0], "fbs", "product_mismatch", shift_id=shift_id,
+                object_code=barcode,
+                result="pdf_expected=" + expected_article + ";scanned=" + product_barcode,
+                article=article or None, product_name=product_name or None,
+            )
+            return jsonify(
+                error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа нужен: " + expected_article,
+                reason="pdf_product_mismatch",
+                expected_article=expected_article,
+            ), 409
+        wb_order_id = "pdf:" + barcode
+    else:
+        expected = query_one(
+            "SELECT order_id, article, skus_json FROM wb_orders WHERE wb_barcode = ? LIMIT 1",
+            (barcode,),
+        )
+        if expected:
+            wb_order_id = str(expected[0])
+            expected_article = str(expected[1] or "").strip()
+            try:
+                expected_skus = [str(x).strip() for x in json.loads(expected[2] or "[]") if str(x).strip()]
+            except Exception:
+                expected_skus = []
 
-        sku_ok = product_barcode in expected_skus if expected_skus else False
-        article_ok = bool(expected_article and article and expected_article == article)
+            sku_ok = product_barcode in expected_skus if expected_skus else False
+            article_ok = bool(expected_article and article and expected_article == article)
 
-        if WB_STRICT_MATCHING and not (sku_ok or (not expected_skus and article_ok)):
+            if WB_STRICT_MATCHING and not (sku_ok or (not expected_skus and article_ok)):
+                log_event(
+                    shift[0],
+                    "fbs",
+                    "product_mismatch",
+                    shift_id=shift_id,
+                    object_code=barcode,
+                    result=f"scanned={article or product_barcode};expected={expected_article or ','.join(expected_skus)}",
+                    article=article or None,
+                    product_name=product_name or None,
+                )
+                expected_text = expected_article or (", ".join(expected_skus[:3]) if expected_skus else "неизвестный товар")
+                return jsonify(
+                    error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа ожидается: " + expected_text,
+                    expected_article=expected_article,
+                    expected_skus=expected_skus,
+                ), 409
+        elif WB_STRICT_MATCHING:
             log_event(
                 shift[0],
                 "fbs",
-                "product_mismatch",
+                "wb_order_missing",
                 shift_id=shift_id,
                 object_code=barcode,
-                result=f"scanned={article or product_barcode};expected={expected_article or ','.join(expected_skus)}",
+                result="not-synced",
                 article=article or None,
                 product_name=product_name or None,
             )
-            expected_text = expected_article or (", ".join(expected_skus[:3]) if expected_skus else "неизвестный товар")
             return jsonify(
-                error="❌ НЕ ТОТ ТОВАР. Для этого WB-заказа ожидается: " + expected_text,
-                expected_article=expected_article,
-                expected_skus=expected_skus,
+                error="WB-заказ не найден в локальном справочнике. На ПК обнови синхронизацию WB."
             ), 409
-    elif WB_STRICT_MATCHING:
-        log_event(
-            shift[0],
-            "fbs",
-            "wb_order_missing",
-            shift_id=shift_id,
-            object_code=barcode,
-            result="not-synced",
-            article=article or None,
-            product_name=product_name or None,
-        )
-        return jsonify(
-            error="WB-заказ не найден в локальном справочнике. На ПК обнови синхронизацию WB."
-        ), 409
 
     duplicate = query_one(
         "SELECT s.id, e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
