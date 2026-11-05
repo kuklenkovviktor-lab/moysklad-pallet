@@ -148,6 +148,23 @@ def main():
             dc('run', '--rm', '--no-deps', '--entrypoint', 'python3', 'backup', '/scripts/fetch_s3.py', receipt['key'], 's3-recovered-test.dump', receipt['sha256'])
             dc('run', '--rm', '--no-deps', '--entrypoint', 'sh', 'backup', '/scripts/restore.sh', '/backups/s3-recovered-test.dump', 'restore_check_s3')
             assert sql('SELECT value FROM deployment_probe', 'restore_check_s3') == 'retained'
+            # Real network failure of ONLY the disposable emulator: preserve
+            # its process/data, and retry the same persistent pending queue.
+            run(['docker','network','disconnect',project + '_web',emulator],capture_output=True)
+            try:
+                unavailable = subprocess.run(compose + ['run','--rm','--no-deps','--entrypoint','sh','backup','/scripts/backup-once.sh'],env=environment,capture_output=True)
+                assert unavailable.returncode != 0
+                failed_health = subprocess.run(compose + ['run','--rm','--no-deps','--entrypoint','sh','backup','/scripts/backup-health.sh'],env=environment,capture_output=True)
+                assert failed_health.returncode != 0
+                pending = dc('run','--rm','--no-deps','--entrypoint','sh','backup','-c','ls /backups/grit-*.dump.pending.json',capture_output=True).stdout
+                assert pending.strip()
+                before_retry = dc('run','--rm','--no-deps','--entrypoint','sh','backup','-c','ls /backups/grit-*.dump',capture_output=True).stdout
+            finally:
+                run(['docker','network','connect','--alias','s3-test',project + '_web',emulator],capture_output=True)
+            dc('run','--rm','--no-deps','--entrypoint','python3','backup','-c',"import sys;sys.path.insert(0,'/scripts');import backup_worker as w;w.cycle(False);assert w.health()")
+            after_retry = dc('run','--rm','--no-deps','--entrypoint','sh','backup','-c','ls /backups/grit-*.dump',capture_output=True).stdout
+            assert before_retry == after_retry, 'Retry created another local dump instead of uploading the queue'
+            print('PASS: actual S3 network outage retains archive/queue, fails health and recovers without another local dump')
         # Existing targets and corrupt archives must fail, without overwriting.
         repeat = subprocess.run(compose + ['run', '--rm', '--no-deps', '--entrypoint', 'sh', 'backup', '/scripts/restore.sh', archive, 'restore_check_test'], env=environment, capture_output=True)
         assert repeat.returncode != 0

@@ -243,6 +243,17 @@ def notify(stage, force=False):
         return False
 
 
+def retry_notifications():
+    pending = read_json('.pending-alerts.json')
+    for stage in list(pending):
+        try:
+            if notify(stage):
+                pending.pop(stage)
+                atomic('.pending-alerts.json', pending)
+        except Exception:
+            print('Backup failure notification configuration invalid', flush=True)
+
+
 def cycle(force_local=False):
     offsite = enabled('BACKUP_S3_ENABLED')
     interval = integer('BACKUP_INTERVAL_SECONDS', 86400, 60)
@@ -273,7 +284,7 @@ def health():
     age = time.time() - latest.get('time', 0)
     if not 0 <= age <= interval + 300 or not (ROOT / latest.get('file', '__missing__')).is_file():
         return False
-    if enabled('BACKUP_ALERT_REQUIRED') and not alert_configured():
+    if enabled('BACKUP_ALERT_REQUIRED') and (not alert_configured() or read_json('.pending-alerts.json')):
         return False
     if enabled('BACKUP_S3_ENABLED'):
         if list(ROOT.glob('grit-*.dump.pending.json')):
@@ -290,15 +301,17 @@ def health():
 def execute(force_local):
     try:
         cycle(force_local)
+        # Deliver an earlier failure even if S3 recovered before Telegram did.
+        retry_notifications()
         return True
     except Exception as exc:
         stage = str(exc) if isinstance(exc, Failure) else 'backup_internal_error'
         atomic('.last-error.json', {'time': time.time(), 'stage': stage})
         print('PostgreSQL backup failed: ' + stage, flush=True)
-        try:
-            notify(stage)
-        except Exception:
-            print('Backup failure notification configuration invalid', flush=True)
+        pending = read_json('.pending-alerts.json')
+        pending.setdefault(stage, time.time())
+        atomic('.pending-alerts.json', pending)
+        retry_notifications()
         return False
 
 

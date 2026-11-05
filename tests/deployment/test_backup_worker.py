@@ -238,6 +238,32 @@ class BackupTests(unittest.TestCase):
                 w.cycle()
             self.assertEqual(upload.call_count, 2)
 
+    def test_failed_alert_is_retried_even_after_backup_recovers(self):
+        self.archive()
+        os.environ['BACKUP_S3_ENABLED']='0'
+        os.environ['BACKUP_ALERT_REQUIRED']='1'
+        os.environ['BACKUP_ALERT_WEBHOOK_URL']='https://example.test/isolated'
+        with patch.object(w, 'cycle', side_effect=w.Failure('s3_upload_failed')), patch.object(w, 'notify', return_value=False):
+            self.assertFalse(w.execute(False))
+        self.assertIn('s3_upload_failed', w.read_json('.pending-alerts.json'))
+        self.assertFalse(w.health())
+        with patch.object(w, 'notify', return_value=True) as notify:
+            self.assertTrue(w.execute(False))
+            notify.assert_called_once_with('s3_upload_failed')
+        self.assertEqual(w.read_json('.pending-alerts.json'), {})
+        self.assertTrue(w.health())
+
+    def test_telegram_success_is_confirmed_without_logging_token(self):
+        os.environ['BACKUP_ALERT_TELEGRAM_TOKEN']='isolated-test-token'
+        os.environ['BACKUP_ALERT_TELEGRAM_CHAT_ID']='123'
+        response=unittest.mock.MagicMock()
+        response.__enter__.return_value.status=200
+        response.__enter__.return_value.read.return_value=b'{"ok":true}'
+        with patch.object(w,'urlopen',return_value=response), patch('sys.stdout',new_callable=io.StringIO) as output:
+            self.assertTrue(w.notify('s3_upload_failed'))
+        self.assertNotIn('isolated-test-token',output.getvalue())
+        self.assertEqual(w.read_json('.last-alert.json')['stage'],'s3_upload_failed')
+
     def test_private_backup_template_never_overwrites(self):
         spec = importlib.util.spec_from_file_location('init_backup_env', ROOT / 'deploy/init_backup_env.py')
         module = importlib.util.module_from_spec(spec)
