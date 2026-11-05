@@ -3685,6 +3685,13 @@ def fbs_scan():
         )
         return jsonify(error="Сейчас включена не сборка. Переключи операцию на «Сборка»."), 409
 
+    # Only normalize at the WB-sticker stage; the earlier item scan stays raw.
+    # The printed Code128 is decimal, while the QR contains WB's Base64 form.
+    pdf_control = pdf_picking_active(shift_id, employee["id"])
+    if pdf_control:
+        from wb_qr_codec import canonical_wb_sticker
+        barcode = canonical_wb_sticker(barcode)
+
     # A second scan of the same merchandise barcode is not evidence of a WB
     # order sticker. Reject it independently of optional WB API matching.
     # A genuine WB label that collides with a product code needs a separately
@@ -3706,7 +3713,7 @@ def fbs_scan():
         ), 409
 
     wb_order_id = None
-    if pdf_picking_active(shift_id, employee["id"]):
+    if pdf_control:
         pdf_expected = query_one(
             "SELECT article, product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?",
             (barcode,),
