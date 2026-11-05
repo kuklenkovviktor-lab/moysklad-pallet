@@ -163,7 +163,14 @@ class PdfUploadTests(unittest.TestCase):
         shift_id=shift_response.json["shift_id"]
         off=worker.get("/api/fbs/pdf-mode",query_string={"shift_id":shift_id})
         self.assertEqual(off.status_code,200,off.json)
-        self.assertFalse(off.json["enabled"])
+        self.assertTrue(off.json["enabled"])
+        self.assertGreaterEqual(off.json["orders_available"],2)
+        # Explicit OFF overrides the automatic default for this shift.
+        opted_out=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":False})
+        self.assertEqual(opted_out.status_code,200,opted_out.json)
+        self.assertFalse(opted_out.json["enabled"])
+        still_out=worker.get("/api/fbs/pdf-mode",query_string={"shift_id":shift_id})
+        self.assertFalse(still_out.json["enabled"])
         enabled=worker.post("/api/fbs/pdf-mode",json={"shift_id":shift_id,"enabled":True})
         self.assertEqual(enabled.status_code,200,enabled.json)
         self.assertTrue(enabled.json["enabled"])
