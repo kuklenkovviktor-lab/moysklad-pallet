@@ -421,6 +421,7 @@ def require_employee_login():
         "/manager/fbs-pdf",
         "/manager/onix-print-test",
         "/api/manager/fbs-pdf/preview",
+        "/api/manager/fbs-pdf/physical-test-import",
         "/api/manager/shift-history",
         "/api/manager/employee-events",
         "/api/manager/shifts/actions",
