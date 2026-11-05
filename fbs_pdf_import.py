@@ -7,6 +7,7 @@ import hashlib
 import io
 import re
 from pathlib import Path
+from fbs_pdf_physical_test import physical_test_enabled, prepare_test_orders
 
 from flask import Blueprint, jsonify, redirect, request
 
@@ -156,6 +157,7 @@ def inspect_pdf(content):
             "warnings": issues,
             "mode": "diagnostic_only",
             "orders_imported": 0,
+            "physical_test_enabled": physical_test_enabled(),
             "stock_changed": False,
             "tasks_created": 0,
             "file_stored": False,
@@ -193,3 +195,46 @@ def fbs_pdf_preview():
         return jsonify(error="Ошибка обработки PDF. Файл не импортирован"), 422
     filename = Path((upload.filename or "").replace("\\", "/")).name[:160]
     return jsonify(filename=filename, **result)
+
+
+@fbs_pdf_bp.post("/api/manager/fbs-pdf/physical-test-import")
+def fbs_pdf_physical_test_import():
+    """Write only PDF-scanned test order registry; no stock/tasks/live orders."""
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if not physical_test_enabled():
+        return jsonify(error="Тестовая загрузка доступна только в изолированном окружении"), 403
+    if request.content_length is not None and request.content_length > MAX_BYTES + 64 * 1024:
+        return jsonify(error="PDF больше 25 МБ"), 413
+    upload = request.files.get("file")
+    if upload is None or not (upload.filename or "").lower().endswith(".pdf"):
+        return jsonify(error="Выбери PDF-файл"), 400
+    raw = upload.stream.read(MAX_BYTES + 1)
+    try:
+        report = inspect_pdf(raw).get("wb_report")
+        orders = prepare_test_orders(report)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    except Exception:
+        return jsonify(error="Ошибка разбора PDF; тестовые заказы не сохранены"), 422
+
+    from wms import ensure_db, db_connect
+    from datetime import datetime, timezone
+    try:
+        ensure_db()
+        with db_connect() as conn:
+            cur = conn.cursor()
+            # Isolated DB. Re-import replaces only earlier test orders.
+            cur.execute("DELETE FROM wb_orders WHERE order_id LIKE 'pdf-physical:%'")
+            for order in orders:
+                cur.execute(
+                    "INSERT INTO wb_orders (order_id, wb_barcode, article, skus_json, synced_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (order["order_id"], order["wb_barcode"], order["article"],
+                     order["skus_json"], datetime.now(timezone.utc).isoformat()),
+                )
+            conn.commit()
+            cur.close()
+    except Exception:
+        return jsonify(error="Не удалось сохранить тестовые заказы"), 409
+    return jsonify(ok=True, orders_imported=len(orders), isolated=True, strict_matching=True)
