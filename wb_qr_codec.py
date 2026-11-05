@@ -25,8 +25,11 @@ def canonical_wb_sticker(value):
     # Scanner AIM symbology ID, if configured to send it.
     if len(code) > 3 and re.fullmatch(r"\]Q\d", code[:3]):
         code = code[3:]
-    if code.startswith("*") and len(code) == 9:
-        candidate = code.translate(RU_HID_TO_EN)
+    # On an iPhone with Russian HID keyboard layout, QR's leading "*" is
+    # emitted as ";". Restore it ONLY for an exact 9-character WB QR candidate.
+    if code.startswith(("*", ";")) and len(code) == 9:
+        candidate = ("*" if code[0] == ";" else code[0]) + code[1:]
+        candidate = candidate.translate(RU_HID_TO_EN)
         if QR_DATA_RE.fullmatch(candidate):
             try:
                 payload = base64.b64decode(candidate[1:], validate=True)
