@@ -193,3 +193,33 @@ def fbs_pdf_preview():
         return jsonify(error="Ошибка обработки PDF. Файл не импортирован"), 422
     filename = Path((upload.filename or "").replace("\\", "/")).name[:160]
     return jsonify(filename=filename, **result)
+
+
+@fbs_pdf_bp.get("/api/manager/fbs-pdf/status")
+def fbs_pdf_registry_status():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    from pdf_fbs_registry import status
+    return jsonify(ok=True, **status())
+
+
+@fbs_pdf_bp.post("/api/manager/fbs-pdf/import")
+def fbs_pdf_import_orders():
+    """Explicit manager confirmation; persistent PDF registry, no stock mutation."""
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if request.content_length is not None and request.content_length > MAX_BYTES + 64 * 1024:
+        return jsonify(error="PDF больше 25 МБ"), 413
+    upload = request.files.get("file")
+    if upload is None or not (upload.filename or "").lower().endswith(".pdf"):
+        return jsonify(error="Выбери PDF-файл"), 400
+    raw = upload.stream.read(MAX_BYTES + 1)
+    from pdf_fbs_registry import import_pdf_orders
+    try:
+        report = inspect_pdf(raw)
+        imported = import_pdf_orders(report.get("wb_report"), report["sha256"])
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 422
+    except Exception:
+        return jsonify(error="Не удалось сохранить PDF-заказы. Запись отменена."), 409
+    return jsonify(ok=True, **imported, stock_changed=False, tasks_created=0)
