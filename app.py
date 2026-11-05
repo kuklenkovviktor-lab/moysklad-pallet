@@ -91,7 +91,7 @@ class ONIXScopedSessionInterface(SecureCookieSessionInterface):
 app.session_interface = ONIXScopedSessionInterface()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=not __import__('fbs_pdf_physical_test').physical_test_enabled(),
     SESSION_COOKIE_SAMESITE="Lax",
     # Rolling persistent employee cookie: closing Safari/PWA must never log out a TSD.
     # The official employee logout still clears the cookie after supervisor QR.
