@@ -74,7 +74,8 @@ git switch fix/hostkey-s3-backups
 
 Создайте **отдельный тестовый bucket** без публичного доступа и сервисный аккаунт
 с доступом только к нему/нужному префиксу. Не используйте bucket/ключи Render.
-Для этого механизма нужны PutObject, HeadObject/GetObject и операции multipart;
+Для этого механизма нужны PutObject, HeadObject/GetObject, GetObjectVersion
+при включённом versioning и операции multipart;
 DeleteObject не нужен. Ограничьте права политикой bucket. Рекомендуется включить
 versioning и серверное шифрование; Object Lock/сроки хранения согласовать отдельно.
 Приложение не создаёт bucket, не меняет его ACL/lifecycle и не удаляет объекты.
