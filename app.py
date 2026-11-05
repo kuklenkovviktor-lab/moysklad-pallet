@@ -91,7 +91,7 @@ class ONIXScopedSessionInterface(SecureCookieSessionInterface):
 app.session_interface = ONIXScopedSessionInterface()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=not __import__('fbs_pdf_physical_test').physical_test_enabled(),
     SESSION_COOKIE_SAMESITE="Lax",
     # Rolling persistent employee cookie: closing Safari/PWA must never log out a TSD.
     # The official employee logout still clears the cookie after supervisor QR.
@@ -2461,6 +2461,23 @@ def fbs_product_info():
         barcode = str(data.get("barcode", "")).strip()
         if not barcode:
             return jsonify(error="Пустой ШК товара"), 400
+
+        # Isolated physical test: identify scanned product from validated PDF only.
+        # Never call MoySklad in this mode.
+        from fbs_pdf_physical_test import physical_test_enabled
+        if physical_test_enabled():
+            from wms import query_all
+            for test_article, skus in query_all(
+                "SELECT article, skus_json FROM wb_orders WHERE order_id LIKE 'pdf-physical:%'"
+            ):
+                try:
+                    known = json.loads(skus or "[]")
+                except (ValueError, TypeError):
+                    known = []
+                if barcode in known:
+                    return jsonify(ok=True, barcode=barcode, article=test_article,
+                                   name="Тестовый товар " + test_article)
+            return jsonify(error="Товар отсутствует в тестовом PDF"), 404
 
         product, pack = find_fbs_product_by_barcode(barcode)
         if not product:
