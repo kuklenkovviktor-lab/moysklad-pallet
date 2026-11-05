@@ -2,7 +2,7 @@
 
 FBS_PDF_PAGE = """<!doctype html><html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONIX WMS · Загрузка PDF FBS</title>
+<title>GRIT WMS · Загрузка PDF FBS</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#e9eef3;color:#25313d;font:14px system-ui,-apple-system,Segoe UI,sans-serif}
@@ -36,10 +36,79 @@ th{position:sticky;top:0;background:#eaf0f4;z-index:1}
 .chip{display:inline-block;background:#e0ebf1;border-radius:8px;font-size:12px;padding:6px 8px;margin:3px}
 ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 @media(max-width:640px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:10px}}
-</style></head><body><main>
+
+/* PDF-specific dark surfaces. Shared grit-ui.css is inserted AFTER this style,
+   so these scoped selectors override both the legacy light mode and shared theme. */
+#grit-pdf-workspace .tablewrap{
+ background:#102033!important;border:1px solid #36516a!important;border-radius:11px!important
+}
+#grit-pdf-workspace details{
+ background:#14283b!important;color:#ecf5ff!important;
+ border:1px solid #39566f!important;border-radius:10px!important;
+ box-shadow:none!important
+}
+#grit-pdf-workspace details>summary{
+ background:#20384f!important;color:#eaf5ff!important;
+ border-bottom:1px solid transparent!important;
+ padding:12px 13px!important;line-height:1.45;
+ outline-offset:-2px
+}
+#grit-pdf-workspace details[open]>summary{
+ background:#24435e!important;border-bottom-color:#3a617d!important
+}
+#grit-pdf-workspace details>summary::marker{color:#8ed0ff}
+#grit-pdf-workspace details>summary:hover{background:#2b4c69!important}
+#grit-pdf-workspace details .sample{
+ background:#122638!important;color:#e3f1fd!important;
+ padding:13px!important;overflow-wrap:anywhere
+}
+#grit-pdf-workspace details .printcode{
+ display:block;padding:7px 0;color:#e3f4ff!important;
+ border-bottom:1px solid #304a60;overflow-wrap:anywhere
+}
+#grit-pdf-workspace pre{
+ background:#1d3449!important;color:#f1f7ff!important;
+ border:1px solid #38566c!important;font-size:12px;line-height:1.65
+}
+#grit-pdf-workspace .notice{
+ background:#192c40!important;color:#dcecff!important;
+ border-left:3px solid #4a9dd8!important
+}
+#grit-pdf-workspace .notice.good{
+ background:#132e2b!important;color:#a1f3ca!important;
+ border-left-color:#3fcc91!important
+}
+#grit-pdf-workspace .notice.error{
+ background:#36242a!important;color:#ffb1b5!important;
+ border-left-color:#ff767e!important
+}
+#grit-pdf-workspace .metric{
+ background:#1a3045!important;color:#eef7ff!important;
+ border:1px solid #34536c!important
+}
+#grit-pdf-workspace .metric .l{color:#b2cfe5!important}
+#grit-pdf-workspace .metric .v{color:#fff!important}
+#grit-pdf-workspace .pass{color:#71e2a8!important}
+#grit-pdf-workspace .fail{color:#ff9d9e!important}
+#grit-pdf-workspace .chip{background:#25445c!important;color:#e8f5ff!important}
+#grit-pdf-workspace .hint{color:#ffcf83!important}
+#grit-pdf-workspace #wbProducts td:last-child{min-width:142px}
+#grit-pdf-workspace #wbProducts td:last-child details{margin:0;min-width:122px}
+#grit-pdf-workspace #wbProducts td:last-child details>summary{
+ font-size:12px;padding:9px 11px!important
+}
+#grit-pdf-workspace #pages details>summary{font-size:13px}
+#grit-pdf-workspace .tablewrap td,
+#grit-pdf-workspace .tablewrap th{line-height:1.45}
+@media(max-width:640px){
+ #grit-pdf-workspace .card{padding:13px}
+ #grit-pdf-workspace .tablewrap{max-height:480px}
+ #grit-pdf-workspace details>summary{padding:12px!important}
+}
+</style></head><body><main id="grit-pdf-workspace">
 <a href="/manager">← Менеджерская панель</a>
 <h1>📄 Загрузка PDF FBS</h1>
-<p class="small">Первый этап: проверяем формат настоящего файла и способность ONIX извлекать его содержимое. Никаких заданий на сборку и пополнение автоматически не создаётся.</p>
+<p class="small">Первый этап: проверяем формат настоящего файла и способность GRIT извлекать его содержимое. Никаких заданий на сборку и пополнение автоматически не создаётся.</p>
 <section class="card">
 <h2>Загрузить PDF с этикетками/заказами</h2>
 <form id="form">
@@ -50,7 +119,7 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 </form><div id="message" role="status"></div>
 </section>
 <section class="card" id="summary" hidden>
-<h2>Что ONIX прочитал</h2>
+<h2>Что GRIT прочитала</h2>
 <div class="summary" id="metrics"></div>
 <p class="small" id="fileInfo"></p>
 <div id="hints"></div>
@@ -65,11 +134,11 @@ ul{padding-left:20px}li{line-height:1.5;margin:6px 0}
 <div class="tablewrap"><table>
 <thead><tr><th>Товарный листок, стр.</th><th>Артикул</th><th>ШК товара</th><th>Заявлено</th><th>Стикеров WB</th><th>Проверка</th><th>Ячейки</th><th>Стикеры</th></tr></thead>
 <tbody id="wbProducts"></tbody></table></div>
-<p class="small">Точные адреса берутся из карты ONIX. Если SKU закреплён за несколькими ячейками, выбрать адрес автоматически нельзя. Данные остаются только в ответе текущей загрузки.</p>
+<p class="small">Точные адреса берутся из карты GRIT. Если SKU закреплён за несколькими ячейками, выбрать адрес автоматически нельзя. Данные остаются только в ответе текущей загрузки.</p>
 </section>
 <section class="card" id="results" hidden>
 <h2>Предпросмотр содержимого</h2>
-<p class="small">ONIX показывает текст и размеры выбранных страниц. Найденные числа и артикулы пока не считаются подтверждёнными заказами. Для сканированных этикеток без текстового слоя понадобится отдельный этап распознавания.</p>
+<p class="small">GRIT показывает текст и размеры выбранных страниц. Найденные числа и артикулы пока не считаются подтверждёнными заказами. Для сканированных этикеток без текстового слоя понадобится отдельный этап распознавания.</p>
 <div id="warnings"></div>
 <div id="pages"></div>
 </section>
