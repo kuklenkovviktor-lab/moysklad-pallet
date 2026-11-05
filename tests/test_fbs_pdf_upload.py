@@ -179,8 +179,9 @@ class PdfUploadTests(unittest.TestCase):
             a=worker.post("/api/fbs/product-info",json={"barcode":barcode_a,"shift_id":shift_id})
         self.assertEqual(a.status_code,200,a.json)
         self.assertEqual(a.json["article"],"TEST_PDF_A")
-        args={"shift_id":shift_id,"product_barcode":barcode_b,
-              "barcode":sticker_a,"article":"TEST_PDF_B","product_name":"Test"}
+        # Product A is pending; WB sticker B belongs to a different product.
+        args={"shift_id":shift_id,"product_barcode":barcode_a,
+              "barcode":sticker_b,"article":"TEST_PDF_A","product_name":"Test"}
         wrong=worker.post("/api/fbs/scan",json=args)
         self.assertEqual(wrong.status_code,409,wrong.json)
         self.assertEqual(wrong.json["reason"],"pdf_product_mismatch")
