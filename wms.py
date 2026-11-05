@@ -1186,6 +1186,11 @@ button.active{background:#436986;color:#fff;outline:1px solid #74b5dc}
 .manual-entry.open{position:static;height:auto;display:flex;gap:7px;pointer-events:auto;margin-top:8px}
 .manual-entry.open #barcode{position:static;opacity:1;width:100%;height:40px;padding:9px;background:#eef4f8;color:#203242;border:1px solid #91afc2;border-radius:8px;min-width:0}
 .manual-entry.open #scanButton{display:block;flex:none;min-width:118px;padding:8px;font-size:11px}
+
+.pdf-mode-row{display:flex;align-items:center;gap:9px;background:#162b3e;padding:9px;border:1px solid #36536b;border-radius:9px}
+#pdfModeButton{flex:none;padding:10px 13px;min-height:42px;background:#26435a}
+#pdfModeButton.enabled{background:#126043;border:1px solid #47b789;color:#eafff3}
+#pdfModeInfo{font-size:11px;color:#b4cde1;line-height:1.3}
 #result:empty{display:none}
 #result{margin-top:6px;font-size:11px}
 .ok,.err{border-radius:7px;padding:6px 9px;overflow-wrap:anywhere}
@@ -1289,6 +1294,10 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
 </div>
 
 <div id="work" class="hidden">
+  <div class="pdf-mode-row" role="group" aria-label="Режим сборки">
+    <button id="pdfModeButton" type="button" onclick="togglePdfMode()">PDF-контроль: ВЫКЛ</button>
+    <span id="pdfModeInfo">Обычная сборка</span>
+  </div>
   <div class="card" id="scanCard">
     <div class="scan-stage" id="scanStageBox">
       <svg class="scan-icon" viewBox="0 0 36 36" fill="none" aria-hidden="true">
@@ -1364,6 +1373,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
 <script>
 let shiftId=localStorage.getItem('fbs_shift_id')||'';
 let scanner=null,busy=false,audioCtx=null,pendingProduct=null,lastCameraCode='',lastCameraAt=0;
+let pdfModeEnabled=false;
 let fbsFocusInitialized=false,hidScanBuffer='',hidScanLastAt=0,hidScanResetTimer=null;
 
 function beep(ok=true){
@@ -1426,6 +1436,37 @@ async function startShift(){
  const d=await r.json();if(!r.ok){showErr(d.error);return}
  shiftId=d.shift_id;localStorage.setItem('fbs_shift_id',shiftId);await refresh();
 }
+async function refreshPdfMode(){
+ if(!shiftId)return;
+ try{
+  const r=await fetch('/api/fbs/pdf-mode?shift_id='+encodeURIComponent(shiftId),{cache:'no-store'});
+  if(!r.ok)return;
+  const d=await r.json();
+  pdfModeEnabled=!!d.enabled;
+  const btn=document.getElementById('pdfModeButton');
+  btn.textContent='PDF-контроль: '+(pdfModeEnabled?'ВКЛ':'ВЫКЛ');
+  btn.classList.toggle('enabled',pdfModeEnabled);
+  document.getElementById('pdfModeInfo').textContent=pdfModeEnabled?
+   'Только заказы из PDF. Ошибки блокируются.':'Обычная сборка, прежняя логика WB.';
+ }catch(e){}
+}
+async function togglePdfMode(){
+ if(!shiftId)return;
+ if(pendingProduct){showTsdError('Сначала сбрось текущий товар, затем переключи режим.');return}
+ const button=document.getElementById('pdfModeButton');button.disabled=true;
+ try{
+  const response=await fetch('/api/fbs/pdf-mode',{method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({shift_id:shiftId,enabled:!pdfModeEnabled})});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Не удалось переключить режим');
+  await refreshPdfMode();
+  document.getElementById('result').innerHTML=
+   '<div class="ok">'+(pdfModeEnabled?'PDF-контроль включён. Сканируй товар.':'Обычная сборка включена.')+'</div>';
+  focusFbsInput();
+ }catch(e){showTsdError(e.message)}
+ finally{button.disabled=false}
+}
 async function refresh(){
  if(!shiftId)return;
  const r=await fetch('/api/fbs/stats?shift_id='+encodeURIComponent(shiftId)),d=await r.json();
@@ -1442,6 +1483,7 @@ async function refresh(){
  if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
  const back=document.getElementById('backToPicking');
  if(back)back.classList.toggle('hidden',d.activity==='picking');
+ await refreshPdfMode();
 }
 function updateScanStage(){
  const input=document.getElementById('barcode');
@@ -1464,7 +1506,7 @@ function clearPendingProduct(){
  const el=document.getElementById('barcode');el.value='';el.focus();
 }
 async function acceptProduct(code){
- const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code})});
+ const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
  const d=await r.json();
  if(!r.ok){showTsdError(d.error||'Товар не найден');return false}
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
