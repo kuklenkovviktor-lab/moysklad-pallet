@@ -1,0 +1,21 @@
+name: FBS durability SQLite and PostgreSQL
+on:
+  pull_request:
+    paths: ['wms.py', 'fbs_transactions.py', 'fbs_skip_authorization.py', 'tests/test_fbs_*', 'deploy/verify_fbs_postgres.py', '.github/workflows/fbs-durability.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  durability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: node tests/test_fbs_outbox.cjs
+      - run: docker build -t grit-wms:fbs-test .
+      - run: python deploy/verify_fbs_postgres.py

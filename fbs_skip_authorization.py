@@ -49,31 +49,21 @@ def pending_for_shift(shift_id, employee_id):
 
 
 def record_pending_item(shift_id, employee_id, barcode, article, name):
-    from wms import query_one, execute, now_iso, current_activity
+    from wms import sql, now_iso
+    from fbs_transactions import shift_transaction, active_worker
     if not shift_id or not employee_id:
         raise ValueError("Требуется активная смена для сборки")
-    active = query_one(
-        "SELECT 1 FROM shifts WHERE id=? AND employee_id=? AND ended_at IS NULL",
-        (shift_id, employee_id),
-    )
-    op = current_activity(shift_id)
-    if not active or not op or op.get("type") != "picking":
-        raise ValueError("Сначала выбери операцию «Сборка»")
-    existing = pending_for_shift(shift_id, employee_id)
-    if existing and existing["barcode"] != barcode:
-        raise ValueError("Сначала заверши текущий товар либо отсканируй QR руководителя «Пропуск товара»")
-    if existing:
-        return existing
-    execute(
-        "INSERT INTO fbs_pending_products "
-        "(shift_id, employee_id, product_barcode, article, product_name, started_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (shift_id) DO NOTHING",
-        (shift_id, employee_id, barcode, article or "", name or "", now_iso()),
-    )
-    result = pending_for_shift(shift_id, employee_id)
-    if not result or result["barcode"] != barcode:
-        raise ValueError("Другая позиция уже ожидает стикер WB")
-    return result
+    with shift_transaction(shift_id) as (cur, shift):
+        active_worker(cur, shift, shift_id, employee_id)
+        cur.execute(sql("SELECT product_barcode,article,product_name FROM fbs_pending_products WHERE shift_id=? AND employee_id=?"), (shift_id, employee_id))
+        old = cur.fetchone()
+        if old:
+            if old[0] != barcode:
+                raise ValueError("Сначала заверши текущий товар либо отсканируй QR руководителя «Пропуск товара»")
+            return {"barcode": old[0], "article": old[1] or "", "name": old[2] or ""}
+        cur.execute(sql("INSERT INTO fbs_pending_products (shift_id,employee_id,product_barcode,article,product_name,started_at) VALUES (?,?,?,?,?,?)"),
+                    (shift_id, employee_id, barcode, article or "", name or "", now_iso()))
+        return {"barcode": barcode, "article": article or "", "name": name or ""}
 
 
 def complete_pending_item(shift_id, employee_id, barcode):
@@ -92,35 +82,23 @@ def consume_skip_code(code, shift_id, employee_id):
         raise ValueError("Это не QR пропуска товара")
     digest = hashlib.sha256(candidate.encode("ascii")).hexdigest()
     ts = now_iso()
-    with db_connect() as conn:
-        cur = conn.cursor()
-        try:
-            cur.execute(sql(
-                "SELECT product_barcode, article, product_name FROM fbs_pending_products "
-                "WHERE shift_id=? AND employee_id=?"
-            ), (shift_id, employee_id))
-            pending = cur.fetchone()
-            if not pending:
-                raise ValueError("Нет товара, ожидающего пропуска")
-            cur.execute(sql(
-                "UPDATE fbs_skip_tokens "
-                "SET consumed_at=?, consumed_shift_id=?, consumed_employee_id=?, consumed_product_barcode=? "
-                "WHERE token_hash=? AND consumed_at IS NULL AND expires_at>?"
-            ), (ts, shift_id, employee_id, pending[0], digest, time.time()))
-            if cur.rowcount != 1:
-                raise ValueError("QR пропуска уже использован или срок действия истёк")
-            cur.execute(sql(
-                "DELETE FROM fbs_pending_products WHERE shift_id=? AND employee_id=? AND product_barcode=?"
-            ), (shift_id, employee_id, pending[0]))
-            if cur.rowcount != 1:
-                raise ValueError("Товар уже изменился; QR не применён")
-            conn.commit()
-            return {"barcode": pending[0], "article": pending[1] or "", "name": pending[2] or ""}
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            cur.close()
+    from fbs_transactions import shift_transaction, active_worker, event
+    with shift_transaction(shift_id) as (cur, shift):
+        active_worker(cur, shift, shift_id, employee_id)
+        cur.execute(sql("SELECT product_barcode,article,product_name FROM fbs_pending_products WHERE shift_id=? AND employee_id=?"), (shift_id, employee_id))
+        pending = cur.fetchone()
+        if not pending:
+            raise ValueError("Нет товара, ожидающего пропуска")
+        cur.execute(sql("UPDATE fbs_skip_tokens SET consumed_at=?,consumed_shift_id=?,consumed_employee_id=?,consumed_product_barcode=? WHERE token_hash=? AND consumed_at IS NULL AND expires_at>?"),
+                    (ts, shift_id, employee_id, pending[0], digest, time.time()))
+        if cur.rowcount != 1:
+            raise ValueError("QR пропуска уже использован или срок действия истёк")
+        cur.execute(sql("DELETE FROM fbs_pending_products WHERE shift_id=? AND employee_id=? AND product_barcode=?"), (shift_id, employee_id, pending[0]))
+        if cur.rowcount != 1:
+            raise ValueError("Товар уже изменился; QR не применён")
+        event(cur, employee_id, shift_id, "fbs", "fbs_item_skip", pending[0], 0,
+              "supervisor-one-time-qr", pending[1] or None, pending[2] or None)
+        return {"barcode": pending[0], "article": pending[1] or "", "name": pending[2] or ""}
 
 
 MANAGER_SKIP_PAGE = """<!doctype html><html lang="ru"><head>
