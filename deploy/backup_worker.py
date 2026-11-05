@@ -31,7 +31,10 @@ class Failure(Exception):
 
 
 def enabled(name):
-    return os.getenv(name, '0').lower() in ('1', 'true', 'yes')
+    value = os.getenv(name, '0').lower()
+    if value not in ('0', 'false', 'no', '', '1', 'true', 'yes'):
+        raise Failure('invalid_configuration')
+    return value in ('1', 'true', 'yes')
 
 
 def integer(name, default, minimum=1):
@@ -241,13 +244,20 @@ def notify(stage, force=False):
 
 
 def cycle(force_local=False):
+    offsite = enabled('BACKUP_S3_ENABLED')
     interval = integer('BACKUP_INTERVAL_SECONDS', 86400, 60)
     latest = read_json('.last-local.json')
     if force_local or time.time() - latest.get('time', 0) >= interval:
         create_archive()
-    if enabled('BACKUP_S3_ENABLED'):
+    if offsite:
+        failure = None
         for pending in sorted(ROOT.glob('grit-*.dump.pending.json')):
-            upload(ROOT / pending.name.removesuffix('.pending.json'), read_json(pending.name))
+            try:
+                upload(ROOT / pending.name.removesuffix('.pending.json'), read_json(pending.name))
+            except Exception as exc:
+                failure = exc
+        if failure:
+            raise failure
     # A failure is cleared only by a complete cycle, including all pending uploads.
     atomic('.last-cycle.json', {'time': time.time(), 's3': enabled('BACKUP_S3_ENABLED')})
     with contextlib.suppress(FileNotFoundError):

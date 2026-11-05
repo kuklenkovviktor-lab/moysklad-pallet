@@ -225,6 +225,19 @@ class BackupTests(unittest.TestCase):
         with self.assertRaisesRegex(w.Failure, 'invalid_download_key'):
             fetch.download('elsewhere/test.dump', 'recovered.dump')
 
+    def test_typo_cannot_silently_disable_offsite_backup(self):
+        os.environ['BACKUP_S3_ENABLED'] = 'treu'
+        with self.assertRaisesRegex(w.Failure, 'invalid_configuration'):
+            w.cycle()
+
+    def test_failed_old_object_does_not_starve_newer_backups(self):
+        self.archive()
+        w.atomic('grit-z.dump.pending.json', {'sha256': 'test'})
+        with patch.object(w, 'upload', side_effect=[w.Failure('local_archive_changed'), None]) as upload:
+            with self.assertRaisesRegex(w.Failure, 'local_archive_changed'):
+                w.cycle()
+            self.assertEqual(upload.call_count, 2)
+
     def test_private_backup_template_never_overwrites(self):
         spec = importlib.util.spec_from_file_location('init_backup_env', ROOT / 'deploy/init_backup_env.py')
         module = importlib.util.module_from_spec(spec)
