@@ -8,7 +8,7 @@ permissions:
 jobs:
   docker-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,4 +19,6 @@ jobs:
       - run: docker build -t grit-wms:hostkey .
       - run: docker build -f deploy/backup.Dockerfile -t grit-wms-backup:hostkey .
       - run: docker pull postgres:17-bookworm
+      - run: docker build -f tests/deployment/s3.Dockerfile -t grit-s3-test:local .
       - run: python deploy/verify_stack.py
+      - run: python deploy/verify_stack.py --s3
