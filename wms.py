@@ -1447,7 +1447,10 @@ async function refreshPdfMode(){
   btn.textContent='PDF-контроль: '+(pdfModeEnabled?'ВКЛ':'ВЫКЛ');
   btn.classList.toggle('enabled',pdfModeEnabled);
   document.getElementById('pdfModeInfo').textContent=pdfModeEnabled?
-   'Только заказы из PDF. Ошибки блокируются.':'Обычная сборка, прежняя логика WB.';
+   'PDF-контроль автоматически включён. Ошибки блокируются.':
+   (Number(d.orders_available||0)===0?
+    'В реестре PDF пока 0 заказов. Сначала загрузи PDF через менеджерскую панель.':
+    'Обычная сборка: PDF-контроль отключён вручную.');
  }catch(e){}
 }
 async function togglePdfMode(){
@@ -3583,16 +3586,24 @@ def start_shift():
 
 
 def pdf_picking_active(shift_id, employee_id):
-    """PDF control is bound to server-side shift state, never a client flag."""
+    """Auto-enable PDF control when orders exist, unless employee opted out.
+
+    No imported PDF orders means legacy picking remains available.
+    The employee's explicit per-shift choice always takes precedence.
+    """
     if not shift_id or not employee_id:
         return False
     row = query_one(
-        "SELECT m.enabled FROM pdf_fbs_shift_modes m "
-        "JOIN shifts s ON s.id=m.shift_id "
-        "WHERE m.shift_id=? AND s.employee_id=? AND s.ended_at IS NULL",
+        "SELECT m.enabled FROM shifts s "
+        "LEFT JOIN pdf_fbs_shift_modes m ON m.shift_id=s.id "
+        "WHERE s.id=? AND s.employee_id=? AND s.ended_at IS NULL",
         (shift_id, employee_id),
     )
-    return bool(row and row[0])
+    if row is None:
+        return False
+    if row[0] is not None:
+        return bool(row[0])
+    return bool(query_one("SELECT 1 FROM pdf_fbs_orders LIMIT 1"))
 
 
 @wms_bp.route("/api/fbs/pdf-mode", methods=["GET", "POST"])
@@ -3623,7 +3634,9 @@ def fbs_pdf_mode():
             "DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at",
             (shift_id, int(enabled), now_iso()),
         )
-    return jsonify(ok=True, enabled=pdf_picking_active(shift_id, employee["id"]))
+    available = query_one("SELECT COUNT(*) FROM pdf_fbs_orders")
+    return jsonify(ok=True, enabled=pdf_picking_active(shift_id, employee["id"]),
+                   orders_available=int(available[0] if available else 0))
 
 
 @wms_bp.post("/api/fbs/scan")
