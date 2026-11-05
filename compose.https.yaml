@@ -1,0 +1,27 @@
+# Optional overlay. Do not activate before DNS/TLS/cutover approval.
+services:
+  app:
+    # Compose >=2.24.4. Remove even the loopback host port; Caddy uses web network.
+    ports: !override []
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      GRIT_ACME_EMAIL: ${GRIT_ACME_EMAIL:?Set certificate contact email}
+      GRIT_ADMIN_CIDRS: ${GRIT_ADMIN_CIDRS:-127.0.0.1/32 ::1/128}
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./deploy/https/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${GRIT_DATA_ROOT:-/opt/grit-data}/caddy/data:/data
+      - ${GRIT_DATA_ROOT:-/opt/grit-data}/caddy/config:/config
+    networks: [web]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"

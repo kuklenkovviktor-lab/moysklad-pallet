@@ -1,0 +1,29 @@
+{
+    email {$GRIT_ACME_EMAIL}
+    admin off
+}
+
+gritwms.space {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "frame-ancestors 'none'"
+        Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+        -Server
+    }
+    @internal path /api/health /api/startup /api/system/status /metrics /debug /debug/* /setup/*
+    respond @internal 404
+    @untrusted_management {
+        path /manager* /api/manager/* /api/admin/* /api/partners/accounts /integrations* /api/integrations/* /badges /history /stats /api/history /api/stats/* /api/fbs/dashboard /api/fbs/overview /api/fbs/journal /api/fbs/hourly /api/operations/deviations /api/wb/* /api/receiving/overview /receiving-monitor /fbs-journal /fbs-manager /api/print-agent/* /supervisor-terminal/setup
+        not remote_ip {$GRIT_ADMIN_CIDRS:127.0.0.1/32 ::1/128}
+    }
+    respond @untrusted_management 404
+    reverse_proxy app:8000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+}
