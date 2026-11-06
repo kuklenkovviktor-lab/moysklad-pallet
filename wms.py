@@ -193,6 +193,11 @@ def execute(query, params=()):
 def init_wms_db():
     global _DB_READY
     statements = [
+        """CREATE TABLE IF NOT EXISTS fbs_scan_requests (
+            request_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL,
+            shift_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+            barcode TEXT NOT NULL, product_barcode TEXT NOT NULL
+        )""",
         """
         CREATE TABLE IF NOT EXISTS employees (
             id TEXT PRIMARY KEY,
@@ -484,8 +489,8 @@ def init_wms_db():
         scanner_code = make_badge_scanner_code(emp_id)
         if query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
             execute(
-                "UPDATE employees SET name = ?, role = ?, badge_number = ?, badge_code = ?, scanner_code = ?, rate = ?, target = ?, active = 1 WHERE id = ?",
-                (name, role, badge_number, badge_code, scanner_code, RATE, TARGET, emp_id),
+                "UPDATE employees SET badge_code = ?, scanner_code = ? WHERE id = ?",
+                (badge_code, scanner_code, emp_id),
             )
         else:
             execute(
@@ -500,7 +505,7 @@ def init_wms_db():
     try:
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_barcode_unique ON scans(barcode)")
     except Exception:
-        pass
+        raise RuntimeError("Не удалось создать обязательную защиту от повторных WB-сканов. Проверьте дубли scans.barcode; данные автоматически не исправлялись.") from None
     try:
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_scanner_code ON employees(scanner_code)")
     except Exception:
@@ -675,39 +680,45 @@ def log_event(
 
 
 def ensure_active_shift(employee_id, initial_activity="other"):
-    existing = query_one(
-        "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
-        (employee_id,),
-    )
-    if existing:
-        return existing[0], False
-
-    shift_id = str(uuid.uuid4())
-    ts = now_iso()
-    execute(
-        "INSERT INTO shifts (id, employee_id, started_at, ended_at) VALUES (?, ?, ?, NULL)",
-        (shift_id, employee_id, ts),
-    )
-    execute(
-        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        (str(uuid.uuid4()), shift_id, employee_id, initial_activity, ts),
-    )
-    log_event(employee_id, "shift", "start", shift_id=shift_id, result=initial_activity)
-    return shift_id, True
+    from fbs_transactions import event
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            if not DATABASE_URL:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute(sql("SELECT id FROM employees WHERE id=?" + (" FOR NO KEY UPDATE" if DATABASE_URL else "")), (employee_id,))
+            if not cur.fetchone():
+                raise ValueError("Сотрудник не найден")
+            cur.execute(sql("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1"), (employee_id,))
+            existing = cur.fetchone()
+            if existing:
+                return existing[0], False
+            shift_id, ts = str(uuid.uuid4()), now_iso()
+            cur.execute(sql("INSERT INTO shifts (id,employee_id,started_at) VALUES (?,?,?)"), (shift_id, employee_id, ts))
+            cur.execute(sql("INSERT INTO activities (id,shift_id,employee_id,activity_type,started_at) VALUES (?,?,?,?,?)"), (str(uuid.uuid4()), shift_id, employee_id, initial_activity, ts))
+            event(cur, employee_id, shift_id, "shift", "start", result=initial_activity)
+            conn.commit()
+            return shift_id, True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
 
 
 def switch_activity(shift_id, employee_id, activity_type):
-    current = current_activity(shift_id)
-    if current and current["type"] == activity_type:
-        return False
-    ts = now_iso()
-    execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
-    execute(
-        "INSERT INTO activities (id, shift_id, employee_id, activity_type, started_at, ended_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        (str(uuid.uuid4()), shift_id, employee_id, activity_type, ts),
-    )
-    log_event(employee_id, activity_type, "switch", shift_id=shift_id, result="active")
-    return True
+    from fbs_transactions import shift_transaction, active_worker, event
+    with shift_transaction(shift_id) as (cur, shift):
+        active_worker(cur, shift, shift_id, employee_id, picking=False)
+        cur.execute(sql("SELECT activity_type FROM activities WHERE shift_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1"), (shift_id,))
+        current = cur.fetchone()
+        if current and current[0] == activity_type:
+            return False
+        ts = now_iso()
+        cur.execute(sql("UPDATE activities SET ended_at=? WHERE shift_id=? AND ended_at IS NULL"), (ts, shift_id))
+        cur.execute(sql("INSERT INTO activities (id,shift_id,employee_id,activity_type,started_at) VALUES (?,?,?,?,?)"), (str(uuid.uuid4()), shift_id, employee_id, activity_type, ts))
+        event(cur, employee_id, shift_id, activity_type, "switch", result="active")
+        return True
 
 
 def current_activity(shift_id):
@@ -1462,6 +1473,7 @@ async function refresh(){
  if(toggle)toggle.textContent=labels[d.activity]||'Другая работа';
  const back=document.getElementById('backToPicking');
  if(back)back.classList.toggle('hidden',d.activity==='picking');
+ if(queuedFbsScan())await retryFbsOutbox();
  await refreshPendingProduct();
 }
 function updateScanStage(){
@@ -1508,29 +1520,54 @@ async function acceptProduct(code){
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
  return true;
 }
+const FBS_OUTBOX_KEY='grit_fbs_unconfirmed_v1';
+let fbsRecovering=false;
+function queuedFbsScan(){
+ const raw=localStorage.getItem(FBS_OUTBOX_KEY);
+ if(!raw)return null;
+ try{return JSON.parse(raw)}catch(e){throw new Error('Повреждена ожидающая операция. Нужна проверка руководителя.')}
+}
+async function sendFbsScan(payload){
+ const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+ const d=await r.json();
+ if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);showTsdError(d.error||'Ошибка ШК WB');return false}
+ localStorage.removeItem(FBS_OUTBOX_KEY);
+ pendingProduct=null;updateScanStage();beep(true);
+ document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
+ return true;
+}
+async function retryFbsOutbox(){
+ const queued=queuedFbsScan();if(!queued||fbsRecovering)return false;
+ if(queued.shift_id!==shiftId){showTsdError('Есть неподтверждённый скан другой смены. Нужна сверка руководителя.');return false}
+ fbsRecovering=true;
+ try{return await sendFbsScan(queued)}
+ catch(e){showTsdError('Нет подтверждения сервера. Скан сохранён; повторим после восстановления связи.');return false}
+ finally{fbsRecovering=false}
+}
 async function acceptWb(code){
+ if(queuedFbsScan())return await retryFbsOutbox();
  const p=pendingProduct;if(!p)return false;
  if(code===p.barcode){
   showTsdError('❌ ДВА РАЗА ОТСКАНИРОВАН ТОВАР. Заказ не засчитан. Отсканируй стикер WB.');
   return false;
  }
- const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-  shift_id:shiftId,barcode:code,product_barcode:p.barcode,article:p.article,product_name:p.name,scan_type:'normal'
- })});
- const d=await r.json();
- if(!r.ok){showTsdError(d.error||'Ошибка ШК WB');return false}
- pendingProduct=null;updateScanStage();beep(true);
- document.getElementById('result').innerHTML='<div class="ok">✅ +1 заказ · '+esc(p.article||p.barcode)+' → '+esc(code)+'</div>';
- await refresh();return true;
+ const payload={request_id:crypto.randomUUID(),shift_id:shiftId,barcode:code,
+  product_barcode:p.barcode,article:p.article,product_name:p.name,scan_type:'normal'};
+ // If durable storage is unavailable, fail BEFORE sending anything to the server.
+ localStorage.setItem(FBS_OUTBOX_KEY,JSON.stringify(payload));
+ const result=await retryFbsOutbox();
+ if(result)await refresh();
+ return result;
 }
 async function handleScan(code){
  code=(code||'').trim();if(!code||busy||!shiftId)return;
  busy=true;
  try{
+  if(queuedFbsScan()){await retryFbsOutbox();await refresh();return}
   if(pendingProduct && /^97[0-9]{22}$/.test(code))await acceptSkipQr(code);
   else if(pendingProduct)await acceptWb(code);
   else await acceptProduct(code);
- }finally{
+ }catch(e){showTsdError('Нет подтверждения сервера. Обнови связь; ожидающий товар сохранён.')}finally{
   setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},60);
  }
 }
@@ -2702,10 +2739,8 @@ def auth_logout():
     )
     if row:
         shift_id = row[0]
-        ts = now_iso()
-        execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
-        execute("UPDATE shifts SET ended_at = ? WHERE id = ?", (ts, shift_id))
-        log_event(emp["id"], "shift", "end", shift_id=shift_id, object_code="supervisor-qr", result="ok")
+        from fbs_transactions import close_shift
+        close_shift(shift_id, emp["id"])
 
     log_event(emp["id"], "auth", "logout", object_code="supervisor-qr", result="ok")
     session.clear()
@@ -2880,7 +2915,9 @@ def manager_force_close_shift():
     with db_connect() as conn:
         cur = conn.cursor()
         try:
-            cur.execute(sql("SELECT employee_id, started_at, ended_at FROM shifts WHERE id = ?"), (shift_id,))
+            if not DATABASE_URL:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute(sql("SELECT employee_id, started_at, ended_at FROM shifts WHERE id = ?" + (" FOR UPDATE" if DATABASE_URL else "")), (shift_id,))
             shift = cur.fetchone()
             if shift is None:
                 return jsonify(error="Смена не найдена"), 404
@@ -3655,12 +3692,6 @@ def fbs_skip_item():
         item = consume_skip_code(code, shift_id, emp["id"])
     except ValueError as exc:
         return jsonify(error=str(exc)), 409
-    log_event(
-        emp["id"], "fbs", "fbs_item_skip", shift_id=shift_id,
-        object_code=item["barcode"], article=item["article"] or None,
-        product_name=item["name"] or None, result="supervisor-one-time-qr",
-        quantity=0,
-    )
     return jsonify(ok=True, skipped=True, order_counted=False)
 
 
@@ -3691,11 +3722,39 @@ def fbs_scan():
     )
     if not shift:
         return jsonify(error="Смена не найдена"), 404
-    if shift[1]:
-        return jsonify(error="Смена уже завершена"), 409
     if shift[0] != employee["id"]:
         return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
 
+    request_id = str(data.get("request_id") or "").strip()
+    if request_id:
+        try:
+            request_id = str(uuid.UUID(request_id))
+        except ValueError:
+            return jsonify(error="Неверный номер операции"), 400
+    from fbs_transactions import replay, commit_scan
+    if request_id or pdf_picking_active(shift_id, employee["id"]):
+        from wb_qr_codec import canonical_wb_sticker
+        barcode = canonical_wb_sticker(barcode)
+    try:
+        if replay(request_id, shift_id, employee["id"], barcode, product_barcode):
+            return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409
+
+    if request_id:
+        try:
+            replayed = commit_scan(shift_id, employee["id"], barcode, product_barcode,
+                                   article, product_name, None, scan_type, request_id, True)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 409
+        except Exception:
+            if query_one("SELECT id FROM scans WHERE barcode=?", (barcode,)):
+                return jsonify(error="Этот заказ уже был засчитан"), 409
+            raise
+        return jsonify(ok=True, replayed=replayed, **shift_stats(shift_id))
+
+    if shift[1]:
+        return jsonify(error="Смена уже завершена"), 409
     active = current_activity(shift_id)
     if not active or active["type"] != "picking":
         log_event(
@@ -3840,38 +3899,19 @@ def fbs_scan():
         return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[1])), 409
 
     try:
-        execute(
-            """
-            INSERT INTO scans
-            (id, shift_id, employee_id, barcode, product_barcode, article, product_name, wb_order_id, scan_type, scanned_at, marketplace)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'WB')
-            """,
-            (str(uuid.uuid4()), shift_id, shift[0], barcode, product_barcode, article or None, product_name or None, wb_order_id, scan_type, now_iso()),
-        )
+        replayed = commit_scan(shift_id, employee["id"], barcode, product_barcode,
+                               article, product_name, wb_order_id, scan_type,
+                               request_id, bool(request_id or pdf_control or pending))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409
     except Exception:
-        duplicate = query_one(
-            "SELECT e.name FROM scans s JOIN employees e ON e.id = s.employee_id WHERE s.barcode = ? LIMIT 1",
-            (barcode,),
-        )
+        # A concurrent scan from a different shift may win the global WB unique
+        # index. It is a conflict, not a replay for this employee/request.
+        duplicate = query_one("SELECT id FROM scans WHERE barcode=?", (barcode,))
         if duplicate:
-            return jsonify(error="Этот заказ уже был засчитан: " + str(duplicate[0])), 409
+            return jsonify(error="Этот заказ уже был засчитан"), 409
         raise
-
-    # A confirmed WB sticker completes the current item stage.
-    from fbs_skip_authorization import complete_pending_item
-    complete_pending_item(shift_id, employee["id"], product_barcode)
-
-    log_event(
-        shift[0],
-        "fbs",
-        "scan",
-        shift_id=shift_id,
-        object_code=barcode,
-        quantity=1,
-        result=(article or product_barcode) + "|" + scan_type,
-    )
-    stats = shift_stats(shift_id)
-    return jsonify(ok=True, **stats)
+    return jsonify(ok=True, replayed=replayed, **shift_stats(shift_id))
 
 
 @wms_bp.post("/api/fbs/activity")
@@ -3915,10 +3955,8 @@ def end_shift():
         return jsonify(error="Эта смена принадлежит другому сотруднику"), 403
     if shift[2]:
         return jsonify(ok=True, already_ended=True)
-    ts = now_iso()
-    execute("UPDATE activities SET ended_at = ? WHERE shift_id = ? AND ended_at IS NULL", (ts, shift_id))
-    execute("UPDATE shifts SET ended_at = ? WHERE id = ?", (ts, shift_id))
-    log_event(shift[1], "shift", "end", shift_id=shift_id, object_code="supervisor-qr", result="ok")
+    from fbs_transactions import close_shift
+    close_shift(shift_id, shift[1])
     return jsonify(ok=True, stats=shift_stats(shift_id))
 
 

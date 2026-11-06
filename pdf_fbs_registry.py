@@ -62,7 +62,15 @@ def import_pdf_orders(report, sha256):
                         "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (wb_barcode) DO NOTHING"),
                     (code, article, barcode, wb_id or None, sha256, at),
                 )
-                imported += max(0, cur.rowcount or 0)
+                inserted = max(0, cur.rowcount or 0)
+                if not inserted:
+                    # A concurrent import may have inserted after the preflight.
+                    # Validate the winning mapping instead of silently ignoring it.
+                    cur.execute(sql("SELECT article,product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?"), (code,))
+                    winner = cur.fetchone()
+                    if not winner or str(winner[0]).casefold() != article.casefold() or winner[1] != barcode:
+                        raise ValueError("Стикер " + code + " уже привязан к другому товару")
+                imported += inserted
             conn.commit()
         except Exception:
             conn.rollback()
