@@ -93,3 +93,30 @@ class MigrationTests(unittest.TestCase):
     def test_remote_connection_requires_verified_tls_before_network_access(self):
         with self.assertRaisesRegex(m.Refused, 'verify-full'):
             m.connection('host=render.example.invalid dbname=grit sslmode=prefer')
+
+    def create_request_ledger(self):
+        with m.connection(self.dsn) as conn:
+            conn.execute('CREATE TABLE fbs_scan_requests (request_id TEXT PRIMARY KEY,scan_id TEXT NOT NULL,shift_id TEXT NOT NULL,employee_id TEXT NOT NULL,barcode TEXT NOT NULL,product_barcode TEXT NOT NULL)')
+
+    def test_post_startup_comparison_accepts_real_pr93_empty_schema(self):
+        baseline=m.snapshot(self.dsn)
+        self.create_request_ledger()
+        after=m.snapshot(self.dsn)
+        self.assertEqual(m.compare_rollout(baseline,after),[])
+        self.assertIn('tables mismatch',m.compare(baseline,after))
+
+    def test_existing_request_ledger_must_preserve_all_records(self):
+        self.create_request_ledger()
+        with m.connection(self.dsn) as conn:
+            conn.execute("INSERT INTO fbs_scan_requests VALUES ('r1','scan1','shift1','e1','WB-test','SKU-test')")
+        baseline=m.snapshot(self.dsn)
+        self.assertEqual(m.compare_rollout(baseline,m.snapshot(self.dsn)),[])
+        with m.connection(self.dsn) as conn:
+            conn.execute("UPDATE fbs_scan_requests SET barcode='changed'")
+        self.assertTrue(m.compare_rollout(baseline,m.snapshot(self.dsn)))
+
+    def test_post_startup_comparison_rejects_existing_schema_drift(self):
+        baseline=m.snapshot(self.dsn)
+        with m.connection(self.dsn) as conn:
+            conn.execute('ALTER TABLE employees ADD COLUMN unexpected text')
+        self.assertTrue(m.compare_rollout(baseline,m.snapshot(self.dsn)))
