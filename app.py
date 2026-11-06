@@ -2165,6 +2165,12 @@ def receipt_document_status(receipt_id):
 
 
 def add_or_increment_position(receipt_id, product, pack, requested_qty=None, enforce_pack_limit=True):
+    from receiving_lock import receipt_write_lock
+    with receipt_write_lock(receipt_id):
+        return _add_or_increment_position_locked(receipt_id, product, pack, requested_qty, enforce_pack_limit)
+
+
+def _add_or_increment_position_locked(receipt_id, product, pack, requested_qty=None, enforce_pack_limit=True):
     receipt = get_receipt(receipt_id)
     if receipt.get("applicable"):
         raise ValueError("Это Оприходование уже проведено. Открой черновик или создай новое.")
@@ -2351,6 +2357,12 @@ def new_receipt():
 
 @app.post("/api/receipts/<receipt_id>/complete")
 def finish_receipt(receipt_id):
+    from receiving_lock import receipt_write_lock
+    with receipt_write_lock(receipt_id):
+        return _finish_receipt_locked(receipt_id)
+
+
+def _finish_receipt_locked(receipt_id):
     try:
         if has_unresolved_operations(receipt_id):
             return jsonify(error="Есть неподтверждённая операция приёмки. Сначала сверь документ МойСклад."), 409
