@@ -24,7 +24,9 @@ HOSTKEY WMS. Пока рабочая WMS на Render, её сервисы/БД �
 
 ## 1. Идентификация и защищённая точка сохранения
 
-Команды выполняются в Bash на VPS владельцем с Docker/root-доступом. Не включать
+Команды выполняются в одном Bash-сеансе на VPS владельцем с Docker/root-доступом.
+После разрыва сеанса не продолжать с середины: сначала восстановить контекст
+из защищённого GRIT_STATE и повторить диагностику, а не повторять deployment вслепую. Не включать
 `set -x`, не отправлять вывод `.env`/полного inspect/compose config в чат.
 
 ```bash
@@ -106,9 +108,11 @@ mv "$GRIT_BUNDLE_ROOT/emergency.dump.partial" "$GRIT_BUNDLE_ROOT/emergency.dump"
 
 ```bash
 : "${GRIT_APPROVED_COMMIT:?Set the exact reviewed release SHA first}"
+[[ "$GRIT_APPROVED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo 'Use a full immutable commit SHA, not a branch/tag' >&2; exit 1; }
 git fetch origin
 git cat-file -e "${GRIT_APPROVED_COMMIT}^{commit}"
 git switch --detach "$GRIT_APPROVED_COMMIT"
+test "$(git rev-parse HEAD)" = "$GRIT_APPROVED_COMMIT"
 test -f compose.ops.yaml
 cmp -s .env "$GRIT_STATE/env.saved"
 if test -f "$GRIT_STATE/env.backup.saved"; then cmp -s .env.backup "$GRIT_STATE/env.backup.saved"; fi
