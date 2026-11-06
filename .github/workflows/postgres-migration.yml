@@ -1,0 +1,16 @@
+name: PostgreSQL migration preflight
+on:
+  pull_request:
+    paths: ['deploy/migration/**', 'deploy/verify_migration_postgres.py', 'tests/test_migration_postgres.py', '.github/workflows/postgres-migration.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/migration/Dockerfile -t grit-migration:test .
+      - run: docker build -t grit-wms:migration-trial .
+      - run: python3 deploy/verify_migration_postgres.py
