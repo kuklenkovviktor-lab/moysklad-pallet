@@ -15,7 +15,7 @@ def generate(path=Path('.env')):
         for name, value in values.items():
             output.write(f'{name}={value}\n')
         output.write('GRIT_DATA_ROOT=/opt/grit-data\nGRIT_PORT=8000\n')
-        output.write('BACKUP_INTERVAL_SECONDS=86400\nBACKUP_RETENTION_DAYS=14\n')
+        output.write('BACKUP_INTERVAL_SECONDS=86400\nBACKUP_S3_ENABLED=0\nBACKUP_ALERT_REQUIRED=0\n')
 
 
 if __name__ == '__main__':
