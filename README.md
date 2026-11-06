@@ -55,3 +55,6 @@ Bluetooth/USB-сканер должен работать как клавиату
 Docker Compose с отдельной PostgreSQL, генерацией тестовых секретов и резервным
 копированием: [инструкция HOSTKEY](docs/HOSTKEY_DEPLOYMENT.md).
 Рабочий Render, производственные данные и DNS эта конфигурация не изменяет.
+
+Обновление backup для Yandex Object Storage и Telegram:
+[ручная инструкция без изменения app/db](docs/HOSTKEY_BACKUP_UPDATE.md).
