@@ -19,7 +19,7 @@ from onix_usb_print_test import (
 )
 
 DEFAULT_SERVER = "https://onix-wms-frankfurt.onrender.com"
-ALLOWED_SERVERS = {DEFAULT_SERVER}
+ALLOWED_SERVERS = {DEFAULT_SERVER, 'https://gritwms.space'}
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -103,6 +103,8 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description="ONIX agent: one cloud diagnostic label")
     parser.add_argument("--once",action="store_true",
                         help="Забрать максимум одно тестовое задание, не выполнять автоповторы")
+    parser.add_argument('--server',choices=sorted(ALLOWED_SERVERS),default=DEFAULT_SERVER,
+                        help='Explicitly select HOSTKEY after cutover; never run agents against both servers')
     args=parser.parse_args(argv)
     if not args.once:
         parser.error("Используй --once (фоновый режим специально отключён)")
@@ -110,7 +112,7 @@ def main(argv=None):
     if not token:
         token=getpass.getpass("Введи ONIX_PRINT_AGENT_TOKEN (скрытый ввод): ").strip()
     try:
-        run_once(DEFAULT_SERVER,token)
+        run_once(args.server,token)
     except (PrintAgentError,PrintPilotError) as exc:
         print("ONIX агент остановлен: "+str(exc))
         return 1

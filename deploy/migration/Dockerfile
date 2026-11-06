@@ -6,6 +6,6 @@ RUN --mount=type=secret,id=proxy_ca \
 FROM postgres:17-bookworm
 COPY --from=python /usr/local /usr/local
 WORKDIR /tools
-COPY deploy/migration/migration_tool.py deploy/migration/ops_entrypoint.py /tools/
+COPY --chmod=0444 deploy/migration/migration_tool.py deploy/migration/ops_entrypoint.py deploy/migration/input_entrypoint.py /tools/
 ENV PYTHONPATH=/tools PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["python3", "/tools/migration_tool.py"]

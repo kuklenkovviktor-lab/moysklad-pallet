@@ -7,3 +7,4 @@ FROM postgres:17-bookworm
 # Both stages use Debian bookworm. Keep PostgreSQL 17 client tools from this base.
 COPY --from=python /usr/local /usr/local
 COPY --chmod=0555 deploy/backup-*.sh deploy/restore.sh deploy/backup_worker.py deploy/fetch_s3.py /scripts/
+COPY --chmod=0555 deploy/migration/copy_bundle_s3.py /scripts/copy_bundle_s3.py

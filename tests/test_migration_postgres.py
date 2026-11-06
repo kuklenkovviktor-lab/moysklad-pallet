@@ -90,6 +90,38 @@ class MigrationTests(unittest.TestCase):
         with m.connection(self.dsn) as conn: conn.execute('ALTER TABLE scans ADD COLUMN extra text')
         self.assertIn('tables mismatch',m.compare(expected,m.snapshot(self.dsn)))
 
+    def test_sequence_and_identity_state_survives_and_changes_are_detected(self):
+        with m.connection(self.dsn) as conn:
+            conn.execute('CREATE TABLE serial_probe(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY)')
+            conn.execute('INSERT INTO serial_probe DEFAULT VALUES')
+            conn.execute("SELECT setval('serial_probe_id_seq',41,true)")
+        before=m.export(self.dsn,self.bundle)
+        restored=m.trial_restore(self.admin,self.bundle,self.target)
+        self.assertEqual(before['sequences'],restored['sequences'])
+        values=m.conninfo_to_dict(self.admin);values['dbname']=self.target
+        target=m.make_conninfo(**values)
+        with m.connection(target) as conn:
+            self.assertEqual(conn.execute("SELECT nextval('serial_probe_id_seq')").fetchone()[0],42)
+        self.assertIn('sequences mismatch',m.compare(before,m.snapshot(target)))
+
+    def test_unverified_storage_is_refused_instead_of_omitted(self):
+        with m.connection(self.dsn) as conn:
+            conn.execute('CREATE SCHEMA extra; CREATE TABLE extra.unverified(id int)')
+        with self.assertRaisesRegex(m.Refused,'Non-public'):m.snapshot(self.dsn)
+
+    def test_large_objects_are_refused_until_content_audited(self):
+        with m.connection(self.dsn) as conn:conn.execute('SELECT lo_create(0)')
+        with self.assertRaisesRegex(m.Refused,'Large objects'):m.snapshot(self.dsn)
+
+    def test_upgrade_startup_allows_version_change_but_never_lost_rows(self):
+        before=m.snapshot(self.dsn)
+        upgraded=dict(before,server_version=before['server_version']+10000)
+        self.assertEqual(m.compare_restored_startup(before,upgraded),[])
+        older=dict(before,server_version=before['server_version']-10000)
+        self.assertTrue(m.compare_restored_startup(before,older))
+        changed=json.loads(json.dumps(upgraded));changed['tables']['scans']['rows']=0
+        self.assertTrue(m.compare_restored_startup(before,changed))
+
     def test_remote_connection_requires_verified_tls_before_network_access(self):
         with self.assertRaisesRegex(m.Refused, 'verify-full'):
             m.connection('host=render.example.invalid dbname=grit sslmode=prefer')

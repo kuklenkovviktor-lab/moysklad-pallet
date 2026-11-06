@@ -148,6 +148,28 @@ def main():
             dc('run', '--rm', '--no-deps', '--entrypoint', 'python3', 'backup', '/scripts/fetch_s3.py', receipt['key'], 's3-recovered-test.dump', receipt['sha256'])
             dc('run', '--rm', '--no-deps', '--entrypoint', 'sh', 'backup', '/scripts/restore.sh', '/backups/s3-recovered-test.dump', 'restore_check_s3')
             assert sql('SELECT value FROM deployment_probe', 'restore_check_s3') == 'retained'
+            # Complete migration bundle: three independent conditional objects,
+            # each verified with HEAD and full GET, rather than dump alone.
+            bundle_dir=data/'migration-copy';bundle_dir.mkdir()
+            run(['docker','run','--rm','--network','none','-v',str(bundle_dir)+':/bundle','postgres:17-bookworm','sh','-c','chown 0:0 /bundle && chmod 700 /bundle'],capture_output=True)
+            create_bundle=("from pathlib import Path;import hashlib,json; "
+                           "p=Path('/bundle');p.joinpath('database.dump').write_bytes(Path("+repr(archive)+").read_bytes()); "
+                           "p.joinpath('manifest.json').write_text('{\"synthetic_storage_test\":true}'); "
+                           "p.joinpath('checksums.json').write_text(json.dumps({n:hashlib.sha256(p.joinpath(n).read_bytes()).hexdigest() for n in ('database.dump','manifest.json')}))")
+            dc('run','--rm','--no-deps','-v',str(bundle_dir)+':/bundle','--entrypoint','python3','backup','-c',create_bundle)
+            dc('run','--rm','--no-deps','-v',str(bundle_dir)+':/bundle','--entrypoint','python3','backup','/scripts/copy_bundle_s3.py')
+            test_condition="from pathlib import Path;import sys,json;sys.path.insert(0,'/scripts');import copy_bundle_s3 as c;from backup_worker import s3_client; p=Path('/bundle');r=json.loads(next(p.glob('external-copy-*.json')).read_text());assert len(r['objects'])==3; obj=r['objects'][0];client=s3_client();failed=False\ntry:c.upload_object(client,r['bucket'],obj['key'],p/'database.dump',{'ServerSideEncryption':'AES256'})\nexcept Exception:failed=True\nassert failed;assert client.head_object(Bucket=r['bucket'],Key=obj['key'])['Metadata']['sha256']==obj['sha256'];print('PASS: full migration bundle S3 copy and pre-existing object refusal')"
+            dc('run','--rm','--no-deps','-v',str(bundle_dir)+':/bundle','--entrypoint','python3','backup','-c',test_condition)
+            dc('run','--rm','--no-deps','--entrypoint','python3','backup','-c',"import sys;sys.path.insert(0,'/scripts');from backup_worker import s3_client; s3_client().put_bucket_versioning(Bucket='grit-isolated-tests',VersioningConfiguration={'Status':'Enabled'})")
+            dc('run','--rm','--no-deps','-v',str(bundle_dir)+':/bundle','--entrypoint','python3','backup','/scripts/copy_bundle_s3.py')
+            dc('run','--rm','--no-deps','-v',str(bundle_dir)+':/bundle','--entrypoint','python3','backup','-c',"from pathlib import Path;import json; receipts=[json.loads(p.read_text()) for p in Path('/bundle').glob('external-copy-*.json')];assert any(all(o['version_id'] and o['version_id']!='null' for o in r['objects']) for r in receipts)")
+            # The separate original-files archive uses the same verified protocol.
+            from migrate import pack_files
+            originals=data/'original-files';originals.mkdir();(originals/'WB.pdf').write_bytes(b'synthetic-original-pdf')
+            file_bundle=data/'file-bundle';pack_files(originals,file_bundle)
+            dc('run','--rm','--no-deps','--user',str(os.getuid())+':'+str(os.getgid()),'-v',str(file_bundle)+':/bundle','--entrypoint','python3','backup','/scripts/copy_bundle_s3.py')
+            assert len(list(file_bundle.glob('external-copy-*.json')))==1
+            print('PASS: versioned and unversioned S3 bundles; original-file archive independently copied')
             # Real network failure of ONLY the disposable emulator: preserve
             # its process/data, and retry the same persistent pending queue.
             run(['docker','network','disconnect',project + '_web',emulator],capture_output=True)

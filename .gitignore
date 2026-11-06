@@ -7,3 +7,5 @@ __pycache__/
 *.sql
 *.pem
 *.key
+*.partial
+*.tar.gz
