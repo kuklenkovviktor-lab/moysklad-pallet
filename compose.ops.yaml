@@ -1,0 +1,22 @@
+# Manual tools only. Does not start or recreate any db/app/backup service.
+services:
+  ops:
+    profiles: [ops]
+    image: grit-migration:ops
+    build:
+      context: .
+      dockerfile: deploy/migration/Dockerfile
+    entrypoint: [python3, /tools/ops_entrypoint.py]
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: grit
+      PGDATABASE: grit
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Preserve the existing .env}
+    volumes:
+      - ${GRIT_OPERATIONS_DIR:?Set a new protected operations directory}:/operations
+    networks: [database]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
