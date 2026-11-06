@@ -1,7 +1,7 @@
 name: PostgreSQL migration preflight
 on:
   pull_request:
-    paths: ['deploy/migration/**', 'deploy/verify_migration_postgres.py', 'tests/test_migration_postgres.py', '.github/workflows/postgres-migration.yml']
+    paths: ['compose.ops.yaml', 'deploy/verify_rollout.py', 'tests/deployment/test_rollout_tools.py', 'deploy/migration/**', 'deploy/verify_migration_postgres.py', 'tests/test_migration_postgres.py', '.github/workflows/postgres-migration.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +11,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests/deployment -p test_rollout_tools.py -v
       - run: docker build -f deploy/migration/Dockerfile -t grit-migration:test .
       - run: docker build -t grit-wms:migration-trial .
       - run: python3 deploy/verify_migration_postgres.py

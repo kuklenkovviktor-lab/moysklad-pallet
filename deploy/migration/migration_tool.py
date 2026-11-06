@@ -156,6 +156,39 @@ def compare(expected, actual):
     return problems
 
 
+def approved_empty_request_table(table):
+    names=('request_id','scan_id','shift_id','employee_id','barcode','product_barcode')
+    return (table.get('rows')==0 and table.get('sha256')==hashlib.sha256(b'').hexdigest()
+            and table.get('columns')==[[name,'text','text','NO',None] for name in names]
+            and table.get('constraints')==[['fbs_scan_requests_pkey','PRIMARY KEY (request_id)',True]]
+            and table.get('indexes')==[['fbs_scan_requests_pkey','CREATE UNIQUE INDEX fbs_scan_requests_pkey ON public.fbs_scan_requests USING btree (request_id)']])
+
+
+def compare_rollout(expected, actual):
+    """No existing data/schema drift; only PR93's exact NEW empty table allowed."""
+    problems=[]
+    if actual['server_version']!=expected['server_version']:
+        problems.append('PostgreSQL version changed during application-only rollout')
+    for name,before in expected['tables'].items():
+        if actual['tables'].get(name)!=before:
+            problems.append('Existing table changed: '+name)
+    extra=set(actual['tables'])-set(expected['tables'])
+    if extra:
+        if extra!={'fbs_scan_requests'} or not approved_empty_request_table(actual['tables']['fbs_scan_requests']):
+            problems.append('Unapproved schema addition or nonempty new request ledger')
+    previous=expected['integrity'];current=actual['integrity']
+    if any(current.values()) or any(previous.values()):
+        problems.append('Integrity findings block rollout acceptance')
+    if any(current.get(name)!=value for name,value in previous.items()):
+        problems.append('Integrity counters changed')
+    extra_checks=set(current)-set(previous)
+    if extra_checks-({'orphan_fbs_requests'} if extra=={'fbs_scan_requests'} else set()):
+        problems.append('Unexpected integrity checks')
+    if actual['extensions']!=expected['extensions']:
+        problems.append('Extensions changed')
+    return problems
+
+
 def trial_restore(admin_dsn, bundle, database):
     if not re.fullmatch(r'restore_check_[a-z0-9_]{1,45}',database):
         raise Refused('Target must be a NEW restore_check_* database')
@@ -178,7 +211,7 @@ def trial_restore(admin_dsn, bundle, database):
 def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('snapshot','export','verify','trial-restore'))
+    parser.add_argument('action',choices=('snapshot','export','verify','trial-restore','compare-live'))
     parser.add_argument('--dsn-env',default='GRIT_MIGRATION_DSN')
     parser.add_argument('--confirm-read-only-access',action='store_true')
     parser.add_argument('--bundle',required=True)
@@ -194,6 +227,9 @@ def main():
             if args.action=='export': export(dsn,args.bundle)
             elif args.action=='snapshot': write_json(args.bundle,snapshot(dsn))
             elif args.action=='trial-restore': trial_restore(dsn,args.bundle,args.database or '')
+            elif args.action=='compare-live':
+                problems=compare_rollout(verify_bundle(args.bundle),snapshot(dsn))
+                if problems: raise Refused('; '.join(problems))
         print('Migration check completed; no GRIT process or traffic was started')
     except Exception as error:
         # psycopg exceptions may include secrets, hostnames or record values.

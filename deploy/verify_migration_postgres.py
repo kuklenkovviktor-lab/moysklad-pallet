@@ -36,6 +36,8 @@ def main():
         docker('run','--rm','--network',name,'--entrypoint','python','-e','DATABASE_URL='+dsn,
                *keys,'grit-wms:migration-trial','-c',
                'from wms import init_wms_db; from fbs_catalog import init_fbs_catalog_db; from receiving_idempotency import init_receiving_operations; init_wms_db();init_fbs_catalog_db();init_receiving_operations()')
+        # Only the freshly created artificial DB: simulate the pre-PR93 schema.
+        docker('exec',db,'psql','-v','ON_ERROR_STOP=1','-U','grit','-d','grit','-c','DROP TABLE IF EXISTS fbs_scan_requests')
         docker('run','--rm','--network',name,'-e','GRIT_MIGRATION_DSN='+dsn,
                '-v',str(bundles)+':/bundles','grit-migration:test','export',
                '--confirm-read-only-access','--bundle','/bundles/full-grit')
@@ -51,7 +53,11 @@ def main():
             if probe.returncode==0: break
             time.sleep(1)
         else: raise RuntimeError('Restored GRIT trial application did not become ready')
-        print('PASS: full GRIT snapshot/export/restore/content comparison and actual restored application readiness')
+        trial_dsn='postgresql://grit:isolated-test-only@db:5432/restore_check_trial'
+        docker('run','--rm','--network',name,'-e','GRIT_MIGRATION_DSN='+trial_dsn,
+               '-v',str(bundles)+':/bundles:ro','grit-migration:test','compare-live',
+               '--confirm-read-only-access','--bundle','/bundles/full-grit')
+        print('PASS: pre-PR93 GRIT snapshot/export/restore, restored app readiness and post-startup preservation check')
     finally:
         if app: docker('rm','-f',app,capture_output=True)
         print('Synthetic migration bundles retained at',bundles)
