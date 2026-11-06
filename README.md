@@ -58,3 +58,8 @@ Docker Compose с отдельной PostgreSQL, генерацией тесто
 
 Обновление backup для Yandex Object Storage и Telegram:
 [ручная инструкция без изменения app/db](docs/HOSTKEY_BACKUP_UPDATE.md).
+
+## Совместная приёмка HOSTKEY
+
+[Совместимость PR №92–96 и результаты проверок](docs/HOSTKEY_PR92_96_COMPATIBILITY.md).
+[Ручное обновление без замены PostgreSQL](docs/HOSTKEY_PR92_96_UPDATE.md).

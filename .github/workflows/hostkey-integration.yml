@@ -1,0 +1,35 @@
+name: HOSTKEY PR integration acceptance
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt pytest==8.4.2
+      - run: python -m pytest -q -p no:cacheprovider
+      - run: node tests/test_fbs_outbox.cjs
+      - run: node tests/test_replenishment_scan_focus.cjs
+      - run: docker build -t grit-wms:hostkey .
+      - run: |
+          docker tag grit-wms:hostkey grit-wms:fbs-test
+          docker tag grit-wms:hostkey grit-wms:receiving-test
+          docker tag grit-wms:hostkey grit-wms:migration-trial
+      - run: docker build -f deploy/backup.Dockerfile -t grit-wms-backup:hostkey .
+      - run: docker build -f deploy/migration/Dockerfile -t grit-migration:test .
+      - run: docker tag grit-migration:test grit-migration:ops
+      - run: docker build -f tests/deployment/s3.Dockerfile -t grit-s3-test:local .
+      - run: docker pull caddy:2-alpine
+      - run: python3 deploy/verify_fbs_postgres.py
+      - run: python3 deploy/verify_receiving_postgres.py
+      - run: python3 deploy/verify_migration_postgres.py
+      - run: python3 deploy/verify_stack.py --s3
+      - run: python3 deploy/verify_https.py
+      - run: python3 deploy/verify_rollout.py
