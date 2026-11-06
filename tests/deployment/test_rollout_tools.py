@@ -22,6 +22,7 @@ class RolloutTests(unittest.TestCase):
     def new_table(self):
         return {'rows':0,'sha256':hashlib.sha256(b'').hexdigest(),
                 'columns':[[name,'text','text','NO',None] for name in ('request_id','scan_id','shift_id','employee_id','barcode','product_barcode')],
+                'column_details':[[name,'text',True,'','',None,'pg_catalog','default'] for name in ('request_id','scan_id','shift_id','employee_id','barcode','product_barcode')],
                 'constraints':[['fbs_scan_requests_pkey','PRIMARY KEY (request_id)',True]],
                 'indexes':[['fbs_scan_requests_pkey','CREATE UNIQUE INDEX fbs_scan_requests_pkey ON public.fbs_scan_requests USING btree (request_id)']]}
 

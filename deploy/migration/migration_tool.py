@@ -67,14 +67,27 @@ def integrity(conn, tables):
 
 
 def manifest(conn):
+    # Do not silently claim a complete migration for unverified extra schemas.
+    extra=conn.execute("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','S','m','f') AND n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg_%' LIMIT 1").fetchone()
+    if extra: raise Refused('Non-public storage requires a separate migration audit')
+    if conn.execute("SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('m','f') LIMIT 1").fetchone():
+        raise Refused('Materialized views or foreign tables require a separate migration audit')
+    if conn.execute('SELECT 1 FROM pg_largeobject_metadata LIMIT 1').fetchone():
+        raise Refused('Large objects require separate content verification')
+    if conn.execute("SELECT 1 FROM pg_policies WHERE schemaname='public' LIMIT 1").fetchone():
+        raise Refused('Row security policies require a separate roles/ACL audit')
+    if conn.execute("SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef LIMIT 1").fetchone():
+        raise Refused('SECURITY DEFINER functions require a separate owner/privilege audit')
     tables=[r[0] for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")]
     if not REQUIRED.issubset(tables):
         raise Refused('Required GRIT tables are missing')
     result={'format':1,'server_version':conn.info.server_version,'tables':{},'integrity':integrity(conn,tables)}
+    result['database']=conn.execute("SELECT pg_encoding_to_char(encoding),datcollate,datctype,datlocprovider FROM pg_database WHERE datname=current_database()").fetchone()
     for table in tables:
         columns=conn.execute("SELECT column_name,data_type,udt_name,is_nullable,column_default FROM information_schema.columns WHERE table_schema='public' AND table_name=%s ORDER BY ordinal_position",(table,)).fetchall()
         constraints=conn.execute("SELECT c.conname,pg_get_constraintdef(c.oid),c.convalidated FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname=%s ORDER BY c.conname",(table,)).fetchall()
         indexes=conn.execute("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename=%s ORDER BY indexname",(table,)).fetchall()
+        details=conn.execute("SELECT a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.attidentity,a.attgenerated,pg_get_expr(d.adbin,d.adrelid),cn.nspname,cl.collname FROM pg_attribute a JOIN pg_class t ON t.oid=a.attrelid JOIN pg_namespace n ON n.oid=t.relnamespace LEFT JOIN pg_attrdef d ON d.adrelid=t.oid AND d.adnum=a.attnum LEFT JOIN pg_collation cl ON cl.oid=a.attcollation LEFT JOIN pg_namespace cn ON cn.oid=cl.collnamespace WHERE n.nspname='public' AND t.relname=%s AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum",(table,)).fetchall()
         value=hashlib.sha256();count=0
         # Stable complete-row comparison, including nullable values and duplicates.
         # The sort may spill to disk on large tables: this is an explicit audit tool.
@@ -82,9 +95,25 @@ def manifest(conn):
             cursor.execute(sql.SQL('SELECT to_jsonb(t)::text FROM public.{} t ORDER BY to_jsonb(t)::text COLLATE "C"').format(sql.Identifier(table)))
             for row in cursor:
                 value.update(row[0].encode('utf-8')+b'\n');count+=1
-        result['tables'][table]={'rows':count,'sha256':value.hexdigest(),'columns':columns,'constraints':constraints,'indexes':indexes}
+        result['tables'][table]={'rows':count,'sha256':value.hexdigest(),'columns':columns,'column_details':details,'constraints':constraints,'indexes':indexes}
     result['extensions']=conn.execute('SELECT extname,extversion FROM pg_extension ORDER BY extname').fetchall()
+    result['sequences']=sequence_state(conn)
+    result['schema_objects']={
+        'views':conn.execute("SELECT viewname,definition FROM pg_views WHERE schemaname='public' ORDER BY viewname").fetchall(),
+        'triggers':conn.execute("SELECT c.relname,t.tgname,pg_get_triggerdef(t.oid),t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal ORDER BY c.relname,t.tgname").fetchall(),
+        'identities':conn.execute("SELECT table_name,column_name,is_identity,identity_generation FROM information_schema.columns WHERE table_schema='public' AND is_identity='YES' ORDER BY table_name,column_name").fetchall(),
+        'functions':conn.execute("SELECT p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prokind IN ('f','p') AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e') ORDER BY p.proname,pg_get_function_identity_arguments(p.oid)").fetchall(),
+        'enums':conn.execute("SELECT t.typname,e.enumlabel,e.enumsortorder::text FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_enum e ON e.enumtypid=t.oid WHERE n.nspname='public' ORDER BY t.typname,e.enumsortorder").fetchall(),
+    }
     return json.loads(json.dumps(result))  # Normalize tuples before comparison.
+
+
+def sequence_state(conn):
+    result={}
+    for name,start,minimum,maximum,increment,cycle,cache in conn.execute("SELECT sequencename,start_value,min_value,max_value,increment_by,cycle,cache_size FROM pg_sequences WHERE schemaname='public' ORDER BY sequencename"):
+        value,called=conn.execute(sql.SQL('SELECT last_value,is_called FROM public.{}').format(sql.Identifier(name))).fetchone()
+        result[name]=[start,minimum,maximum,increment,cycle,cache,value,called]
+    return result
 
 
 def snapshot(dsn):
@@ -108,7 +137,7 @@ def pg_command(command, dsn):
             raise Refused('Unsupported libpq option; review secure client configuration')
         environment[names[key]]=str(value)
     try:
-        subprocess.run(command, env=environment,check=True,capture_output=True,timeout=3600)
+        return subprocess.run(command, env=environment,check=True,capture_output=True,timeout=3600).stdout
     except (subprocess.SubprocessError, OSError):
         raise Refused('PostgreSQL command failed; existing databases and archives were not removed') from None
 
@@ -122,11 +151,19 @@ def export(dsn, destination):
         if conn.info.server_version//10000>client_major():
             raise Refused('pg_dump major version is older than source PostgreSQL')
         snapshot_id=conn.execute('SELECT pg_export_snapshot()').fetchone()[0]
+        sequences_before=sequence_state(conn)
         temporary=folder/'database.dump.partial'
         pg_command(['pg_dump','--format=custom','--no-owner','--no-acl','--snapshot',snapshot_id,'--file',str(temporary)],dsn)
         # Manifest and dump share EXACTLY the same exported database snapshot.
         data=manifest(conn)
-        pg_command(['pg_restore','--list',str(temporary)],dsn)
+        listing=pg_command(['pg_restore','--list',str(temporary)],dsn).decode('utf-8')
+        if not all(re.search(r' TABLE DATA public '+re.escape(table)+r' ',listing) for table in REQUIRED):
+            raise Refused('Archive is missing critical table data entries')
+        with temporary.open('rb') as stream: magic=stream.read(5);os.fsync(stream.fileno())
+        if temporary.stat().st_size<512 or magic!=b'PGDMP':
+            raise Refused('Export is not a nonempty PostgreSQL custom archive')
+        if sequences_before!=data['sequences'] or sequence_state(conn)!=sequences_before:
+            raise Refused('Sequences changed during export; freeze all writers and retry into a NEW bundle')
         write_json(folder/'manifest.json',data)
         temporary.rename(folder/'database.dump')
         write_json(folder/'checksums.json', {name:checksum(folder/name) for name in ('database.dump','manifest.json')})
@@ -150,8 +187,8 @@ def compare(expected, actual):
     problems=[]
     if actual['server_version']//10000<expected['server_version']//10000:
         problems.append('Target PostgreSQL is older than source')
-    for field in ('tables','integrity','extensions'):
-        if actual[field]!=expected[field]: problems.append(field+' mismatch')
+    for field in ('tables','integrity','extensions','sequences','schema_objects','database'):
+        if actual.get(field)!=expected.get(field): problems.append(field+' mismatch')
     if any(actual['integrity'].values()): problems.append('Integrity findings require review before cutover')
     return problems
 
@@ -160,6 +197,7 @@ def approved_empty_request_table(table):
     names=('request_id','scan_id','shift_id','employee_id','barcode','product_barcode')
     return (table.get('rows')==0 and table.get('sha256')==hashlib.sha256(b'').hexdigest()
             and table.get('columns')==[[name,'text','text','NO',None] for name in names]
+            and table.get('column_details')==[[name,'text',True,'','',None,'pg_catalog','default'] for name in names]
             and table.get('constraints')==[['fbs_scan_requests_pkey','PRIMARY KEY (request_id)',True]]
             and table.get('indexes')==[['fbs_scan_requests_pkey','CREATE UNIQUE INDEX fbs_scan_requests_pkey ON public.fbs_scan_requests USING btree (request_id)']])
 
@@ -186,7 +224,17 @@ def compare_rollout(expected, actual):
         problems.append('Unexpected integrity checks')
     if actual['extensions']!=expected['extensions']:
         problems.append('Extensions changed')
+    for field in ('sequences','schema_objects','database'):
+        if actual.get(field)!=expected.get(field): problems.append(field+' changed')
     return problems
+
+
+def compare_restored_startup(expected,actual):
+    if actual['server_version']//10000<expected['server_version']//10000:
+        return ['Target PostgreSQL is older than source']
+    # Only the approved startup schema delta is allowed after a major upgrade.
+    baseline=dict(expected,server_version=actual['server_version'])
+    return compare_rollout(baseline,actual)
 
 
 def trial_restore(admin_dsn, bundle, database):
@@ -198,7 +246,12 @@ def trial_restore(admin_dsn, bundle, database):
             raise Refused('Target PostgreSQL is older than source')
         # No DROP, --clean or connection to an existing target. Concurrent CREATE
         # also fails exclusively, preserving any previously existing database.
-        admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(database)))
+        properties=expected.get('database')
+        if not properties or properties[3]!='c':
+            raise Refused('Re-export with current tools; non-libc locale providers require separate compatibility review')
+        encoding,collate,ctype,_=properties
+        admin.execute(sql.SQL('CREATE DATABASE {} TEMPLATE template0 ENCODING {} LC_COLLATE {} LC_CTYPE {} LOCALE_PROVIDER libc').format(
+            sql.Identifier(database),sql.Literal(encoding),sql.Literal(collate),sql.Literal(ctype)))
     values=conninfo_to_dict(admin_dsn);values['dbname']=database
     target=make_conninfo(**values)
     pg_command(['pg_restore','--exit-on-error','--single-transaction','--no-owner','--no-acl','--dbname',database,str(Path(bundle)/'database.dump')],target)
@@ -211,7 +264,7 @@ def trial_restore(admin_dsn, bundle, database):
 def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('snapshot','export','verify','trial-restore','compare-live'))
+    parser.add_argument('action',choices=('snapshot','export','verify','trial-restore','compare-live','compare-restored'))
     parser.add_argument('--dsn-env',default='GRIT_MIGRATION_DSN')
     parser.add_argument('--confirm-read-only-access',action='store_true')
     parser.add_argument('--bundle',required=True)
@@ -224,11 +277,16 @@ def main():
             if not args.confirm_read_only_access: raise Refused('Explicit connection authorization is required')
             dsn=os.environ.get(args.dsn_env)
             if not dsn: raise Refused('Configured DSN variable is missing')
+            if args.action in ('compare-live','compare-restored') and args.database:
+                if not re.fullmatch(r'restore_check_[a-z0-9_]{1,45}',args.database):
+                    raise Refused('Comparison target must be restore_check_*')
+                values=conninfo_to_dict(dsn);values['dbname']=args.database;dsn=make_conninfo(**values)
             if args.action=='export': export(dsn,args.bundle)
             elif args.action=='snapshot': write_json(args.bundle,snapshot(dsn))
             elif args.action=='trial-restore': trial_restore(dsn,args.bundle,args.database or '')
-            elif args.action=='compare-live':
-                problems=compare_rollout(verify_bundle(args.bundle),snapshot(dsn))
+            elif args.action in ('compare-live','compare-restored'):
+                comparator=compare if args.action=='compare-restored' else (compare_restored_startup if args.database else compare_rollout)
+                problems=comparator(verify_bundle(args.bundle),snapshot(dsn))
                 if problems: raise Refused('; '.join(problems))
         print('Migration check completed; no GRIT process or traffic was started')
     except Exception as error:
