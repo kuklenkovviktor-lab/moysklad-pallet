@@ -1,0 +1,16 @@
+name: HOSTKEY HTTPS isolated proxy
+on:
+  pull_request:
+    paths: ['compose.https.yaml', 'deploy/https/**', 'deploy/verify_https.py', '.github/workflows/hostkey-https.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker pull caddy:2-alpine
+      - run: docker build -t grit-wms:hostkey .
+      - run: python3 deploy/verify_https.py
