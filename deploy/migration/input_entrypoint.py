@@ -5,7 +5,7 @@ import sys
 from urllib.parse import urlsplit
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
-from migration_tool import Refused, export
+from migration_tool import Refused, export, check_source, DiagnosticFailure, at_stage, failure_category
 
 
 def external_dsn(value):
@@ -16,7 +16,7 @@ def external_dsn(value):
         if parsed.scheme not in ('postgres','postgresql') or not parsed.hostname:
             raise ValueError()
         fields=conninfo_to_dict(value)
-        if not fields.get('user') or not fields.get('dbname') or not fields.get('password'):
+        if not fields.get('user') or not fields.get('dbname') or not fields.get('password') or fields.get('host','').startswith('/'):
             raise ValueError()
         if any(k not in {'host','port','user','dbname','password','sslmode','sslrootcert'} for k in fields):
             raise ValueError()
@@ -31,24 +31,28 @@ def external_dsn(value):
 
 def main():
     os.umask(0o077)
+    phase='INPUT'
     try:
-        payload=json.loads(sys.stdin.buffer.read(65537))
-        dsn=external_dsn(payload['url'])
-        destination=payload['destination']
-        if not destination.startswith('/bundles/') or '/' in destination[len('/bundles/'):]:
-            raise Refused('Invalid destination')
-        export(dsn,destination)
-        print('Export verified: custom archive, consistent row fingerprints, SHA-256. Source was read-only.')
+        with at_stage('INPUT'):
+            payload=json.loads(sys.stdin.buffer.read(65537))
+            dsn=external_dsn(payload['url'])
+            action=payload.get('action','export')
+            if action not in ('export','check-source'):raise Refused('Invalid action')
+        if action=='check-source':
+            phase='SOURCE_CHECK'
+            result=check_source(dsn)
+            print('Source check passed: PostgreSQL '+str(result['server_version'])+'; native clients major '+str(result['client_major'])+'; readable public tables '+str(result['tables_checked'])+'. No dump created; full export may still encounter other errors.')
+        else:
+            with at_stage('INPUT'):
+                destination=payload['destination']
+                if not destination.startswith('/bundles/') or '/' in destination[len('/bundles/'):]:
+                    raise Refused('Invalid destination')
+            phase='EXPORT'
+            export(dsn,destination)
+            print('Export verified: custom archive, consistent row fingerprints, SHA-256. Source was read-only.')
     except Exception as error:
-        detail=str(error).lower()  # Classify locally; NEVER print the raw error.
-        category='SOURCE_OR_ARCHIVE'
-        if isinstance(error,FileExistsError):category='DESTINATION_EXISTS'
-        elif isinstance(error,Refused):category='URL_OR_SCHEMA_OR_ARCHIVE'
-        elif 'could not translate host' in detail or 'name or service not known' in detail:category='DNS'
-        elif 'certificate' in detail or 'ssl' in detail:category='TLS'
-        elif 'authentication' in detail or 'password' in detail:category='AUTHENTICATION'
-        elif 'timeout' in detail or 'connection refused' in detail or 'network is unreachable' in detail:category='TCP_OR_FIREWALL'
-        raise SystemExit('GRIT_EXPORT_FAILED:'+category) from None
+        diagnostic=error if isinstance(error,DiagnosticFailure) else DiagnosticFailure(phase,failure_category(error))
+        raise SystemExit(str(diagnostic)) from None
 
 
 if __name__=='__main__': main()

@@ -75,6 +75,8 @@ def run(args, **kwargs):
     except subprocess.CalledProcessError as error:
         output=error.stderr or ''
         if isinstance(output,bytes): output=output.decode('utf-8',errors='replace')
+        staged=re.search(r'GRIT_EXPORT_FAILED:(INPUT|TOOLS|CONNECT|SNAPSHOT|READ_ACCESS|NATIVE_CONNECT|SNAPSHOT_IMPORT|PG_DUMP|MANIFEST|ARCHIVE_WRITE|ARCHIVE_CHECK|FINALIZE|RESTORE|SOURCE_CHECK|EXPORT):(TLS|AUTHENTICATION|PERMISSION|SCHEMA|VERSION|DISK_FULL|IO|TOOL_MISSING|PROCESS_EXIT|TIMEOUT|EMPTY_ARCHIVE|INVALID_ARCHIVE|REFUSED|UNKNOWN|DESTINATION_EXISTS|CONNECTION|READ_ONLY_REFUSAL)\b',output)
+        if staged:raise Stop('Source/export failed at '+staged[1]+'; category '+staged[2]+'. No raw database error is printed; existing archives are retained.') from None
         match=re.search(r'GRIT_EXPORT_FAILED:(DNS|TLS|AUTHENTICATION|TCP_OR_FIREWALL|DESTINATION_EXISTS|URL_OR_SCHEMA_OR_ARCHIVE|SOURCE_OR_ARCHIVE)\b',output)
         if match:raise Stop('Export diagnosis: '+match[1]+'. See the diagnosis table in the migration guide. No SSH tunnel is used.') from None
         raise Stop('Command failed; stopped without removing databases, volumes or archives. Check Docker/network/permissions privately.') from None
@@ -120,16 +122,28 @@ def export_external(destination):
     destination.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     if destination.parent.is_symlink() or destination.parent.stat().st_mode & 0o077:
         raise Stop('Bundle parent directory must be private (0700)')
+    source_request('export',destination)
+    verify_local(destination)
+
+
+def source_request(action,destination=None):
     value=secret('Render External Database URL (hidden, ONE line, no quotes): ')
     if not value.startswith(('postgresql://','postgres://')) or any(c.isspace() for c in value):
         raise Stop('Paste only the complete external PostgreSQL URL; no ssh, quotes or Bash commands')
-    payload=json.dumps({'url':value,'destination':'/bundles/'+destination.name})
-    docker('run','--rm','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--tmpfs','/tmp','--cap-drop=ALL',
-           '--mount','type=bind,src='+str(destination.parent)+',dst=/bundles',
-           '--mount','type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly',
+    payload={'url':value,'action':action}
+    mounts=[]
+    if destination is not None:
+        payload['destination']='/bundles/'+destination.name
+        mounts=['--mount','type=bind,src='+str(destination.parent)+',dst=/bundles']
+    result=docker('run','--rm','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--tmpfs','/tmp','--cap-drop=ALL',
+           *mounts,'--mount','type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly',
            '--entrypoint','python3','grit-migration:ops','/tools/input_entrypoint.py',
-           input=payload,text=True,capture_output=True)
-    verify_local(destination)
+           input=json.dumps(payload),text=True,capture_output=True)
+    if action=='check-source':
+        # Worker success is numeric/fixed vocabulary only. Do not relay arbitrary output.
+        match=re.fullmatch(r'Source check passed: PostgreSQL (\d+); native clients major (\d+); readable public tables (\d+)\. No dump created; full export may still encounter other errors\.\n?',result.stdout)
+        if not match:raise Stop('Source check returned an unrecognized result; no raw output is printed')
+        print('PASS: source PostgreSQL '+match[1]+', native clients '+match[2]+', readable tables '+match[3]+'. No dump created; export success is not guaranteed.')
 
 
 def verify_local(path):
@@ -347,12 +361,13 @@ def stop_local():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('build','export','verify','trial','compare','prepare-live','preflight','update','trial-app','start-live','stop','external-copy','pack-files','verify-files','external-copy-files'))
+    parser.add_argument('action',choices=('check-source','build','export','verify','trial','compare','prepare-live','preflight','update','trial-app','start-live','stop','external-copy','pack-files','verify-files','external-copy-files'))
     parser.add_argument('--bundle')
     parser.add_argument('--database')
     args=parser.parse_args()
     try:
-        if args.action=='build':
+        if args.action=='check-source':source_request('check-source')
+        elif args.action=='build':
             docker('build','-f','deploy/migration/Dockerfile','-t','grit-migration:ops','.',capture_output=True)
         elif args.action=='export': export_external(args.bundle or input('NEW bundle path: ').strip())
         elif args.action=='verify': verify_local(args.bundle or input('Bundle path: ').strip())
