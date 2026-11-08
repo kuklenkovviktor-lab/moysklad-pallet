@@ -29,6 +29,7 @@ class FinalMigrationTests(unittest.TestCase):
         values=conninfo_to_dict(external_dsn('postgresql://user:p%40ss%3A%24@render.example.invalid/db'))
         self.assertEqual(values['password'],'p@ss:$')
         self.assertEqual(values['sslmode'],'verify-full')
+        self.assertEqual(values['sslrootcert'],'/etc/ssl/certs/ca-certificates.crt')
         self.assertEqual(values['options'],'-c default_transaction_read_only=on')
         self.assertEqual(values['connect_timeout'],'10')
 
@@ -57,6 +58,17 @@ class FinalMigrationTests(unittest.TestCase):
             with patch.object(kit,'secret') as prompt:
                 with self.assertRaises(kit.Stop):kit.export_external(path)
                 prompt.assert_not_called()
+
+    def test_external_export_mounts_host_system_ca_directory_read_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            destination=Path(temp)/'new'
+            with patch.object(kit,'secret',return_value='postgresql://user:fake-only@render.example.invalid/db'),patch.object(kit,'docker') as docker,patch.object(kit,'verify_local'):
+                kit.export_external(destination)
+            args=docker.call_args.args
+            mounts=[args[index+1] for index,value in enumerate(args) if value=='--mount']
+            ca_mounts=[mount for mount in mounts if 'dst=/etc/ssl/certs' in mount.split(',')]
+            self.assertEqual(ca_mounts,['type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly'])
+            self.assertIn('type=bind,src='+str(destination.parent)+',dst=/bundles',mounts)
 
     def test_private_configs_and_multiline_values_are_refused(self):
         with tempfile.TemporaryDirectory() as temp:

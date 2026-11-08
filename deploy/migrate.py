@@ -126,6 +126,7 @@ def export_external(destination):
     payload=json.dumps({'url':value,'destination':'/bundles/'+destination.name})
     docker('run','--rm','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--tmpfs','/tmp','--cap-drop=ALL',
            '--mount','type=bind,src='+str(destination.parent)+',dst=/bundles',
+           '--mount','type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly',
            '--entrypoint','python3','grit-migration:ops','/tools/input_entrypoint.py',
            input=payload,text=True,capture_output=True)
     verify_local(destination)
