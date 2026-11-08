@@ -56,7 +56,7 @@ class MigrationTests(unittest.TestCase):
         m.export(self.dsn,self.bundle)
         m.trial_restore(self.admin,self.bundle,self.target)
         with self.assertRaises(Exception): m.trial_restore(self.admin,self.bundle,self.target)
-        with self.assertRaises(FileExistsError): m.export(self.dsn,self.bundle)
+        with self.assertRaisesRegex(m.DiagnosticFailure,'ARCHIVE_WRITE:DESTINATION_EXISTS'): m.export(self.dsn,self.bundle)
         self.assertEqual(m.verify_bundle(self.bundle)['tables']['employees']['rows'],1)
 
     def test_content_change_detected_even_when_row_counts_match(self):

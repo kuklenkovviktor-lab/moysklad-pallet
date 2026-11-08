@@ -47,6 +47,34 @@ def main():
         client=['run','--rm','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--network',networks[0],'-v',str(bundle)+':/bundles',
                 '-v',str(tls/'server.crt')+':/etc/ssl/certs/ca-certificates.crt:ro','--entrypoint','python3',
                 'grit-migration:ops','/tools/input_entrypoint.py']
+        # Preflight uses BOTH psycopg and native psql/libpq with snapshot import.
+        before=set(bundle.iterdir())
+        check=json.dumps({'url':'postgresql://grit:synthetic-only@render-test/grit','action':'check-source'})
+        result=docker(*client,input=check,text=True,capture_output=True)
+        assert 'Source check passed: PostgreSQL 16' in result.stdout
+        assert set(bundle.iterdir())==before, 'check-source created an archive'
+        poisoned=client.copy()
+        poisoned[1:1]=['-e','PGHOSTADDR=192.0.2.1','-e','PGSERVICE=untrusted','-e','PGSSLMODE=disable']
+        docker(*poisoned,input=check,text=True,capture_output=True)
+        def refused(arguments,body,expected):
+            failed=subprocess.run(['docker','--host=unix:///var/run/docker.sock',*arguments],env=ENV,input=json.dumps(body),text=True,capture_output=True)
+            assert failed.returncode!=0
+            assert expected in failed.stderr, 'Unexpected sanitized diagnosis: '+failed.stderr
+            assert 'synthetic-only' not in failed.stderr and 'postgresql://' not in failed.stderr
+        # Actual issuer and hostname failures, not OpenSSL-only probes.
+        untrusted=client.copy();position=untrusted.index(str(tls/'server.crt')+':/etc/ssl/certs/ca-certificates.crt:ro');del untrusted[position-1:position+1]
+        refused(untrusted,{'url':'postgresql://grit:synthetic-only@render-test/grit','action':'check-source'},'CONNECT:TLS')
+        refused(client,{'url':'postgresql://grit:synthetic-only@db/grit','action':'check-source'},'CONNECT:TLS')
+        refused(client,{'url':'postgresql://grit:wrong-synthetic-only@render-test/grit','action':'check-source'},'CONNECT:AUTHENTICATION')
+        docker('exec',source,'psql','-U','grit','-d','grit','-v','ON_ERROR_STOP=1','-c',
+               "CREATE TABLE denied_dump(id text); CREATE ROLE readonly_probe LOGIN PASSWORD 'synthetic-only'; CREATE ROLE snapshot_denied LOGIN PASSWORD 'synthetic-only'; GRANT USAGE ON SCHEMA public TO readonly_probe,snapshot_denied; GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_probe,snapshot_denied; GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO readonly_probe,snapshot_denied; REVOKE SELECT ON denied_dump FROM readonly_probe; REVOKE EXECUTE ON FUNCTION pg_export_snapshot() FROM PUBLIC; GRANT EXECUTE ON FUNCTION pg_export_snapshot() TO readonly_probe",capture_output=True)
+        refused(client,{'url':'postgresql://snapshot_denied:synthetic-only@render-test/grit','action':'check-source'},'SNAPSHOT:PERMISSION')
+        refused(client,{'url':'postgresql://readonly_probe:synthetic-only@render-test/grit','action':'check-source'},'READ_ACCESS:PERMISSION')
+        refused(client,{'url':'postgresql://readonly_probe:synthetic-only@render-test/grit','destination':'/bundles/denied'},'PG_DUMP:PERMISSION')
+        partial=bundle/'denied/database.dump.partial'
+        assert partial.exists() and partial.stat().st_size==0
+        assert not (partial.parent/'database.dump').exists()
+        print('PASS: PG16 real issuer/hostname TLS, password, snapshot permission, pg_dump permission with retained zero partial; preflight creates no dump; poisoned PG environment ignored')
         docker(*client,input=payload,text=True,capture_output=True)
         checks=json.loads((bundle/'pg16/checksums.json').read_text())
         # Refuse a repeated export, preserving every original byte.

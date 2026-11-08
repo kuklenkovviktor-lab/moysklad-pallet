@@ -3,6 +3,8 @@
 Never prints DSNs, never drops databases, never starts GRIT or changes traffic.
 """
 import argparse
+from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import os
@@ -19,6 +21,79 @@ REQUIRED = {'employees','shifts','activities','scans','operation_events'}
 
 class Refused(Exception):
     pass
+
+
+class SchemaRefused(Refused):
+    pass
+
+
+STAGES={'INPUT','TOOLS','CONNECT','SNAPSHOT','READ_ACCESS','NATIVE_CONNECT','SNAPSHOT_IMPORT','PG_DUMP','MANIFEST','ARCHIVE_WRITE','ARCHIVE_CHECK','FINALIZE','RESTORE','SOURCE_CHECK','EXPORT'}
+CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','EMPTY_ARCHIVE','INVALID_ARCHIVE','REFUSED','UNKNOWN','DESTINATION_EXISTS','CONNECTION','READ_ONLY_REFUSAL'}
+
+
+class DiagnosticFailure(Refused):
+    def __init__(self,stage,category):
+        self.stage=stage if stage in STAGES else 'INPUT'
+        self.category=category if category in CATEGORIES else 'UNKNOWN'
+        super().__init__('GRIT_EXPORT_FAILED:'+self.stage+':'+self.category)
+
+
+def failure_category(error):
+    """Only structured codes or recognized primary client diagnostics; never echo."""
+    state=getattr(error,'sqlstate',None)
+    codes={'28P01':'AUTHENTICATION','28000':'AUTHENTICATION','42501':'PERMISSION',
+           '42P01':'SCHEMA','42703':'SCHEMA','3F000':'SCHEMA','53100':'DISK_FULL',
+           '58030':'IO','25006':'READ_ONLY_REFUSAL'}
+    if state in codes:return codes[state]
+    if isinstance(error,OSError):
+        if error.errno in (errno.ENOSPC,errno.EDQUOT):return 'DISK_FULL'
+        if error.errno in (errno.EACCES,errno.EPERM):return 'PERMISSION'
+        if isinstance(error,FileExistsError):return 'DESTINATION_EXISTS'
+        if isinstance(error,FileNotFoundError):return 'IO'
+        return 'IO'
+    if isinstance(error,subprocess.TimeoutExpired):return 'TIMEOUT'
+    if isinstance(error,SchemaRefused):return 'SCHEMA'
+    if isinstance(error,Refused):return 'REFUSED'
+    if not isinstance(error,(psycopg.OperationalError,subprocess.CalledProcessError)):
+        return 'CONNECTION' if state and state.startswith('08') else 'UNKNOWN'
+    detail=error.stderr if isinstance(error,subprocess.CalledProcessError) else str(error)
+    if isinstance(detail,bytes):detail=detail.decode('utf-8',errors='replace')
+    detail=detail or ''
+    # libpq has no SQLSTATE for certificate verification failures. These are
+    # explicit verifier diagnostics, not a guess based on the word "ssl".
+    if re.search(r'^pg_dump: error: query failed: ERROR:\s+permission denied for (?:table|sequence|schema|database|relation)\b',detail,re.M):return 'PERMISSION'
+    if re.search(r'(?:^|failed: )FATAL:\s+password authentication failed for user',detail,re.M):return 'AUTHENTICATION'
+    if re.search(r'(?:^|failed: )FATAL:\s+no pg_hba.conf entry',detail,re.M):return 'PERMISSION'
+    if re.search(r'(?:^|failed: )(?:SSL error: certificate verify failed|server certificate .* does not match host name|root certificate file .* does not exist|could not (?:read|open) root certificate file)',detail,re.M):return 'TLS'
+    # psql VERBOSITY=sqlstate, or pg_dump's primary server error line.
+    match=re.search(r'^.*(?:ERROR|FATAL):\s+([0-9A-Z]{5})(?:\s|$)',detail,re.M)
+    if match and match[1] in codes:return codes[match[1]]
+    if re.search(r'^pg_dump: error: (?:aborting because of server version mismatch|server version:.*pg_dump version:)',detail,re.M):return 'VERSION'
+    if re.search(r'^pg_dump: error: (?:could not write to output file|could not close output file|could not write to file "[^"\r\n]*"): (?:No space left on device|Disk quota exceeded)\s*$',detail,re.M):return 'DISK_FULL'
+    if re.search(r'^pg_restore: error: (?:input file (?:does not appear to be a valid archive|is too short)|did not find magic string in file header)',detail,re.M):return 'INVALID_ARCHIVE'
+    if isinstance(error,subprocess.CalledProcessError):return 'PROCESS_EXIT'
+    if state and state.startswith('08'):return 'CONNECTION'
+    return 'UNKNOWN'
+
+
+@contextmanager
+def at_stage(stage):
+    try:yield
+    except DiagnosticFailure:raise
+    except Exception as error:
+        raise DiagnosticFailure(stage,failure_category(error)) from None
+
+
+@contextmanager
+def without_pg_environment():
+    # This single-threaded CLI must resolve the same DSN for psycopg and tools.
+    saved={key:value for key,value in os.environ.items() if key.startswith('PG')}
+    for key in saved:os.environ.pop(key)
+    try:yield
+    finally:
+        for key in list(os.environ):
+            if key.startswith('PG'):os.environ.pop(key)
+        os.environ.update(saved)
 
 
 def checksum(path):
@@ -41,7 +116,8 @@ def connection(dsn, **kwargs):
     local=not host or host.startswith('/') or host in ('db','localhost','127.0.0.1','::1')
     if not local and values.get('sslmode')!='verify-full':
         raise Refused('Remote PostgreSQL requires sslmode=verify-full and a trusted CA')
-    return psycopg.connect(dsn, connect_timeout=10, **kwargs)
+    with without_pg_environment():
+        return psycopg.connect(dsn, connect_timeout=10, **kwargs)
 
 
 def begin_readonly(conn):
@@ -66,21 +142,26 @@ def integrity(conn, tables):
     return {name:conn.execute(query).fetchone()[0] for name,query in probes.items()}
 
 
-def manifest(conn):
+def source_tables(conn):
     # Do not silently claim a complete migration for unverified extra schemas.
     extra=conn.execute("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','S','m','f') AND n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg_%' LIMIT 1").fetchone()
-    if extra: raise Refused('Non-public storage requires a separate migration audit')
+    if extra: raise SchemaRefused('Non-public storage requires a separate migration audit')
     if conn.execute("SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('m','f') LIMIT 1").fetchone():
-        raise Refused('Materialized views or foreign tables require a separate migration audit')
+        raise SchemaRefused('Materialized views or foreign tables require a separate migration audit')
     if conn.execute('SELECT 1 FROM pg_largeobject_metadata LIMIT 1').fetchone():
-        raise Refused('Large objects require separate content verification')
+        raise SchemaRefused('Large objects require separate content verification')
     if conn.execute("SELECT 1 FROM pg_policies WHERE schemaname='public' LIMIT 1").fetchone():
-        raise Refused('Row security policies require a separate roles/ACL audit')
+        raise SchemaRefused('Row security policies require a separate roles/ACL audit')
     if conn.execute("SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef LIMIT 1").fetchone():
-        raise Refused('SECURITY DEFINER functions require a separate owner/privilege audit')
+        raise SchemaRefused('SECURITY DEFINER functions require a separate owner/privilege audit')
     tables=[r[0] for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")]
     if not REQUIRED.issubset(tables):
-        raise Refused('Required GRIT tables are missing')
+        raise SchemaRefused('Required GRIT tables are missing')
+    return tables
+
+
+def manifest(conn):
+    tables=source_tables(conn)
     result={'format':1,'server_version':conn.info.server_version,'tables':{},'integrity':integrity(conn,tables)}
     result['database']=conn.execute("SELECT pg_encoding_to_char(encoding),datcollate,datctype,datlocprovider FROM pg_database WHERE datname=current_database()").fetchone()
     for table in tables:
@@ -122,51 +203,110 @@ def snapshot(dsn):
         return manifest(conn)
 
 
+def client_versions():
+    versions={}
+    for name in ('pg_dump','pg_restore','psql'):
+        with at_stage('TOOLS'):
+            try:
+                version=subprocess.run([name,'--version'],env=pg_environment(None),check=True,capture_output=True,text=True,timeout=10).stdout
+            except FileNotFoundError:
+                raise DiagnosticFailure('TOOLS','TOOL_MISSING') from None
+            match=re.fullmatch(re.escape(name)+r' \(PostgreSQL\) (\d+)(?:\.[^\r\n ]+)?(?: [^\r\n]*)?\n?',version)
+            if not match:raise DiagnosticFailure('TOOLS','VERSION')
+            versions[name]=int(match[1])
+    if len(set(versions.values()))!=1:raise DiagnosticFailure('TOOLS','VERSION')
+    return versions
+
+
 def client_major():
-    version=subprocess.run(['pg_dump','--version'],check=True,capture_output=True,text=True).stdout
-    match=re.search(r'(\d+)\.',version)
-    if not match: raise Refused('Cannot determine pg_dump version')
-    return int(match[1])
+    return client_versions()['pg_dump']
 
 
-def pg_command(command, dsn):
-    environment=dict(os.environ)
+def pg_environment(dsn):
+    environment={key:value for key,value in os.environ.items() if not key.startswith('PG')}
+    environment['LC_ALL']='C'
     names={'dbname':'PGDATABASE','host':'PGHOST','hostaddr':'PGHOSTADDR','port':'PGPORT','user':'PGUSER','password':'PGPASSWORD','sslmode':'PGSSLMODE','sslrootcert':'PGSSLROOTCERT','sslcert':'PGSSLCERT','sslkey':'PGSSLKEY','options':'PGOPTIONS','connect_timeout':'PGCONNECT_TIMEOUT','service':'PGSERVICE','application_name':'PGAPPNAME','target_session_attrs':'PGTARGETSESSIONATTRS'}
-    for key,value in conninfo_to_dict(dsn).items():
+    for key,value in (conninfo_to_dict(dsn).items() if dsn else ()):
         if key not in names:
             raise Refused('Unsupported libpq option; review secure client configuration')
         environment[names[key]]=str(value)
-    try:
-        return subprocess.run(command, env=environment,check=True,capture_output=True,timeout=3600).stdout
-    except (subprocess.SubprocessError, OSError):
-        raise Refused('PostgreSQL command failed; existing databases and archives were not removed') from None
+    return environment
+
+
+def pg_command(command, dsn, stage='RESTORE', timeout=3600):
+    with at_stage(stage):
+        try:
+            return subprocess.run(command,env=pg_environment(dsn),check=True,capture_output=True,timeout=timeout).stdout
+        except FileNotFoundError:
+            raise DiagnosticFailure(stage,'TOOL_MISSING') from None
+
+
+def source_snapshot(conn,major):
+    with at_stage('SNAPSHOT'):
+        begin_readonly(conn)
+        if conn.info.server_version//10000>major:
+            raise DiagnosticFailure('TOOLS','VERSION')
+        return conn.execute('SELECT pg_export_snapshot()').fetchone()[0]
+
+
+def source_connection(dsn):
+    with at_stage('CONNECT'):
+        conn=connection(dsn)
+        return conn
+
+
+def check_source(dsn):
+    versions=client_versions()
+    with source_connection(dsn) as conn:
+        snapshot_id=source_snapshot(conn,versions['pg_dump'])
+        with at_stage('READ_ACCESS'):
+            conn.execute("SET LOCAL lock_timeout='5s'")
+            conn.execute("SET LOCAL statement_timeout='60s'")
+            tables=source_tables(conn)
+            for table in tables:
+                conn.execute(sql.SQL('LOCK TABLE public.{} IN ACCESS SHARE MODE').format(sql.Identifier(table)))
+                conn.execute(sql.SQL('SELECT * FROM public.{} LIMIT 0').format(sql.Identifier(table)))
+            sequence_state(conn)
+        # Native psql links the same system libpq as pg_dump, unlike psycopg's
+        # bundled libpq. Import the SAME snapshot; never generate even a schema dump.
+        if not re.fullmatch(r'[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+',snapshot_id):
+            raise DiagnosticFailure('SNAPSHOT','UNKNOWN')
+        query="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TRANSACTION SNAPSHOT '"+snapshot_id+"'; SELECT current_setting('server_version_num'); ROLLBACK;"
+        pg_command(['psql','-X','--no-password','--set=ON_ERROR_STOP=1','--set=VERBOSITY=sqlstate','--tuples-only','--no-align','--command','BEGIN READ ONLY; SELECT 1; ROLLBACK;'],dsn,stage='NATIVE_CONNECT',timeout=30)
+        result=pg_command(['psql','-X','--no-password','--set=ON_ERROR_STOP=1','--set=VERBOSITY=sqlstate','--tuples-only','--no-align','--command',query],dsn,stage='SNAPSHOT_IMPORT',timeout=30)
+        if str(conn.info.server_version).encode() not in result.splitlines():
+            raise DiagnosticFailure('SNAPSHOT_IMPORT','UNKNOWN')
+        return {'server_version':conn.info.server_version,'client_major':versions['pg_dump'],'tables_checked':len(tables)}
 
 
 def export(dsn, destination):
     folder=Path(destination)
-    folder.mkdir(mode=0o700)  # Exclusive: never overwrite a previous bundle.
+    with at_stage('ARCHIVE_WRITE'):
+        folder.mkdir(mode=0o700)  # Exclusive; failures and partials are retained.
     os.umask(0o077)
-    with connection(dsn) as conn:
-        begin_readonly(conn)
-        if conn.info.server_version//10000>client_major():
-            raise Refused('pg_dump major version is older than source PostgreSQL')
-        snapshot_id=conn.execute('SELECT pg_export_snapshot()').fetchone()[0]
-        sequences_before=sequence_state(conn)
+    major=client_major()
+    with source_connection(dsn) as conn:
+        snapshot_id=source_snapshot(conn,major)
+        with at_stage('READ_ACCESS'):sequences_before=sequence_state(conn)
         temporary=folder/'database.dump.partial'
-        pg_command(['pg_dump','--format=custom','--no-owner','--no-acl','--snapshot',snapshot_id,'--file',str(temporary)],dsn)
-        # Manifest and dump share EXACTLY the same exported database snapshot.
-        data=manifest(conn)
-        listing=pg_command(['pg_restore','--list',str(temporary)],dsn).decode('utf-8')
+        pg_command(['pg_dump','--no-password','--format=custom','--no-owner','--no-acl','--snapshot',snapshot_id,'--file',str(temporary)],dsn,stage='PG_DUMP')
+        # A successful exit with an empty/invalid output is NOT an export.
+        with at_stage('ARCHIVE_WRITE'):
+            size=temporary.stat().st_size
+            with temporary.open('rb') as stream:magic=stream.read(5);os.fsync(stream.fileno())
+        if size==0:raise DiagnosticFailure('ARCHIVE_CHECK','EMPTY_ARCHIVE')
+        if size<512 or magic!=b'PGDMP':raise DiagnosticFailure('ARCHIVE_CHECK','INVALID_ARCHIVE')
+        with at_stage('MANIFEST'):data=manifest(conn)
+        listing=pg_command(['pg_restore','--list',str(temporary)],dsn,stage='ARCHIVE_CHECK').decode('utf-8')
         if not all(re.search(r' TABLE DATA public '+re.escape(table)+r' ',listing) for table in REQUIRED):
-            raise Refused('Archive is missing critical table data entries')
-        with temporary.open('rb') as stream: magic=stream.read(5);os.fsync(stream.fileno())
-        if temporary.stat().st_size<512 or magic!=b'PGDMP':
-            raise Refused('Export is not a nonempty PostgreSQL custom archive')
-        if sequences_before!=data['sequences'] or sequence_state(conn)!=sequences_before:
-            raise Refused('Sequences changed during export; freeze all writers and retry into a NEW bundle')
-        write_json(folder/'manifest.json',data)
-        temporary.rename(folder/'database.dump')
-        write_json(folder/'checksums.json', {name:checksum(folder/name) for name in ('database.dump','manifest.json')})
+            raise DiagnosticFailure('ARCHIVE_CHECK','INVALID_ARCHIVE')
+        with at_stage('MANIFEST'):
+            if sequences_before!=data['sequences'] or sequence_state(conn)!=sequences_before:
+                raise DiagnosticFailure('MANIFEST','REFUSED')
+        with at_stage('FINALIZE'):
+            write_json(folder/'manifest.json',data)
+            temporary.rename(folder/'database.dump')
+            write_json(folder/'checksums.json', {name:checksum(folder/name) for name in ('database.dump','manifest.json')})
     return data
 
 
