@@ -3,7 +3,7 @@
 Never prints DSNs, never drops databases, never starts GRIT or changes traffic.
 """
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import errno
 import hashlib
 import json
@@ -31,7 +31,10 @@ class SchemaRefused(Refused):
 
 
 STAGES={'INPUT','TOOLS','CONNECT','SNAPSHOT','READ_ACCESS','NATIVE_CONNECT','SNAPSHOT_IMPORT','PG_DUMP','MANIFEST','ARCHIVE_WRITE','ARCHIVE_CHECK','FINALIZE','RESTORE','SOURCE_CHECK','EXPORT','CLOSE'}
-CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','EMPTY_ARCHIVE','INVALID_ARCHIVE','REFUSED','UNKNOWN','DESTINATION_EXISTS','CONNECTION','READ_ONLY_REFUSAL','CANCELLED'}
+READ_ACCESS_LIMITS={'RA_SCHEMA':10,'RA_TABLE_LIST':5,'RA_TABLE_LOCK':5,'RA_TABLE_READ':5,'RA_SEQUENCE_LIST':5,'RA_SEQUENCE_READ':5}
+
+STAGES.update(READ_ACCESS_LIMITS)
+CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','EMPTY_ARCHIVE','INVALID_ARCHIVE','REFUSED','UNKNOWN','DESTINATION_EXISTS','CONNECTION','READ_ONLY_REFUSAL','CANCELLED','LOCK_UNAVAILABLE'}
 
 
 class DiagnosticFailure(Refused):
@@ -81,7 +84,7 @@ def failure_category(error):
 
 
 _stage_sink=None
-PREFLIGHT_LIMITS={'TOOLS':10,'CONNECT':15,'SNAPSHOT':15,'READ_ACCESS':30,'NATIVE_CONNECT':20,'SNAPSHOT_IMPORT':20,'CLOSE':10,'SOURCE_CHECK':120}
+PREFLIGHT_LIMITS={'TOOLS':10,'CONNECT':15,'SNAPSHOT':15,'READ_ACCESS':30,'NATIVE_CONNECT':20,'SNAPSHOT_IMPORT':20,'CLOSE':10,'SOURCE_CHECK':120,**READ_ACCESS_LIMITS}
 
 
 @contextmanager
@@ -227,21 +230,23 @@ def integrity(conn, tables):
     return {name:conn.execute(query).fetchone()[0] for name,query in probes.items()}
 
 
-def source_tables(conn):
-    # Do not silently claim a complete migration for unverified extra schemas.
-    extra=conn.execute("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','S','m','f') AND n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg_%' LIMIT 1").fetchone()
-    if extra: raise SchemaRefused('Non-public storage requires a separate migration audit')
-    if conn.execute("SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('m','f') LIMIT 1").fetchone():
-        raise SchemaRefused('Materialized views or foreign tables require a separate migration audit')
-    if conn.execute('SELECT 1 FROM pg_largeobject_metadata LIMIT 1').fetchone():
-        raise SchemaRefused('Large objects require separate content verification')
-    if conn.execute("SELECT 1 FROM pg_policies WHERE schemaname='public' LIMIT 1").fetchone():
-        raise SchemaRefused('Row security policies require a separate roles/ACL audit')
-    if conn.execute("SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef LIMIT 1").fetchone():
-        raise SchemaRefused('SECURITY DEFINER functions require a separate owner/privilege audit')
-    tables=[r[0] for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")]
-    if not REQUIRED.issubset(tables):
-        raise SchemaRefused('Required GRIT tables are missing')
+def source_tables(conn,preflight=False):
+    with preflight_operation('RA_SCHEMA') if preflight else nullcontext():
+        # Do not silently claim a complete migration for unverified extra schemas.
+        extra=conn.execute("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','S','m','f') AND n.nspname NOT IN ('public','information_schema') AND n.nspname NOT LIKE 'pg_%' LIMIT 1").fetchone()
+        if extra: raise SchemaRefused('Non-public storage requires a separate migration audit')
+        if conn.execute("SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('m','f') LIMIT 1").fetchone():
+            raise SchemaRefused('Materialized views or foreign tables require a separate migration audit')
+        if conn.execute('SELECT 1 FROM pg_largeobject_metadata LIMIT 1').fetchone():
+            raise SchemaRefused('Large objects require separate content verification')
+        if conn.execute("SELECT 1 FROM pg_policies WHERE schemaname='public' LIMIT 1").fetchone():
+            raise SchemaRefused('Row security policies require a separate roles/ACL audit')
+        if conn.execute("SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef LIMIT 1").fetchone():
+            raise SchemaRefused('SECURITY DEFINER functions require a separate owner/privilege audit')
+    with preflight_operation('RA_TABLE_LIST') if preflight else nullcontext():
+        tables=[r[0] for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")]
+        if not REQUIRED.issubset(tables):
+            raise SchemaRefused('Required GRIT tables are missing')
     return tables
 
 
@@ -340,6 +345,36 @@ def source_connection(dsn):
         return conn
 
 
+@contextmanager
+def preflight_operation(stage):
+    with at_stage(stage):
+        try:yield
+        except psycopg.errors.LockNotAvailable:
+            # SQLSTATE 55P03 is evidence of unavailable lock, not a guess based
+            # on elapsed time. SELECT LIMIT 0 itself takes ACCESS SHARE locks.
+            raise DiagnosticFailure('RA_TABLE_LOCK' if stage=='RA_TABLE_READ' else stage,'LOCK_UNAVAILABLE') from None
+
+
+def preflight_read_access(conn):
+    with at_stage('READ_ACCESS'):
+        with preflight_operation('RA_SCHEMA'):
+            conn.execute("SET LOCAL lock_timeout='1s'")
+            conn.execute("SET LOCAL statement_timeout='3s'")
+        tables=source_tables(conn,preflight=True)
+        for table in tables:
+            with preflight_operation('RA_TABLE_READ'):
+                # Planning this query acquires the required ACCESS SHARE lock
+                # AND verifies SELECT on every column, without fetching rows.
+                # An additional LOCK TABLE duplicated both round trips and locks.
+                conn.execute(sql.SQL('SELECT * FROM public.{} LIMIT 0').format(sql.Identifier(table)))
+        with preflight_operation('RA_SEQUENCE_LIST'):
+            sequences=conn.execute("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' ORDER BY c.relname").fetchall()
+        for (name,) in sequences:
+            with preflight_operation('RA_SEQUENCE_READ'):
+                conn.execute(sql.SQL('SELECT last_value,is_called FROM public.{}').format(sql.Identifier(name))).fetchone()
+        return tables
+
+
 def check_source(dsn):
     # Session-only limits apply before BEGIN/SNAPSHOT, not after those queries.
     values=conninfo_to_dict(dsn)
@@ -349,14 +384,7 @@ def check_source(dsn):
     conn=source_connection(dsn)
     try:
         snapshot_id=source_snapshot(conn,versions['pg_dump'])
-        with at_stage('READ_ACCESS'):
-            conn.execute("SET LOCAL lock_timeout='5s'")
-            conn.execute("SET LOCAL statement_timeout='15s'")
-            tables=source_tables(conn)
-            for table in tables:
-                conn.execute(sql.SQL('LOCK TABLE public.{} IN ACCESS SHARE MODE').format(sql.Identifier(table)))
-                conn.execute(sql.SQL('SELECT * FROM public.{} LIMIT 0').format(sql.Identifier(table)))
-            sequence_state(conn)
+        tables=preflight_read_access(conn)
         # Native psql links the same system libpq as pg_dump, unlike psycopg's
         # bundled libpq. Import the SAME snapshot; never generate even a schema dump.
         if not re.fullmatch(r'[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+',snapshot_id):

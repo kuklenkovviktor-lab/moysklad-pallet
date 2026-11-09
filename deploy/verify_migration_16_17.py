@@ -69,7 +69,7 @@ def main():
         docker('exec',source,'psql','-U','grit','-d','grit','-v','ON_ERROR_STOP=1','-c',
                "CREATE TABLE denied_dump(id text); CREATE ROLE readonly_probe LOGIN PASSWORD 'synthetic-only'; CREATE ROLE snapshot_denied LOGIN PASSWORD 'synthetic-only'; GRANT USAGE ON SCHEMA public TO readonly_probe,snapshot_denied; GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_probe,snapshot_denied; GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO readonly_probe,snapshot_denied; REVOKE SELECT ON denied_dump FROM readonly_probe; REVOKE EXECUTE ON FUNCTION pg_export_snapshot() FROM PUBLIC; GRANT EXECUTE ON FUNCTION pg_export_snapshot() TO readonly_probe",capture_output=True)
         refused(client,{'url':'postgresql://snapshot_denied:synthetic-only@render-test/grit','action':'check-source'},'SNAPSHOT:PERMISSION')
-        refused(client,{'url':'postgresql://readonly_probe:synthetic-only@render-test/grit','action':'check-source'},'READ_ACCESS:PERMISSION')
+        refused(client,{'url':'postgresql://readonly_probe:synthetic-only@render-test/grit','action':'check-source'},'RA_TABLE_READ:PERMISSION')
         refused(client,{'url':'postgresql://readonly_probe:synthetic-only@render-test/grit','destination':'/bundles/denied'},'PG_DUMP:PERMISSION')
         partial=bundle/'denied/database.dump.partial'
         assert partial.exists() and partial.stat().st_size==0
