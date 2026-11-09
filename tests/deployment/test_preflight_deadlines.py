@@ -66,7 +66,12 @@ class WorkerDeadlineTests(unittest.TestCase):
             with self.assertRaisesRegex(m.DiagnosticFailure,'NATIVE_CONNECT:TIMEOUT'):
                 m.supervise_check_source(SECRET,total_timeout=3,stage_timeouts={'NATIVE_CONNECT':0.2},target=target)
             pid=int(path.read_text());stat=Path('/proc')/str(pid)/'stat'
-            self.assertTrue(not stat.exists() or stat.read_text().split()[2]=='Z','native descendant still active')
+            # The process can disappear between exists() and read_text().
+            try:
+                state=stat.read_text().split()[2]
+            except (FileNotFoundError,ProcessLookupError):
+                state=None
+            self.assertIn(state,(None,'Z'),'native descendant still active')
 
 
 class HostDeadlineTests(unittest.TestCase):
