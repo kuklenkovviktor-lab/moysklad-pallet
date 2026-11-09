@@ -1,7 +1,7 @@
 name: PostgreSQL migration preflight
 on:
   pull_request:
-    paths: ['compose*.yaml', 'deploy/migrate.py', 'deploy/entrypoint.py', 'deploy/healthcheck.py', 'tests/deployment/test_final_migration.py', 'deploy/verify_final_migration.py', 'deploy/verify_migration_16_17.py', 'compose.ops.yaml', 'deploy/verify_rollout.py', 'tests/deployment/test_rollout_tools.py', 'tests/deployment/test_export_diagnostics.py', 'deploy/migration/**', 'deploy/verify_migration_postgres.py', 'tests/test_migration_postgres.py', '.github/workflows/postgres-migration.yml']
+    paths: ['compose*.yaml', 'deploy/migrate.py', 'deploy/entrypoint.py', 'deploy/healthcheck.py', 'tests/deployment/test_final_migration.py', 'deploy/verify_final_migration.py', 'deploy/verify_migration_16_17.py', 'compose.ops.yaml', 'deploy/verify_rollout.py', 'tests/deployment/test_rollout_tools.py', 'tests/deployment/test_export_diagnostics.py', 'tests/deployment/test_preflight_deadlines.py', 'deploy/verify_preflight_deadlines.py', 'deploy/migration/**', 'deploy/verify_migration_postgres.py', 'tests/test_migration_postgres.py', '.github/workflows/postgres-migration.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,9 +17,11 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests/deployment -p test_rollout_tools.py -v
       - run: python -m unittest discover -s tests/deployment -p test_export_diagnostics.py -v
+      - run: python -m unittest discover -s tests/deployment -p test_preflight_deadlines.py -v
       - run: docker build -f deploy/migration/Dockerfile -t grit-migration:test -t grit-migration:ops .
       - run: docker build -t grit-wms:migration-trial -t grit-wms:hostkey .
       - run: python3 deploy/verify_migration_postgres.py
       - run: docker build -f deploy/backup.Dockerfile -t grit-wms-backup:hostkey .
       - run: python3 deploy/verify_migration_16_17.py
+      - run: python3 deploy/verify_preflight_deadlines.py
       - run: python3 deploy/verify_final_migration.py

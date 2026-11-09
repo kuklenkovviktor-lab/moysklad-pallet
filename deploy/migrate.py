@@ -15,6 +15,10 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import signal
+import threading
+import time
+import uuid
 
 ROOT=Path(__file__).resolve().parents[1]
 SELECTORS=('DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH')
@@ -60,7 +64,7 @@ def sha(path):
     return digest.hexdigest()
 
 
-def run(args, **kwargs):
+def command_environment(extra=None):
     environment={k:v for k,v in os.environ.items() if k not in SELECTORS}
     # Compose interpolation must use its private files, never stale shell secrets.
     for key in (*SECRETS,*INTEGRATIONS,'POSTGRES_PASSWORD','GRIT_DATABASE_NAME','GRIT_DATA_ROOT',
@@ -69,13 +73,18 @@ def run(args, **kwargs):
     for key in list(environment):
         if key.startswith(('GRIT_','BACKUP_','FBS_','WB_','SUPERVISOR_','MANAGER_LOGIN_')) or key=='BOOTSTRAP_CACHE_SECONDS':
             environment.pop(key,None)
-    environment.update(kwargs.pop('extra_env',{}))
+    environment.update(extra or {})
+    return environment
+
+
+def run(args, **kwargs):
+    environment=command_environment(kwargs.pop('extra_env',{}))
     try:
         return subprocess.run(args,cwd=ROOT,env=environment,check=True,**kwargs)
     except subprocess.CalledProcessError as error:
         output=error.stderr or ''
         if isinstance(output,bytes): output=output.decode('utf-8',errors='replace')
-        staged=re.search(r'GRIT_EXPORT_FAILED:(INPUT|TOOLS|CONNECT|SNAPSHOT|READ_ACCESS|NATIVE_CONNECT|SNAPSHOT_IMPORT|PG_DUMP|MANIFEST|ARCHIVE_WRITE|ARCHIVE_CHECK|FINALIZE|RESTORE|SOURCE_CHECK|EXPORT):(TLS|AUTHENTICATION|PERMISSION|SCHEMA|VERSION|DISK_FULL|IO|TOOL_MISSING|PROCESS_EXIT|TIMEOUT|EMPTY_ARCHIVE|INVALID_ARCHIVE|REFUSED|UNKNOWN|DESTINATION_EXISTS|CONNECTION|READ_ONLY_REFUSAL)\b',output)
+        staged=re.search(r'GRIT_EXPORT_FAILED:(INPUT|TOOLS|CONNECT|SNAPSHOT|READ_ACCESS|NATIVE_CONNECT|SNAPSHOT_IMPORT|PG_DUMP|MANIFEST|ARCHIVE_WRITE|ARCHIVE_CHECK|FINALIZE|RESTORE|SOURCE_CHECK|EXPORT|CLOSE):(TLS|AUTHENTICATION|PERMISSION|SCHEMA|VERSION|DISK_FULL|IO|TOOL_MISSING|PROCESS_EXIT|TIMEOUT|EMPTY_ARCHIVE|INVALID_ARCHIVE|REFUSED|UNKNOWN|DESTINATION_EXISTS|CONNECTION|READ_ONLY_REFUSAL|CANCELLED)\b',output)
         if staged:raise Stop('Source/export failed at '+staged[1]+'; category '+staged[2]+'. No raw database error is printed; existing archives are retained.') from None
         match=re.search(r'GRIT_EXPORT_FAILED:(DNS|TLS|AUTHENTICATION|TCP_OR_FIREWALL|DESTINATION_EXISTS|URL_OR_SCHEMA_OR_ARCHIVE|SOURCE_OR_ARCHIVE)\b',output)
         if match:raise Stop('Export diagnosis: '+match[1]+'. See the diagnosis table in the migration guide. No SSH tunnel is used.') from None
@@ -126,6 +135,85 @@ def export_external(destination):
     verify_local(destination)
 
 
+PREFLIGHT_STAGES={'INPUT','TOOLS','CONNECT','SNAPSHOT','READ_ACCESS','NATIVE_CONNECT','SNAPSHOT_IMPORT','CLOSE','SOURCE_CHECK'}
+PREFLIGHT_CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','REFUSED','UNKNOWN','CONNECTION','READ_ONLY_REFUSAL','CANCELLED'}
+
+
+def stop_preflight_container(name,marker):
+    """Stop only THIS new labeled container. Never remove it or touch a database."""
+    if name!='grit-source-check-'+marker or not re.fullmatch(r'[0-9a-f]{32}',marker):return False
+    cmd=['docker','--host=unix:///var/run/docker.sock']
+    probe=['inspect','--format','{{ index .Config.Labels "grit.migration.preflight" }} {{.State.Running}}',name]
+    try:
+        status=subprocess.run(cmd+probe,env=command_environment(),check=True,capture_output=True,text=True,timeout=3).stdout.strip()
+        if status==marker+' false':return True
+        if status!=marker+' true':return False
+        subprocess.run(cmd+['stop','--time','2',name],env=command_environment(),check=True,capture_output=True,text=True,timeout=5)
+        return subprocess.run(cmd+probe,env=command_environment(),check=True,capture_output=True,text=True,timeout=3).stdout.strip()==marker+' false'
+    except (OSError,subprocess.SubprocessError):return False
+
+
+def run_preflight_container(args,payload,name,marker,total_timeout=150,stopper=None):
+    """Stream ONLY allowlisted stage events; bound stdin, Docker wait and cleanup."""
+    state={'stage':'CONTAINER_START','error':None};output=[];process=None;failure=None
+    deadline=time.monotonic()+total_timeout
+    print('check-source: CONTAINER_START',flush=True)
+    def stderr_reader(stream):
+        try:
+            while line:=stream.readline(4096):
+                match=re.fullmatch(r'GRIT_PREFLIGHT_STAGE:([A-Z_]+)\n?',line)
+                if match and match[1] in PREFLIGHT_STAGES:
+                    if state['stage']!=match[1]:print('check-source: '+match[1],flush=True)
+                    state['stage']=match[1]
+                error=re.fullmatch(r'GRIT_EXPORT_FAILED:([A-Z_]+):([A-Z_]+)\n?',line)
+                if error and error[1] in PREFLIGHT_STAGES and error[2] in PREFLIGHT_CATEGORIES:
+                    state['error']=(error[1],error[2])
+        except (OSError,ValueError):pass
+    def stdout_reader(stream):
+        try:
+            while chunk:=stream.read(1024):
+                if sum(map(len,output))<4096:output.append(chunk[:1024])
+        except (OSError,ValueError):pass
+    def write_input(stream):
+        try:stream.write(payload);stream.close()
+        except (OSError,ValueError):pass
+    threads=[]
+    try:
+        process=subprocess.Popen(args,cwd=ROOT,env=command_environment(),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='replace',start_new_session=True)
+        for fn,stream in ((stderr_reader,process.stderr),(stdout_reader,process.stdout),(write_input,process.stdin)):
+            thread=threading.Thread(target=fn,args=(stream,),daemon=True);thread.start();threads.append(thread)
+        while process.poll() is None:
+            if time.monotonic()>=deadline:
+                failure=(state['stage'],'TIMEOUT');break
+            time.sleep(0.05)
+    except KeyboardInterrupt:failure=(state['stage'],'CANCELLED')
+    except (OSError,subprocess.SubprocessError):failure=(state['stage'],'UNKNOWN')
+    finally:
+        if process is not None and process.poll() is None:
+            try:os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+            try:process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                try:os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                try:process.wait(timeout=1)
+                except subprocess.TimeoutExpired:pass
+        stopped=(stopper or stop_preflight_container)(name,marker)
+        for thread in threads:thread.join(0.2)
+        # Do not close streams while a reader might own their buffered lock.
+        if process is not None and all(not thread.is_alive() for thread in threads):
+            for stream in (process.stdin,process.stdout,process.stderr):
+                if not stream.closed:stream.close()
+    failure=failure or state['error']
+    if failure is None and (process is None or process.returncode!=0):failure=(state['stage'],'PROCESS_EXIT')
+    if not stopped:
+        failure=failure or ('CONTAINER_CLEANUP','UNKNOWN')
+        suffix=' Container stop unconfirmed; inspect only '+name+'.'
+    else:suffix=' Created check-source container is stopped and retained: '+name+'.'
+    if failure:raise Stop('check-source failed at '+failure[0]+'; category '+failure[1]+'.'+suffix)
+    return subprocess.CompletedProcess(args,process.returncode,stdout=''.join(output),stderr='')
+
+
 def source_request(action,destination=None):
     value=secret('Render External Database URL (hidden, ONE line, no quotes): ')
     if not value.startswith(('postgresql://','postgres://')) or any(c.isspace() for c in value):
@@ -135,10 +223,16 @@ def source_request(action,destination=None):
     if destination is not None:
         payload['destination']='/bundles/'+destination.name
         mounts=['--mount','type=bind,src='+str(destination.parent)+',dst=/bundles']
-    result=docker('run','--rm','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--tmpfs','/tmp','--cap-drop=ALL',
+    args=['run','-i','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--tmpfs','/tmp','--cap-drop=ALL',
            *mounts,'--mount','type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly',
-           '--entrypoint','python3','grit-migration:ops','/tools/input_entrypoint.py',
-           input=json.dumps(payload),text=True,capture_output=True)
+           '--entrypoint','python3','grit-migration:ops','/tools/input_entrypoint.py']
+    if action=='check-source':
+        marker=uuid.uuid4().hex;name='grit-source-check-'+marker
+        args[1:1]=['--name',name,'--label','grit.migration.preflight='+marker]
+        result=run_preflight_container(['docker','--host=unix:///var/run/docker.sock',*args],json.dumps(payload),name,marker)
+    else:
+        args.insert(1,'--rm')
+        result=docker(*args,input=json.dumps(payload),text=True,capture_output=True)
     if action=='check-source':
         # Worker success is numeric/fixed vocabulary only. Do not relay arbitrary output.
         match=re.fullmatch(r'Source check passed: PostgreSQL (\d+); native clients major (\d+); readable public tables (\d+)\. No dump created; full export may still encounter other errors\.\n?',result.stdout)

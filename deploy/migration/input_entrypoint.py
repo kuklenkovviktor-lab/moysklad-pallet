@@ -5,7 +5,7 @@ import sys
 from urllib.parse import urlsplit
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
-from migration_tool import Refused, export, check_source, DiagnosticFailure, at_stage, failure_category
+from migration_tool import Refused, export, check_source, DiagnosticFailure, at_stage, failure_category, supervise_check_source
 
 
 def external_dsn(value):
@@ -31,6 +31,7 @@ def external_dsn(value):
 
 def main():
     os.umask(0o077)
+    print('GRIT_PREFLIGHT_STAGE:INPUT',file=sys.stderr,flush=True)
     phase='INPUT'
     try:
         with at_stage('INPUT'):
@@ -40,7 +41,7 @@ def main():
             if action not in ('export','check-source'):raise Refused('Invalid action')
         if action=='check-source':
             phase='SOURCE_CHECK'
-            result=check_source(dsn)
+            result=supervise_check_source(dsn,progress=lambda stage:print('GRIT_PREFLIGHT_STAGE:'+stage,file=sys.stderr,flush=True),target=check_source)
             print('Source check passed: PostgreSQL '+str(result['server_version'])+'; native clients major '+str(result['client_major'])+'; readable public tables '+str(result['tables_checked'])+'. No dump created; full export may still encounter other errors.')
         else:
             with at_stage('INPUT'):
@@ -50,6 +51,8 @@ def main():
             phase='EXPORT'
             export(dsn,destination)
             print('Export verified: custom archive, consistent row fingerprints, SHA-256. Source was read-only.')
+    except KeyboardInterrupt:
+        raise SystemExit(str(DiagnosticFailure(phase,'CANCELLED'))) from None
     except Exception as error:
         diagnostic=error if isinstance(error,DiagnosticFailure) else DiagnosticFailure(phase,failure_category(error))
         raise SystemExit(str(diagnostic)) from None
