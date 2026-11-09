@@ -489,7 +489,11 @@ def init_wms_db():
         scanner_code = make_badge_scanner_code(emp_id)
         if query_one("SELECT id FROM employees WHERE id = ?", (emp_id,)):
             execute(
-                "UPDATE employees SET badge_code = ?, scanner_code = ? WHERE id = ?",
+                "UPDATE employees SET "
+                "badge_code = COALESCE(NULLIF(badge_code, ''), ?), "
+                "scanner_code = COALESCE(NULLIF(scanner_code, ''), ?) "
+                "WHERE id = ? AND "
+                "(badge_code IS NULL OR badge_code = '' OR scanner_code IS NULL OR scanner_code = '')",
                 (badge_code, scanner_code, emp_id),
             )
         else:
@@ -2538,7 +2542,8 @@ load();
 @wms_bp.get("/setup/viktor-8f4c2e91a7b6")
 def bootstrap_viktor_badge():
     ensure_db()
-    code = make_badge_code("viktor")
+    row = query_one("SELECT badge_code FROM employees WHERE id = ?", ("viktor",))
+    code = str((row[0] if row else "") or "").strip() or make_badge_code("viktor")
     page = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>GRIT WMS · Бейдж Виктора</title>
@@ -2550,7 +2555,7 @@ def bootstrap_viktor_badge():
 <div id="qr" class="qr"></div><div class="small">Личный бейдж входа</div>
 <a class="btn" href="/login">Перейти ко входу</a><div class="small hint" style="margin-top:12px">Сохрани или распечатай этот QR. Он предназначен для входа Виктора в GRIT WMS.</div>
 </div></div><script>new QRCode(document.getElementById('qr'),{text:"__VIKTOR_BADGE_CODE__",width:260,height:260});</script></body></html>"""
-    return page
+    return page.replace("__VIKTOR_BADGE_CODE__", code)
 
 
 @wms_bp.get("/login")
