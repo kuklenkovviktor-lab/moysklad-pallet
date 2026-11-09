@@ -1,3 +1,5 @@
+> Дополнение P0 от 9 ноября: [общий deadline, лимиты этапов и безопасная остановка](CHECK_SOURCE_DEADLINES.md). Приведённые ниже прежние лимиты дополнены новым независимым watchdog.
+
 # Render export: нулевой partial и безопасный check-source
 
 Подготовлено 8 ноября 2026. База: `main` / `d0e82d2`, PR98 с read-only системными CA уже включён. Изменения: `fix/render-export-diagnostics`.

@@ -107,11 +107,11 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_check_source_has_no_bundle_mount_and_secret_only_on_stdin(self):
         stdout='Source check passed: PostgreSQL 160010; native clients major 17; readable public tables 5. No dump created; full export may still encounter other errors.\n'
-        with patch.object(kit,'secret',return_value=DSN),patch.object(kit,'docker',return_value=SimpleNamespace(stdout=stdout)) as docker:
+        with patch.object(kit,'secret',return_value=DSN),patch.object(kit,'run_preflight_container',return_value=SimpleNamespace(stdout=stdout)) as docker:
             kit.source_request('check-source')
-        args=docker.call_args.args;kwargs=docker.call_args.kwargs
+        args=docker.call_args.args[0];payload=docker.call_args.args[1]
         self.assertNotIn(SECRET,str(args));self.assertNotIn('dst=/bundles',str(args))
-        self.assertEqual(json.loads(kwargs['input'])['action'],'check-source')
+        self.assertEqual(json.loads(payload)['action'],'check-source')
         self.assertIn('type=bind,src=/etc/ssl/certs,dst=/etc/ssl/certs,readonly',args)
         self.assertNotIn('-e',args)
 
@@ -134,7 +134,7 @@ class AdditionalFaultTests(unittest.TestCase):
             self.assertNotIn(SECRET,str(caught.exception))
 
     def test_unrecognized_worker_output_is_not_echoed(self):
-        with patch.object(kit,'secret',return_value=DSN),patch.object(kit,'docker',return_value=SimpleNamespace(stdout=SECRET)):
+        with patch.object(kit,'secret',return_value=DSN),patch.object(kit,'run_preflight_container',return_value=SimpleNamespace(stdout=SECRET)):
             with self.assertRaises(kit.Stop) as caught:kit.source_request('check-source')
         self.assertNotIn(SECRET,str(caught.exception))
 

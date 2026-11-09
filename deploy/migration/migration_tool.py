@@ -7,10 +7,13 @@ from contextlib import contextmanager
 import errno
 import hashlib
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
+import time
 
 import psycopg
 from psycopg import sql
@@ -27,8 +30,8 @@ class SchemaRefused(Refused):
     pass
 
 
-STAGES={'INPUT','TOOLS','CONNECT','SNAPSHOT','READ_ACCESS','NATIVE_CONNECT','SNAPSHOT_IMPORT','PG_DUMP','MANIFEST','ARCHIVE_WRITE','ARCHIVE_CHECK','FINALIZE','RESTORE','SOURCE_CHECK','EXPORT'}
-CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','EMPTY_ARCHIVE','INVALID_ARCHIVE','REFUSED','UNKNOWN','DESTINATION_EXISTS','CONNECTION','READ_ONLY_REFUSAL'}
+STAGES={'INPUT','TOOLS','CONNECT','SNAPSHOT','READ_ACCESS','NATIVE_CONNECT','SNAPSHOT_IMPORT','PG_DUMP','MANIFEST','ARCHIVE_WRITE','ARCHIVE_CHECK','FINALIZE','RESTORE','SOURCE_CHECK','EXPORT','CLOSE'}
+CATEGORIES={'TLS','AUTHENTICATION','PERMISSION','SCHEMA','VERSION','DISK_FULL','IO','TOOL_MISSING','PROCESS_EXIT','TIMEOUT','EMPTY_ARCHIVE','INVALID_ARCHIVE','REFUSED','UNKNOWN','DESTINATION_EXISTS','CONNECTION','READ_ONLY_REFUSAL','CANCELLED'}
 
 
 class DiagnosticFailure(Refused):
@@ -41,9 +44,10 @@ class DiagnosticFailure(Refused):
 def failure_category(error):
     """Only structured codes or recognized primary client diagnostics; never echo."""
     state=getattr(error,'sqlstate',None)
+    if state=='57014' and getattr(getattr(error,'diag',None),'message_primary',None)=='canceling statement due to statement timeout':return 'TIMEOUT'
     codes={'28P01':'AUTHENTICATION','28000':'AUTHENTICATION','42501':'PERMISSION',
            '42P01':'SCHEMA','42703':'SCHEMA','3F000':'SCHEMA','53100':'DISK_FULL',
-           '58030':'IO','25006':'READ_ONLY_REFUSAL'}
+           '58030':'IO','25006':'READ_ONLY_REFUSAL','57014':'CANCELLED'}
     if state in codes:return codes[state]
     if isinstance(error,OSError):
         if error.errno in (errno.ENOSPC,errno.EDQUOT):return 'DISK_FULL'
@@ -76,12 +80,93 @@ def failure_category(error):
     return 'UNKNOWN'
 
 
+_stage_sink=None
+PREFLIGHT_LIMITS={'TOOLS':10,'CONNECT':15,'SNAPSHOT':15,'READ_ACCESS':30,'NATIVE_CONNECT':20,'SNAPSHOT_IMPORT':20,'CLOSE':10,'SOURCE_CHECK':120}
+
+
 @contextmanager
 def at_stage(stage):
+    if _stage_sink:_stage_sink.send(('begin',stage))
     try:yield
     except DiagnosticFailure:raise
     except Exception as error:
         raise DiagnosticFailure(stage,failure_category(error)) from None
+    finally:
+        if _stage_sink:_stage_sink.send(('end',stage))
+
+
+def _preflight_child(dsn,sink,target):
+    global _stage_sink
+    os.setsid()  # Includes native psql/tool children in the deadline kill group.
+    _stage_sink=sink
+    try:
+        with at_stage('SOURCE_CHECK'):result=target(dsn)
+        if set(result)!={'server_version','client_major','tables_checked'} or any(type(value) is not int or value<0 for value in result.values()):
+            raise DiagnosticFailure('SOURCE_CHECK','UNKNOWN')
+        sink.send(('done',result))
+    except BaseException as error:
+        failure=error if isinstance(error,DiagnosticFailure) else DiagnosticFailure('SOURCE_CHECK','UNKNOWN')
+        sink.send(('error',failure.stage,failure.category))
+    finally:sink.close()
+
+
+def _finish_preflight_child(process):
+    try:os.killpg(process.pid,signal.SIGTERM)
+    except ProcessLookupError:
+        if process.is_alive():process.terminate()
+    if process.is_alive():
+        process.join(1)
+    if process.is_alive():
+        try:os.killpg(process.pid,signal.SIGKILL)
+        except ProcessLookupError:process.kill()
+        process.join(1)
+    return not process.is_alive()
+
+
+def supervise_check_source(dsn,total_timeout=120,stage_timeouts=None,progress=None,target=None):
+    """Hard wall-clock bounds, even for blocked libpq/DNS/C or rollback calls.
+
+    Only fixed stage codes and integer success fields cross the internal pipe.
+    The DSN stays in inherited private memory, never in process argv or env.
+    """
+    limits=dict(PREFLIGHT_LIMITS,**(stage_timeouts or {}))
+    context=multiprocessing.get_context('fork')  # Migration image is Linux.
+    receiver,sender=context.Pipe(duplex=False)
+    process=context.Process(target=_preflight_child,args=(dsn,sender,target or check_source))
+    deadline=time.monotonic()+total_timeout;stack=[];result=None;failure=None
+    process.start();sender.close()
+    try:
+        while True:
+            now=time.monotonic()
+            active=stack[-1][0] if stack else 'SOURCE_CHECK'
+            if now>=deadline or any(now>=end for _,end in stack):
+                failure=DiagnosticFailure(active,'TIMEOUT');break
+            if receiver.poll(min(0.05,max(0,deadline-now))):
+                try:event=receiver.recv()
+                except EOFError:
+                    if result is None and failure is None:failure=DiagnosticFailure(active,'UNKNOWN')
+                    break
+                if event[0]=='begin' and event[1] in limits:
+                    stack.append((event[1],time.monotonic()+limits[event[1]]))
+                    if progress:progress(event[1])
+                elif event[0]=='end' and stack and stack[-1][0]==event[1]:
+                    stack.pop()
+                    if progress:progress(stack[-1][0] if stack else 'SOURCE_CHECK')
+                elif event[0]=='error':
+                    failure=DiagnosticFailure(event[1],event[2]);break
+                elif event[0]=='done':result=event[1];break
+                else:
+                    failure=DiagnosticFailure(active,'UNKNOWN');break
+            elif not process.is_alive():
+                failure=DiagnosticFailure(active,'UNKNOWN');break
+        process.join(0.1)
+    finally:
+        stopped=_finish_preflight_child(process)
+        receiver.close()
+    if not stopped:raise DiagnosticFailure('CLOSE','TIMEOUT')
+    if failure:raise failure
+    if result is None:raise DiagnosticFailure('SOURCE_CHECK','UNKNOWN')
+    return result
 
 
 @contextmanager
@@ -256,12 +341,17 @@ def source_connection(dsn):
 
 
 def check_source(dsn):
+    # Session-only limits apply before BEGIN/SNAPSHOT, not after those queries.
+    values=conninfo_to_dict(dsn)
+    values['options']=values.get('options','')+' -c default_transaction_read_only=on -c statement_timeout=15000 -c lock_timeout=5000'
+    dsn=make_conninfo(**values)
     versions=client_versions()
-    with source_connection(dsn) as conn:
+    conn=source_connection(dsn)
+    try:
         snapshot_id=source_snapshot(conn,versions['pg_dump'])
         with at_stage('READ_ACCESS'):
             conn.execute("SET LOCAL lock_timeout='5s'")
-            conn.execute("SET LOCAL statement_timeout='60s'")
+            conn.execute("SET LOCAL statement_timeout='15s'")
             tables=source_tables(conn)
             for table in tables:
                 conn.execute(sql.SQL('LOCK TABLE public.{} IN ACCESS SHARE MODE').format(sql.Identifier(table)))
@@ -277,6 +367,8 @@ def check_source(dsn):
         if str(conn.info.server_version).encode() not in result.splitlines():
             raise DiagnosticFailure('SNAPSHOT_IMPORT','UNKNOWN')
         return {'server_version':conn.info.server_version,'client_major':versions['pg_dump'],'tables_checked':len(tables)}
+    finally:
+        with at_stage('CLOSE'):conn.close()
 
 
 def export(dsn, destination):
