@@ -4,11 +4,19 @@ set -Eeuo pipefail
 umask 077
 
 sha="${1:?Missing commit SHA}"
+run_id="${2:?Missing GitHub run ID}"
+[[ "$run_id" =~ ^[0-9]+$ ]] || { echo "Invalid run ID"; exit 1; }
+
+# Lock across GitHub Actions, manual deploy and other cooperating release scripts.
+mkdir -p /opt/grit-data/deployment
+exec 9>/opt/grit-data/deployment/production-release.lock
+flock -n 9 || { echo "Another production release is in progress"; exit 1; }
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid commit SHA"; exit 1; }
 
 root=/opt/grit-wms
 incoming=/opt/grit-data/deployment
-candidate="$root/compose.next.yaml"
+release_dir="$incoming/releases/$sha-$run_id"
+candidate="$release_dir/compose.yaml"
 base="$root/compose.yaml"
 envfile="$root/.env"
 image="grit-wms:release-$sha"
@@ -26,8 +34,33 @@ grep -qx "GRIT_DATABASE_NAME=$database" "$envfile" || {
 grep -q '^MOYSKLAD_TOKEN=.' "$envfile" || {
   echo "Missing MoySklad token in .env"; exit 1;
 }
+# Explicit production gate. Operator creates this receipt ONLY after a recent
+# production backup has been uploaded, downloaded and restored off the VPS.
+# Do not satisfy this gate with a backup of the old 'grit' database.
+[[ -s /opt/grit-data/deployment/verified-production-offsite-recovery.txt ]] || {
+  echo "Blocked: no verified off-site recovery receipt for production database"
+  exit 1
+}
+grep -qx 'GRIT_PRODUCTION_MODE=1' "$envfile" || {
+  echo "Set GRIT_PRODUCTION_MODE=1 after verifying production Compose"
+  exit 1
+}
 docker image inspect "$image" >/dev/null
 current=$(docker inspect grit-wms-test-app-1 --format '{{.Image}}')
+# Keep the exact existing deploy context, including legacy cutover overrides.
+config_files=$(docker inspect grit-wms-test-app-1 --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
+IFS=',' read -r -a old_files <<< "$config_files"
+[[ "${#old_files[@]}" -ge 1 ]] || { echo "Cannot identify old Compose context"; exit 1; }
+old_args=()
+for file in "${old_files[@]}"; do
+  [[ -s "$file" ]] || { echo "Missing prior Compose file"; exit 1; }
+  old_args+=(-f "$file")
+done
+# Preserve old .env and base Compose for the complete deployment-context rollback.
+cp -p "$envfile" "$release_dir/env.before"
+cp -p "$base" "$release_dir/compose.before.yaml"
+chmod 600 "$release_dir/env.before" "$release_dir/compose.before.yaml"
+
 old_db=$(docker inspect grit-wms-test-app-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^GRIT_DATABASE_NAME=//p')
 [[ "$old_db" == "$database" ]] || {
   echo "Running application is not on expected database; aborting"; exit 1;
@@ -54,7 +87,7 @@ echo "Pre-deploy backup saved locally"
 # Keep the old image for rollback; don't rely on a mutable image tag.
 rollback_image="grit-wms:rollback-$sha"
 docker tag "$current" "$rollback_image"
-rollback="$incoming/rollback-$sha.yaml"
+rollback="$release_dir/rollback.yaml"
 cat > "$rollback" <<EOF
 services:
   app:
@@ -63,10 +96,19 @@ EOF
 chmod 600 "$rollback"
 
 rollback_on_failure() {
-  echo "Deployment failed. Attempting application image rollback."
-  GRIT_IMAGE_TAG="release-$sha" docker compose --project-directory "$root" \
-    --env-file "$envfile" -f "$candidate" -f "$rollback" \
-    up -d --no-deps --no-build --force-recreate app || true
+  trap - ERR
+  echo "Deployment failed: reverting prior app image and Compose context."
+  # No database restore here: never delete new operations.
+  cp -p "$release_dir/env.before" "$envfile"
+  cp -p "$release_dir/compose.before.yaml" "$base"
+  if docker compose --project-directory "$root" --env-file "$envfile" \
+       "${old_args[@]}" -f "$rollback" up -d --no-deps --no-build --force-recreate app; then
+    sleep 5
+    state=$(docker inspect grit-wms-test-app-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')
+    echo "Rollback container health: $state"
+  else
+    echo "ROLLBACK FAILED: manual recovery necessary" >&2
+  fi
 }
 trap rollback_on_failure ERR
 
@@ -104,8 +146,8 @@ try:
 finally:
     if os.path.exists(name): os.unlink(name)
 PY
-cp "$base" "$incoming/compose-before-$sha.yaml"
-chmod 600 "$incoming/compose-before-$sha.yaml"
+cp "$base" "$release_dir/compose-before-$sha.yaml"
+chmod 600 "$release_dir/compose-before-$sha.yaml"
 mv "$candidate" "$base"
 trap - ERR
 echo "DEPLOY PASS: $sha (database=$database)"
