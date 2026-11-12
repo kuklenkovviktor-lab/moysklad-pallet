@@ -15,7 +15,11 @@ def permitted_database(database):
 
 def configure():
     password = os.environ.pop("POSTGRES_PASSWORD")
-    database = os.getenv("GRIT_DATABASE_NAME", "grit")
+    database = os.environ.get("GRIT_DATABASE_NAME", "").strip()
+    if os.getenv("GRIT_PRODUCTION_MODE") == "1" and database != "grit_migration_trial_20261111":
+        raise SystemExit("Production database mismatch")
+    if not database:
+        raise SystemExit("GRIT_DATABASE_NAME is required")
     if not permitted_database(database):
         raise SystemExit("Invalid local database selection")
     os.environ["DATABASE_URL"] = (
