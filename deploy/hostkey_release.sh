@@ -148,6 +148,8 @@ finally:
 PY
 cp "$base" "$release_dir/compose-before-$sha.yaml"
 chmod 600 "$release_dir/compose-before-$sha.yaml"
-mv "$candidate" "$base"
+cp -p "$candidate" "$base"
+# Preserve the release candidate path because Docker Compose records it in
+# container labels used for the next release rollback.
 trap - ERR
 echo "DEPLOY PASS: $sha (database=$database)"
