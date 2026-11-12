@@ -12,7 +12,9 @@ def check():
         if not json.load(response).get("ready"):
             raise RuntimeError("Application is not ready")
     password = quote(os.environ["POSTGRES_PASSWORD"], safe="")
-    database = os.getenv("GRIT_DATABASE_NAME", "grit")
+    database = os.environ.get("GRIT_DATABASE_NAME", "").strip()
+    if os.getenv("GRIT_PRODUCTION_MODE") == "1" and database != "grit_migration_trial_20261111":
+        raise RuntimeError("Production database mismatch")
     if database not in ('grit', 'grit_migration_trial_20261111') and not re.fullmatch(r'restore_check_[a-z0-9_]{1,45}', database):
         raise RuntimeError("Invalid local database selection")
     with psycopg.connect(
