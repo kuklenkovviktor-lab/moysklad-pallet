@@ -11,29 +11,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  build-and-test:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements.txt
-      - name: Receiving regression (synthetic token only)
+      - run: python -m pip install -r requirements.txt pytest==8.4.2
+      - name: Full synthetic Python regression
         env:
           MOYSKLAD_TOKEN: synthetic-test-token
-        run: python -m unittest discover -s tests -p 'test_receiving*.py' -v
-      - name: Build container
-        run: docker build -t grit-wms:release-${{ github.sha }} .
+          WMS_BADGE_SECRET: synthetic-badge-secret
+          WMS_TERMINAL_SECRET: synthetic-terminal-secret
+          SECRET_KEY: synthetic-flask-secret
+        run: python -m pytest -q -p no:cacheprovider
+      - name: JavaScript scanner regression
+        run: |
+          node tests/test_fbs_outbox.cjs
+          node tests/test_replenishment_scan_focus.cjs
+      - name: Build EXACT release image once
+        run: docker build --pull -t grit-wms:release-${{ github.sha }} .
+      - name: Export immutable release image
+        run: |
+          set -euo pipefail
+          docker save grit-wms:release-${{ github.sha }} | gzip -1 > image.tar.gz
+          sha256sum image.tar.gz > image.tar.gz.sha256
+          docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}' > image.id
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grit-production-image-${{ github.sha }}
+          path: |
+            image.tar.gz
+            image.tar.gz.sha256
+            image.id
+          retention-days: 7
+          if-no-files-found: error
 
   release:
-    needs: test
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: grit-production-image-${{ github.sha }}
+          path: release-artifact
+      - name: Verify image is the tested artifact
+        run: |
+          set -euo pipefail
+          cd release-artifact
+          sha256sum -c image.tar.gz.sha256
+          gzip -dc image.tar.gz | docker load
+          test "$(docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}')" = "$(cat image.id)"
       - name: Prepare SSH credentials with pinned host key
         env:
           HOST: ${{ secrets.HOSTKEY_HOST }}
@@ -49,17 +84,18 @@ jobs:
           printf '%s\n' "$HOST_KEYS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           printf 'HOST=%s\nUSER=%s\n' "$HOST" "$USER" >> "$GITHUB_ENV"
-      - name: Build production image
-        run: docker build -t grit-wms:release-${{ github.sha }} .
-      - name: Upload image and release files
+      - name: Transfer tested image and release configuration
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" 'mkdir -p /opt/grit-data/deployment'
+          RELEASE_PATH="/opt/grit-data/deployment/releases/${{ github.sha }}-${{ github.run_id }}"
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" "install -d -m 700 '$RELEASE_PATH'"
           docker save grit-wms:release-${{ github.sha }} | ssh -o StrictHostKeyChecking=yes "$USER@$HOST" docker load
-          scp -o StrictHostKeyChecking=yes compose.yaml "$USER@$HOST:/opt/grit-wms/compose.next.yaml"
-          scp -o StrictHostKeyChecking=yes deploy/hostkey_release.sh "$USER@$HOST:/opt/grit-data/deployment/hostkey_release.sh"
-      - name: Deploy and verify (rollback on failure)
+          scp -o StrictHostKeyChecking=yes compose.yaml "$USER@$HOST:$RELEASE_PATH/compose.yaml"
+          scp -o StrictHostKeyChecking=yes deploy/hostkey_release.sh "$USER@$HOST:$RELEASE_PATH/release.sh"
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
+            "test \"\$(docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}')\" = '$(cat release-artifact/image.id)'"
+      - name: Release after off-site backup gate
         run: |
           set -euo pipefail
           ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
-            "bash /opt/grit-data/deployment/hostkey_release.sh ${{ github.sha }}"
+            "bash '/opt/grit-data/deployment/releases/${{ github.sha }}-${{ github.run_id }}/release.sh' ${{ github.sha }} ${{ github.run_id }}"
