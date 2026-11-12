@@ -572,11 +572,23 @@ def get_session_employee():
             "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL "
             "ORDER BY started_at DESC LIMIT 1", (employee_id,),
         )
-        if not active_shift or (bound_shift and bound_shift != active_shift[0]):
-            session.clear()
-            return None
-        if not bound_shift:
+        if bound_shift:
+            if not active_shift or bound_shift != active_shift[0]:
+                session.clear()
+                return None
+        elif active_shift:
             session["employee_shift_id"] = active_shift[0]
+        else:
+            # An unbound legacy session must be revoked after a shift closure.
+            # A fresh synthetic fixture with no shift history is not a closed
+            # shift; real employee login always creates the first shift.
+            latest = query_one(
+                "SELECT ended_at FROM shifts WHERE employee_id = ? "
+                "ORDER BY started_at DESC LIMIT 1", (employee_id,),
+            )
+            if latest and latest[0] is not None:
+                session.clear()
+                return None
     # Upgrade legacy browser-only sessions on first valid request as well as
     # newly scanned sessions. A page reload/phone restart must retain the badge.
     if not session.permanent:
