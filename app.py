@@ -1499,6 +1499,15 @@ async function refreshReceiptProgress(){
     units=Number(data.units||0);
     document.getElementById('pallets').textContent=pallets;
     document.getElementById('units').textContent=units;
+    const result=document.getElementById('result');
+    // On iOS process eviction the previous confirmation text is lost.
+    // Show the last durable success without ever issuing a second write.
+    if(result&&!result.textContent.trim()&&!pendingConfirmation&&!stagedPallet&&data.last_confirmed){
+      const p=data.last_confirmed;
+      result.innerHTML='<div class="ok"><b>Последняя подтверждённая палета</b><br>'+
+        escapeHtml(p.article)+' · <b>'+escapeHtml(p.added)+' шт.</b><br>'+
+        '<span class="small">'+escapeHtml(p.barcode)+'</span></div>';
+    }
   }catch(_error){/* Never reset counters on transient network loss. */}
 }
 window.addEventListener('pageshow',()=>{if(activeReceiptId)refreshReceiptProgress()});
@@ -2858,23 +2867,33 @@ def receiving_session_summary():
     if not receipt_id or len(receipt_id) > 200:
         return jsonify(error="Неверный номер приёмки"), 400
     rows = query_all(
-        "SELECT response_json FROM receiving_confirmations "
-        "WHERE receipt_id = ? AND employee_id = ? AND status = 'done'",
+        "SELECT response_json, barcode FROM receiving_confirmations "
+        "WHERE receipt_id = ? AND employee_id = ? AND status = 'done' "
+        "ORDER BY updated_at DESC, operation_id DESC",
         (receipt_id, employee["id"]),
     )
     total = Decimal("0")
-    for (raw,) in rows:
+    last_confirmed = None
+    for raw, barcode in rows:
         try:
             payload = json.loads(raw or "{}")
             value = Decimal(str(payload.get("added", 0)))
             if not value.is_finite() or value < 0:
                 raise ValueError("Invalid confirmed quantity")
             total += value
-        except (ValueError, TypeError, InvalidOperation):
+            if last_confirmed is None:
+                last_confirmed = {
+                    "barcode": barcode,
+                    "article": payload.get("article") or payload.get("name") or "",
+                    "added": float(value),
+                    "total": payload.get("total"),
+                }
+        except (ValueError, TypeError, InvalidOperation, AttributeError):
             # Don't silently show an incorrect total on damaged ledger data.
             return jsonify(error="Не удалось восстановить количество палет"), 503
     return jsonify(receipt_id=receipt_id, pallets=len(rows),
-                   units=float(total), source="receiving_confirmations")
+                   units=float(total), last_confirmed=last_confirmed,
+                   source="receiving_confirmations")
 
 
 @app.get("/api/scan-operation/<operation_id>")
