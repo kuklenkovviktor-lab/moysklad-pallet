@@ -37,7 +37,7 @@ def main():
     s3_test = '--s3' in sys.argv
     emulator = None
     project = 'grit-verify-' + uuid.uuid4().hex[:10]
-    environment = dict(os.environ, GRIT_DATA_ROOT=str(data), GRIT_PORT='0', BACKUP_S3_ENABLED='0', BACKUP_ALERT_REQUIRED='0')
+    environment = dict(os.environ, GRIT_DATA_ROOT=str(data), GRIT_PORT='0', GRIT_DATABASE_NAME='grit', GRIT_PRODUCTION_MODE='0', BACKUP_S3_ENABLED='0', BACKUP_ALERT_REQUIRED='0')
     # Ambient shell variables cannot override these independently generated keys.
     for key in ('POSTGRES_PASSWORD', 'SECRET_KEY', 'WMS_BADGE_SECRET', 'WMS_TERMINAL_SECRET', 'MANAGER_WEB_PASSWORD'):
         environment.pop(key, None)
