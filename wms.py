@@ -563,6 +563,20 @@ def get_session_employee():
     if not row:
         session.clear()
         return None
+    # The server, not a signed browser cookie, decides whether this terminal
+    # is still authorized for the shift. Manager force-close revokes the shift.
+    # Old cookies without a bound shift are upgraded only while a shift is open.
+    if not session.get("manager_web"):
+        bound_shift = str(session.get("employee_shift_id") or "")
+        active_shift = query_one(
+            "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL "
+            "ORDER BY started_at DESC LIMIT 1", (employee_id,),
+        )
+        if not active_shift or (bound_shift and bound_shift != active_shift[0]):
+            session.clear()
+            return None
+        if not bound_shift:
+            session["employee_shift_id"] = active_shift[0]
     # Upgrade legacy browser-only sessions on first valid request as well as
     # newly scanned sessions. A page reload/phone restart must retain the badge.
     if not session.permanent:
@@ -2658,6 +2672,7 @@ def auth_login():
     session["employee_id"] = row[0]
     session.permanent = True
     shift_id, _ = ensure_active_shift(row[0], "other")
+    session["employee_shift_id"] = shift_id
     log_event(row[0], "auth", "login", shift_id=shift_id, object_code=badge_code, result="ok")
     return jsonify(ok=True, shift_id=shift_id, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
 
