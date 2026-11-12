@@ -1931,8 +1931,9 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 /* GRIT branding: decorative warehouse artwork below logout, never covering controls. */
 .sidebar{display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#30445a transparent}
 .sidebar .side-nav{flex:0 0 auto}
-.sidebar-art{flex:0 0 230px;width:calc(100% + 24px);margin:14px -12px -17px;position:relative;pointer-events:none;background:#0b1726 url("/grit-warehouse-sidebar.svg?v=2") center center/cover no-repeat;border-top:1px solid #203549;min-height:230px}
+.sidebar-art{flex:0 0 230px;width:calc(100% + 24px);margin:14px -12px -17px;position:relative;pointer-events:none;background-color:#0b1726;background-image:url("/grit-sidebar-loading.gif?v=1"),url("/grit-warehouse-sidebar.svg?v=2");background-position:center center;background-size:cover;background-repeat:no-repeat;border-top:1px solid #203549;min-height:230px}
 .sidebar-art::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#0b1726 0%,rgba(11,23,38,.05) 24%,rgba(11,23,38,0) 68%,rgba(11,23,38,.18) 100%);pointer-events:none}
+@media(prefers-reduced-motion:reduce){.sidebar-art{background-image:url("/grit-warehouse-sidebar.svg?v=2")}}
 @media(min-width:1161px){.sidebar{padding-top:13px}.sidebar .brand{padding-bottom:11px;margin-bottom:7px}.sidebar .side-nav{gap:1px}.sidebar .side-nav a{min-height:35px;padding:6px 9px;font-size:12.5px;gap:9px}.sidebar-art{margin-top:auto;flex-basis:230px}}
 @media(max-width:1159px){.sidebar-art{flex-basis:220px;min-height:220px}}
 @media(max-width:780px){.sidebar{overflow:visible}.sidebar-art{display:none}}
@@ -1960,7 +1961,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   <a href="#" onclick="openExitQr();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>QR выхода</a>
   <a class="logout" href="#" onclick="managerLogout();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-logout"></use></svg>Выйти из ПК</a>
  </nav>
- <div class="sidebar-art" role="img" aria-label="Фирменная иллюстрация склада GRIT"></div>
+ <div class="sidebar-art" role="img" aria-label="Анимация погрузки коробок в автомобиль GRIT WMS"></div>
 </aside>
 
 <main class="content"><div class="wrap">
