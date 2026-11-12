@@ -8,6 +8,7 @@ import threading
 import tempfile
 from datetime import timedelta, datetime, timezone
 import sqlite3
+from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify, session, redirect, Response, after_this_request
@@ -111,6 +112,49 @@ app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(print_bridge_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
+
+# The employee terminal must react to a manager closing its shift remotely.
+# API authorization is enforced server-side by get_session_employee; this
+# small client poll only makes the logout visible without needing a reload.
+_TERMINAL_RECHECK_JS = """<script>
+(function(){
+  let checking=false, left=false;
+  async function verifyShift(){
+    if(checking||left||document.hidden)return;
+    checking=true;
+    try{
+      const r=await fetch('/api/auth/me',{cache:'no-store',credentials:'same-origin'});
+      if(r.status===401){
+        left=true;
+        for(const key of ['fbs_shift_id','receipt_id','receipt_name','onix_employee_id'])
+          localStorage.removeItem(key);
+        // DO NOT remove the receiving pending operation UUID. It is needed
+        // for reconciliation and must never be blindly replayed.
+        location.replace('/login?shift_closed=1');
+      }
+    }catch(_error){/* Offline is NOT proof that the shift was closed. */}
+    finally{checking=false;}
+  }
+  setInterval(verifyShift,15000);
+  window.addEventListener('pageshow',verifyShift);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)verifyShift()});
+})();
+</script>"""
+
+@app.after_request
+def add_employee_shift_recheck(response):
+    # Explicit terminal pages only. Never inject into manager, partner or
+    # printable documents. Authorization on APIs is a separate server check.
+    if (request.path not in ('/', '/fbs', '/replenishment', '/move',
+                             '/ozon-fbo', '/exit')
+            or response.status_code != 200 or
+            not response.mimetype.startswith('text/html')):
+        return response
+    html=response.get_data(as_text=True)
+    if '</body>' in html and '_TERMINAL_RECHECK' not in html:
+        response.set_data(html.replace('</body>', _TERMINAL_RECHECK_JS+'</body>',1))
+    return response
+
 
 _WMS_READY = threading.Event()
 _WMS_INITIALIZER_STARTED = False
@@ -987,6 +1031,7 @@ function setActiveReceipt(id,name,meta=''){
   activeReceiptName=name||'';
   localStorage.setItem('receipt_id',activeReceiptId);
   localStorage.setItem('receipt_name',activeReceiptName);
+  if(activeReceiptId)refreshReceiptProgress();
 
   const box=document.getElementById('activeDoc');
   const enabled=!!activeReceiptId;
@@ -1442,6 +1487,24 @@ async function confirmStagedPallet(){
   if(busy||!stagedPallet)return;
   await submitReceivingPallet(stagedPallet);
 }
+async function refreshReceiptProgress(){
+  const requestedId=activeReceiptId;
+  if(!requestedId)return;
+  try{
+    const r=await fetch('/api/receiving/session-summary?receipt_id='+encodeURIComponent(requestedId),{cache:'no-store'});
+    if(!r.ok)return; // Leave visible numbers untouched while offline.
+    const data=await r.json();
+    if(requestedId!==activeReceiptId)return; // Document changed during fetch.
+    pallets=Number(data.pallets||0);
+    units=Number(data.units||0);
+    document.getElementById('pallets').textContent=pallets;
+    document.getElementById('units').textContent=units;
+  }catch(_error){/* Never reset counters on transient network loss. */}
+}
+window.addEventListener('pageshow',()=>{if(activeReceiptId)refreshReceiptProgress()});
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&activeReceiptId)refreshReceiptProgress();
+});
 function clearConfirmedPallet(response,pending){
   pendingConfirmation=null;
   localStorage.removeItem(RECEIVING_PENDING_KEY);
@@ -1451,6 +1514,7 @@ function clearConfirmedPallet(response,pending){
   document.getElementById('pallets').textContent=pallets;
   document.getElementById('units').textContent=units;
   successFeedback();
+  refreshReceiptProgress();
   document.getElementById('result').innerHTML=
     '<div class="ok"><b>Палета принята</b><br>'+
     escapeHtml(response.article||response.name||pending.article||'')+' · <b>'+escapeHtml(response.added)+' шт.</b><br>'+
@@ -2779,6 +2843,39 @@ def pack_info():
         return jsonify(error=f"Ошибка API МойСклад: {e}. {body}"), 502
     except Exception as e:
         return jsonify(error=str(e)), 500
+
+@app.get("/api/receiving/session-summary")
+def receiving_session_summary():
+    """Restore receipt counters from durable confirmed operations, not JS RAM.
+
+    Scoped to the authenticated employee and selected receipt. No MoySklad
+    calls and no writes; safe on pageshow/visibilitychange.
+    """
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Нужен вход по бейджу"), 401
+    receipt_id = str(request.args.get("receipt_id") or "").strip()
+    if not receipt_id or len(receipt_id) > 200:
+        return jsonify(error="Неверный номер приёмки"), 400
+    rows = query_all(
+        "SELECT response_json FROM receiving_confirmations "
+        "WHERE receipt_id = ? AND employee_id = ? AND status = 'done'",
+        (receipt_id, employee["id"]),
+    )
+    total = Decimal("0")
+    for (raw,) in rows:
+        try:
+            payload = json.loads(raw or "{}")
+            value = Decimal(str(payload.get("added", 0)))
+            if not value.is_finite() or value < 0:
+                raise ValueError("Invalid confirmed quantity")
+            total += value
+        except (ValueError, TypeError, InvalidOperation):
+            # Don't silently show an incorrect total on damaged ledger data.
+            return jsonify(error="Не удалось восстановить количество палет"), 503
+    return jsonify(receipt_id=receipt_id, pallets=len(rows),
+                   units=float(total), source="receiving_confirmations")
+
 
 @app.get("/api/scan-operation/<operation_id>")
 def receiving_scan_operation_status(operation_id):
