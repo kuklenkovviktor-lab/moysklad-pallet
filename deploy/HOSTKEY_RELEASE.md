@@ -52,3 +52,54 @@ The public half of the deploy key must be added to the corresponding server user
 - HTTP health and tests do not establish semantic correctness of every warehouse workflow.
 - Image rollback cannot undo schema changes made by a future application migration. Introduce explicitly reviewed, backwards-compatible migrations before using automated production deploys for schema changes.
 - This production config intentionally uses the historic database's current name. Plan a separate controlled rename only after off-host backup and recovery testing.
+
+## Updated release safety gates (2026-11-12)
+
+The branch now requires an explicit `GRIT_DATABASE_NAME` for both app and backup.
+On production set `GRIT_PRODUCTION_MODE=1` in the existing `/opt/grit-wms/.env`
+**only after** verifying the correct database and after reviewing the merged
+release code. With this flag, using `grit` instead of
+`grit_migration_trial_20261111` terminates application startup.
+
+The production script requires
+`/opt/grit-data/deployment/verified-production-offsite-recovery.txt`.
+This is a **human-verified receipt, not automatic evidence**: create it only
+after a current production dump was uploaded to remote storage, downloaded
+back with integrity verification, and restored in an isolated environment.
+The current broken backup of `grit` does NOT qualify. Store the target DB,
+UTC verification date, archive SHA256 and evidence location in the receipt
+but no passwords, KMS credentials or document data.
+
+Workflow is **manual only** and checks `main` at job level. The testing job
+runs the complete Python and JS regressions, builds an image once and uploads
+the exact Docker image as a GitHub Actions artifact. Release downloads that
+artifact, validates SHA256 and compares Docker image IDs locally and on
+HOSTKEY. The host uses `flock` and a versioned release folder, then snapshots
+the exact prior Compose references, config and env. On an app failure it
+attempts to restore prior image and config; it NEVER restores an old production
+database over new warehouse operations.
+
+### First-run operator checklist
+
+1. Verify off-site production recovery, including the real KMS/S3 bucket and
+   current PostgreSQL database; record evidence.
+2. Configure dedicated SSH deploy key, **independently verified** known_hosts,
+   and GitHub Environment `production` with required reviewers and
+   branch restriction to main. Configure environment secrets
+   HOSTKEY_HOST, HOSTKEY_SSH_USER, HOSTKEY_SSH_PRIVATE_KEY,
+   HOSTKEY_SSH_KNOWN_HOSTS. No credentials in repository.
+3. Confirm `flock`, Docker, Compose v2, space for an additional local dump,
+   and access to versioned /opt/grit-data/deployment/releases.
+4. Run a complete isolated deployment and forced-failure rollback rehearsal
+   from the candidate SHA. Do not use the production data or real API.
+5. Only after those gates, merge reviewed PR to main and use the manual
+   release workflow with its production approval.
+6. After the first successful release, check that the existing backup
+   container still uses its **old target until separately reconfigured**;
+   do not confuse an app-only release with fixing the backup service.
+7. For subsequent app releases, verify the previous Compose path from the
+   app container labels remains in /opt/grit-data/deployment/releases.
+
+**Do not turn on push-triggered production releases until off-site backup
+monitoring, proper versioned schema migrations, and rollback matrix have been
+accepted separately.**
