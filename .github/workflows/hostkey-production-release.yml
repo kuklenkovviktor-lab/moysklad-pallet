@@ -1,0 +1,118 @@
+name: HOSTKEY production release (manual, guarded)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Delivery only, or protected production deployment'
+        required: true
+        default: delivery-only
+        type: choice
+        options:
+          - delivery-only
+          - deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grit-hostkey-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt pytest==8.4.2
+      - name: Full synthetic Python regression
+        env:
+          MOYSKLAD_TOKEN: synthetic-test-token
+          WMS_BADGE_SECRET: synthetic-badge-secret
+          WMS_TERMINAL_SECRET: synthetic-terminal-secret
+          SECRET_KEY: synthetic-flask-secret
+        run: python -m pytest -q -p no:cacheprovider
+      - name: JavaScript scanner regression
+        run: |
+          node tests/test_fbs_outbox.cjs
+          node tests/test_replenishment_scan_focus.cjs
+      - name: Build EXACT release image once
+        run: docker build --pull -t grit-wms:release-${{ github.sha }} .
+      - name: Export immutable release image
+        run: |
+          set -euo pipefail
+          docker save grit-wms:release-${{ github.sha }} | gzip -1 > image.tar.gz
+          sha256sum image.tar.gz > image.tar.gz.sha256
+          docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}' > image.id
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grit-production-image-${{ github.sha }}
+          path: |
+            image.tar.gz
+            image.tar.gz.sha256
+            image.id
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: grit-production-image-${{ github.sha }}
+          path: release-artifact
+      - name: Verify image is the tested artifact
+        run: |
+          set -euo pipefail
+          cd release-artifact
+          sha256sum -c image.tar.gz.sha256
+          gzip -dc image.tar.gz | docker load
+          test "$(docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}')" = "$(cat image.id)"
+      - name: Prepare SSH credentials with pinned host key
+        env:
+          HOST: ${{ secrets.HOSTKEY_HOST }}
+          USER: ${{ secrets.HOSTKEY_SSH_USER }}
+          SSH_KEY: ${{ secrets.HOSTKEY_SSH_PRIVATE_KEY }}
+          HOST_KEYS: ${{ secrets.HOSTKEY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HOST" && test -n "$USER" && test -n "$SSH_KEY" && test -n "$HOST_KEYS"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$HOST_KEYS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf 'HOST=%s\nUSER=%s\n' "$HOST" "$USER" >> "$GITHUB_ENV"
+      - name: Deliver verified release to unprivileged inbox
+        run: |
+          set -euo pipefail
+          DEST="/home/gritdeploy/releases/${{ github.sha }}-${{ github.run_id }}"
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" "install -d -m 700 '$DEST'"
+          scp -o StrictHostKeyChecking=yes \
+            release-artifact/image.tar.gz \
+            release-artifact/image.tar.gz.sha256 \
+            release-artifact/image.id \
+            compose.yaml \
+            deploy/grit-deploy-received.sh \
+            deploy/hostkey_release.sh \
+            "$USER@$HOST:$DEST/"
+          # The uploaded files are ONLY data. Never upload/execute a script as root.
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
+            "test -s '$DEST/image.tar.gz' && test -s '$DEST/compose.yaml' && cd '$DEST' && sha256sum -c image.tar.gz.sha256"
+      - name: Invoke root-owned deployment gate
+        if: inputs.mode == 'deploy'
+        run: |
+          set -euo pipefail
+          # The only permitted sudo entry point is a fixed, root-owned dispatcher.
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
+            "sudo -n /usr/local/sbin/grit-deploy-received ${{ github.sha }} ${{ github.run_id }}"

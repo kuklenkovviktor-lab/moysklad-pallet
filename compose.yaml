@@ -24,7 +24,7 @@ services:
     shm_size: 128mb
   app:
     build: .
-    image: grit-wms:hostkey
+    image: grit-wms:${GRIT_IMAGE_TAG:-hostkey}
     restart: unless-stopped
     init: true
     environment:
@@ -33,9 +33,11 @@ services:
       WMS_BADGE_SECRET: ${WMS_BADGE_SECRET:?Generate .env first}
       WMS_TERMINAL_SECRET: ${WMS_TERMINAL_SECRET:?Generate .env first}
       MANAGER_WEB_PASSWORD: ${MANAGER_WEB_PASSWORD:?Generate .env first}
+      GRIT_DATABASE_NAME: ${GRIT_DATABASE_NAME:?Set exact database before starting app}
+      GRIT_PRODUCTION_MODE: ${GRIT_PRODUCTION_MODE:-0}
       WMS_REQUIRE_POSTGRES: "1"
       WMS_MIGRATE_SQLITE_FROM_S3: "0"
-      MOYSKLAD_TOKEN: ""
+      MOYSKLAD_TOKEN: ${MOYSKLAD_TOKEN:-}
       WB_API_TOKEN: ""
       ONIX_PRINT_AGENT_TOKEN: ""
       YC_S3_BUCKET: ""
@@ -64,7 +66,7 @@ services:
     environment:
       PGHOST: db
       PGUSER: grit
-      PGDATABASE: grit
+      PGDATABASE: ${GRIT_DATABASE_NAME:?Set exact database before starting backup}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Generate .env first}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       PGCONNECT_TIMEOUT: "5"

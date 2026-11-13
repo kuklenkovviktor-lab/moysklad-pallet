@@ -24,7 +24,7 @@ def main():
     generate(repo/'.env')
     project='grit-final-'+uuid.uuid4().hex[:10]
     with (repo/'.env').open('a') as stream:
-        stream.write('GRIT_DATA_ROOT='+str(data)+'\nGRIT_PORT=0\nCOMPOSE_PROJECT_NAME='+project+'\n')
+        stream.write('GRIT_DATA_ROOT='+str(data)+'\nGRIT_PORT=0\nGRIT_DATABASE_NAME=grit\nGRIT_PRODUCTION_MODE=0\nCOMPOSE_PROJECT_NAME='+project+'\n')
     (repo/'.env.backup').write_text('BACKUP_S3_ACCESS_KEY_ID=fake-only\nBACKUP_S3_SECRET_ACCESS_KEY=fake-only\n');(repo/'.env.backup').chmod(0o600)
     spec=importlib.util.spec_from_file_location('final_kit',repo/'deploy/migrate.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     try:

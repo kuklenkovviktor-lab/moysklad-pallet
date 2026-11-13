@@ -33,11 +33,21 @@ class DeploymentTests(unittest.TestCase):
             self.assertTrue(all(len(values[x]) == 64 for x in names))
 
     def test_entrypoint_forces_local_database_and_quotes_password(self):
-        with patch.dict(os.environ, {'DATABASE_URL': 'postgresql://production/never', 'POSTGRES_PASSWORD': 'x:@/ y', 'WMS_REQUIRE_POSTGRES': '0'}, clear=True):
+        with patch.dict(os.environ, {'DATABASE_URL': 'postgresql://production/never', 'POSTGRES_PASSWORD': 'x:@/ y', 'GRIT_DATABASE_NAME': 'grit', 'WMS_REQUIRE_POSTGRES': '0'}, clear=True):
             module('entrypoint').configure()
             self.assertEqual(os.environ['DATABASE_URL'], 'postgresql://grit:x%3A%40%2F%20y@db:5432/grit')
             self.assertEqual(os.environ['WMS_REQUIRE_POSTGRES'], '1')
             self.assertNotIn('POSTGRES_PASSWORD', os.environ)
+
+    def test_production_rejects_wrong_database_or_missing_database(self):
+        for target in ('', 'grit', 'restore_check_synthetic'):
+            with self.subTest(target=target), patch.dict(
+                os.environ,
+                {'POSTGRES_PASSWORD': 'synthetic-only', 'GRIT_DATABASE_NAME': target,
+                 'GRIT_PRODUCTION_MODE': '1'}, clear=True,
+            ):
+                with self.assertRaises(SystemExit):
+                    module('entrypoint').configure()
 
     def test_failed_startup_cannot_pass_health(self):
         import io
