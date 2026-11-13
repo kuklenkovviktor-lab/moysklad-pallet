@@ -2,6 +2,15 @@ name: HOSTKEY production release (manual, guarded)
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Delivery only, or protected production deployment'
+        required: true
+        default: delivery-only
+        type: choice
+        options:
+          - delivery-only
+          - deploy
 
 permissions:
   contents: read
@@ -94,11 +103,14 @@ jobs:
             release-artifact/image.tar.gz.sha256 \
             release-artifact/image.id \
             compose.yaml \
+            deploy/grit-deploy-received.sh \
+            deploy/hostkey_release.sh \
             "$USER@$HOST:$DEST/"
           # The uploaded files are ONLY data. Never upload/execute a script as root.
           ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
             "test -s '$DEST/image.tar.gz' && test -s '$DEST/compose.yaml' && cd '$DEST' && sha256sum -c image.tar.gz.sha256"
       - name: Invoke root-owned deployment gate
+        if: inputs.mode == 'deploy'
         run: |
           set -euo pipefail
           # The only permitted sudo entry point is a fixed, root-owned dispatcher.
