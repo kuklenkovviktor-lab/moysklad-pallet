@@ -1,7 +1,7 @@
 name: HOSTKEY deployment configuration
 on:
   pull_request:
-    paths: ['Dockerfile', '.dockerignore', 'compose.yaml', 'deploy/**', 'tests/deployment/**', 'requirements.txt', '.github/workflows/hostkey-deployment.yml']
+    paths: ['Dockerfile', '.dockerignore', 'compose.yaml', 'deploy/**', 'tests/deployment/**', 'requirements.txt', '.github/workflows/hostkey-deployment.yml', '.github/workflows/hostkey-production-release.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
+      - name: Validate release and receiving dispatcher Bash syntax
+        run: bash -n deploy/hostkey_release.sh deploy/grit-deploy-received.sh
       - run: python -m unittest discover -s tests/deployment -v
       - run: docker build -t grit-wms:hostkey .
       - run: docker build -f deploy/backup.Dockerfile -t grit-wms-backup:hostkey .
