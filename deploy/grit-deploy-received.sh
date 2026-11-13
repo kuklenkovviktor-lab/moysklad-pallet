@@ -32,7 +32,7 @@ for file in image.tar.gz image.tar.gz.sha256 image.id compose.yaml; do
 done
 cd "$private"
 [[ "$(wc -l < image.tar.gz.sha256)" -eq 1 ]] || exit 1
-expected_sum=$(sed -nE 's/^([a-f0-9]{64})  image\\.tar\\.gz$/\\1/p' image.tar.gz.sha256)
+expected_sum=$(sed -nE 's/^([a-f0-9]{64})  image\.tar\.gz$/\1/p' image.tar.gz.sha256)
 [[ "$expected_sum" =~ ^[a-f0-9]{64}$ ]] || { echo "Bad checksum manifest"; exit 1; }
 actual_sum=$(sha256sum image.tar.gz | cut -d' ' -f1)
 [[ "$actual_sum" == "$expected_sum" ]] || { echo "Artifact integrity mismatch"; exit 1; }
