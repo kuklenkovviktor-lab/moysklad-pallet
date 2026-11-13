@@ -31,9 +31,6 @@ chmod 700 "$backup_dir"
 grep -qx "GRIT_DATABASE_NAME=$database" "$envfile" || {
   echo "Production database not explicitly selected in .env"; exit 1;
 }
-grep -q '^MOYSKLAD_TOKEN=.' "$envfile" || {
-  echo "Missing MoySklad token in .env"; exit 1;
-}
 # Explicit production gate. Operator creates this receipt ONLY after a recent
 # production backup has been uploaded, downloaded and restored off the VPS.
 # Do not satisfy this gate with a backup of the old 'grit' database.
@@ -66,9 +63,18 @@ old_db=$(docker inspect grit-wms-test-app-1 --format '{{range .Config.Env}}{{pri
   echo "Running application is not on expected database; aborting"; exit 1;
 }
 
-# Verify the candidate is the intended app and backup database, without logging secrets.
+# Use exactly the existing Compose overlays; only replace its BASE file.
+# Legacy cutover and MoySklad overlays must remain in the deployment context.
+[[ "${old_files[0]}" == "$base" ]] || {
+  echo "Unexpected Compose base path: refusing to drop live overrides"; exit 1;
+}
+new_args=(-f "$candidate")
+for ((i=1; i<${#old_files[@]}; i++)); do
+  new_args+=(-f "${old_files[i]}")
+done
+# Validate effective merged configuration, not the standalone base compose.
 GRIT_IMAGE_TAG="release-$sha" docker compose --project-directory "$root" \
-  --env-file "$envfile" -f "$candidate" config --format json | \
+  --env-file "$envfile" "${new_args[@]}" config --format json | \
   python3 -c 'import json,sys; x=json.load(sys.stdin)["services"]; assert x["app"]["environment"]["GRIT_DATABASE_NAME"]=="grit_migration_trial_20261111"; assert x["app"]["environment"]["MOYSKLAD_TOKEN"]; assert x["backup"]["environment"]["PGDATABASE"]=="grit_migration_trial_20261111"; assert x["app"]["image"]==sys.argv[1]' "$image"
 
 # Backup source database with PostgreSQL 17 tools; no backup leaves server.
@@ -114,7 +120,7 @@ trap rollback_on_failure ERR
 
 echo "Deploying tested image to existing database"
 GRIT_IMAGE_TAG="release-$sha" docker compose --project-directory "$root" \
-  --env-file "$envfile" -f "$candidate" \
+  --env-file "$envfile" "${new_args[@]}" \
   up -d --no-deps --no-build --force-recreate app
 
 healthy=0
@@ -149,7 +155,7 @@ PY
 cp "$base" "$release_dir/compose-before-$sha.yaml"
 chmod 600 "$release_dir/compose-before-$sha.yaml"
 cp -p "$candidate" "$base"
-# Preserve the release candidate path because Docker Compose records it in
-# container labels used for the next release rollback.
+# The running container retains its candidate path and all existing overlays
+# in Compose labels. The next release uses that exact merged context.
 trap - ERR
 echo "DEPLOY PASS: $sha (database=$database)"
