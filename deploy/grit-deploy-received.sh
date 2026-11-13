@@ -18,11 +18,11 @@ private="/opt/grit-data/deployment/releases/$sha-$run_id"
   echo "Incorrect upload directory ownership or permissions"; exit 1;
 }
 # Restrict writable area to gritdeploy only and accept regular non-symlink files.
-for file in image.tar.gz image.tar.gz.sha256 image.id compose.yaml; do
+for file in image.tar.gz image.tar.gz.sha256 image.id compose.yaml grit-deploy-received.sh hostkey_release.sh; do
   [[ -f "$upload/$file" && ! -L "$upload/$file" ]] || { echo "Missing/unsafe file: $file"; exit 1; }
   [[ "$(stat -c '%U' "$upload/$file")" == gritdeploy ]] || { echo "Wrong file owner"; exit 1; }
 done
-[[ "$(find "$upload" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 4 ]] || {
+[[ "$(find "$upload" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 6 ]] || {
   echo "Unexpected release files"; exit 1;
 }
 mkdir -p /opt/grit-data/deployment/releases
