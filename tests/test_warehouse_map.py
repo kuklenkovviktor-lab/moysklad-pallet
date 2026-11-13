@@ -257,17 +257,47 @@ class WarehouseMapTests(unittest.TestCase):
         self.assertEqual(query_one("SELECT active FROM replenishment_locations WHERE id=?", (loc_id,))[0],0)
         self.assertNotIn(loc_id,[x["id"] for x in self.client.get("/api/manager/warehouse-map").json["cells"]])
 
-    def test_rename_keeps_qr_and_refuses_task_history(self):
+    def test_rename_keeps_qr_and_rebinds_closed_history_with_audit(self):
         loc_id,label=self.loc()
         barcode=query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0]
+        completed_id=self.task(label,"completed",completed_qty=42)
+        cancelled_id=self.task(label,"cancelled")
         next_label=label+"-2"
         r=self.manage(loc_id,label,"rename",new_label=next_label)
         self.assertEqual(r.status_code,200,r.json)
         self.assertTrue(r.json["reprint_label"])
         self.assertEqual(query_one("SELECT barcode FROM replenishment_locations WHERE id=?", (loc_id,))[0],barcode)
         self.assertEqual(query_one("SELECT label FROM replenishment_locations WHERE id=?", (loc_id,))[0],next_label)
-        self.task(next_label,"completed")
-        self.assertEqual(self.manage(loc_id,next_label,"rename",new_label=label).status_code,409)
+        self.assertEqual(query_one("SELECT line_code FROM replenishment_tasks WHERE id=?", (completed_id,))[0],next_label)
+        self.assertEqual(query_one("SELECT line_code FROM replenishment_tasks WHERE id=?", (cancelled_id,))[0],next_label)
+        self.assertEqual(query_one("""SELECT old_label,new_label FROM replenishment_location_rename_events
+                                     WHERE location_id=?""", (loc_id,)), (label,next_label))
+        snapshot=self.client.get("/api/manager/warehouse-map").json
+        tile=next(c for c in snapshot["cells"] if c["id"]==loc_id)
+        self.assertEqual(tile["last_task"]["id"],completed_id)
+        self.assertEqual(tile["last_task"]["completed_qty"],42)
+        again=self.manage(loc_id,next_label,"rename",new_label=label)
+        self.assertEqual(again.status_code,200,again.json)
+        self.assertEqual(query_one("SELECT line_code FROM replenishment_tasks WHERE id=?", (completed_id,))[0],label)
+        self.assertEqual(query_one("SELECT COUNT(*) FROM replenishment_location_rename_events WHERE location_id=?", (loc_id,))[0],2)
+
+    def test_rename_rejects_open_tasks_without_changing_history(self):
+        loc_id,label=self.loc()
+        new_label=label+"-2"
+        completed=self.task(label,"completed",completed_qty=8)
+        open_task=self.task(label,"started")
+        result=self.manage(loc_id,label,"rename",new_label=new_label)
+        self.assertEqual(result.status_code,409,result.json)
+        self.assertEqual(query_one("SELECT label FROM replenishment_locations WHERE id=?", (loc_id,))[0],label)
+        self.assertEqual(query_one("SELECT line_code FROM replenishment_tasks WHERE id=?", (completed,))[0],label)
+        self.assertEqual(query_one("SELECT line_code FROM replenishment_tasks WHERE id=?", (open_task,))[0],label)
+        self.assertEqual(query_one("SELECT COUNT(*) FROM replenishment_location_rename_events WHERE location_id=?", (loc_id,))[0] if query_one("SELECT name FROM sqlite_master WHERE type='table' AND name='replenishment_location_rename_events'") else 0,0)
+
+    def test_rename_refuses_existing_address(self):
+        loc_id,label=self.loc()
+        another,other_label=self.loc("Ж")
+        self.assertEqual(self.manage(loc_id,label,"rename",new_label=other_label).status_code,409)
+        self.assertEqual(query_one("SELECT label FROM replenishment_locations WHERE id=?", (loc_id,))[0],label)
 
     def test_manage_requires_manager_and_confirmed_current_label(self):
         loc_id,label=self.loc()
