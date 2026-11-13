@@ -84,18 +84,23 @@ jobs:
           printf '%s\n' "$HOST_KEYS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           printf 'HOST=%s\nUSER=%s\n' "$HOST" "$USER" >> "$GITHUB_ENV"
-      - name: Transfer tested image and release configuration
+      - name: Deliver verified release to unprivileged inbox
         run: |
           set -euo pipefail
-          RELEASE_PATH="/opt/grit-data/deployment/releases/${{ github.sha }}-${{ github.run_id }}"
-          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" "install -d -m 700 '$RELEASE_PATH'"
-          docker save grit-wms:release-${{ github.sha }} | ssh -o StrictHostKeyChecking=yes "$USER@$HOST" docker load
-          scp -o StrictHostKeyChecking=yes compose.yaml "$USER@$HOST:$RELEASE_PATH/compose.yaml"
-          scp -o StrictHostKeyChecking=yes deploy/hostkey_release.sh "$USER@$HOST:$RELEASE_PATH/release.sh"
+          DEST="/home/gritdeploy/releases/${{ github.sha }}-${{ github.run_id }}"
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" "install -d -m 700 '$DEST'"
+          scp -o StrictHostKeyChecking=yes \
+            release-artifact/image.tar.gz \
+            release-artifact/image.tar.gz.sha256 \
+            release-artifact/image.id \
+            compose.yaml \
+            "$USER@$HOST:$DEST/"
+          # The uploaded files are ONLY data. Never upload/execute a script as root.
           ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
-            "test \"\$(docker image inspect grit-wms:release-${{ github.sha }} --format '{{.Id}}')\" = '$(cat release-artifact/image.id)'"
-      - name: Release after off-site backup gate
+            "test -s '$DEST/image.tar.gz' && test -s '$DEST/compose.yaml' && cd '$DEST' && sha256sum -c image.tar.gz.sha256"
+      - name: Invoke root-owned deployment gate
         run: |
           set -euo pipefail
+          # The only permitted sudo entry point is a fixed, root-owned dispatcher.
           ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
-            "bash '/opt/grit-data/deployment/releases/${{ github.sha }}-${{ github.run_id }}/release.sh' ${{ github.sha }} ${{ github.run_id }}"
+            "sudo -n /usr/local/sbin/grit-deploy-received ${{ github.sha }} ${{ github.run_id }}"
