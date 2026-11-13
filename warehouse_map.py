@@ -464,13 +464,33 @@ def warehouse_map_manage_location():
             if action == "rename":
                 if new_label == old_label:
                     return jsonify(ok=True, unchanged=True, label=old_label, barcode=barcode)
-                # Tasks hold the address as text. Keep history reliable until a migration exists.
-                cur.execute(sql("SELECT COUNT(*) FROM replenishment_tasks WHERE line_code=?"), (old_label,))
-                if cur.fetchone()[0]:
-                    return jsonify(error="Есть история задач по этому адресу. Пока переименование заблокировано, чтобы не нарушить историю"), 409
                 cur.execute(sql("SELECT COUNT(*) FROM replenishment_locations WHERE label=?"), (new_label,))
                 if cur.fetchone()[0]:
                     return jsonify(error="Такой адрес уже существует, включая архивные"), 409
+                # Replenishment tasks reference the current address as text, not
+                # location_id. Rebind the closed task history atomically, while
+                # retaining the original task IDs and a durable rename audit.
+                # Open tasks have already been rejected above.
+                cur.execute(sql("""
+                    CREATE TABLE IF NOT EXISTS replenishment_location_rename_events (
+                        id TEXT PRIMARY KEY,
+                        location_id TEXT NOT NULL,
+                        old_label TEXT NOT NULL,
+                        new_label TEXT NOT NULL,
+                        changed_at TEXT NOT NULL,
+                        actor TEXT NOT NULL
+                    )
+                """))
+                cur.execute(sql("""
+                    UPDATE replenishment_tasks SET line_code=?
+                    WHERE line_code=? AND status NOT IN ('new','started','blocked')
+                """), (new_label, old_label))
+                cur.execute(sql("""
+                    INSERT INTO replenishment_location_rename_events
+                    (id,location_id,old_label,new_label,changed_at,actor)
+                    VALUES (?,?,?,?,?,?)
+                """), (str(uuid.uuid4()), loc_id, old_label, new_label,
+                      now_iso(), "Руководитель"))
                 cur.execute(sql("UPDATE replenishment_locations SET label=? WHERE id=? AND active=1"), (new_label, loc_id))
                 result = new_label
             elif action == "release":
