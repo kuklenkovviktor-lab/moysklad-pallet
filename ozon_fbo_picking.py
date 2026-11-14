@@ -61,6 +61,22 @@ def _ensure_picking_db():
                     FOREIGN KEY(cargo_id) REFERENCES ozon_fbo_cargo(id),
                     FOREIGN KEY(item_id) REFERENCES ozon_fbo_items(id)
                 )""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS ozon_fbo_shortages (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL UNIQUE,
+                    cargo_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL UNIQUE,
+                    employee_id TEXT NOT NULL,
+                    missing_qty INTEGER NOT NULL CHECK(missing_qty > 0),
+                    reason TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')),
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    manager_reason TEXT,
+                    FOREIGN KEY(cargo_id) REFERENCES ozon_fbo_cargo(id),
+                    FOREIGN KEY(item_id) REFERENCES ozon_fbo_items(id)
+                )""")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_fbo_shortages_cargo ON ozon_fbo_shortages(cargo_id,status)")
                 cur.execute("""CREATE TABLE IF NOT EXISTS ozon_fbo_pick_audit (
                     id TEXT PRIMARY KEY,
                     cargo_id TEXT NOT NULL,
@@ -137,8 +153,19 @@ def _serialize(cargo_id):
         SELECT id, article,barcode,planned_qty,picked_qty
         FROM ozon_fbo_items WHERE cargo_id = ? ORDER BY article,barcode
     """, (cargo_id,))
-    prepared = [{"id": x[0], "article": x[1], "barcode": x[2],
-                 "qty": x[3], "picked": x[4], "remaining": x[3] - x[4]} for x in items]
+    shortages = query_all("""SELECT item_id,missing_qty,reason,status,employee_id,manager_reason
+        FROM ozon_fbo_shortages WHERE cargo_id=?""", (cargo_id,))
+    by_item = {x[0]: x for x in shortages}
+    prepared = []
+    for x in items:
+        report = by_item.get(x[0])
+        prepared.append({"id": x[0], "article": x[1], "barcode": x[2],
+            "qty": x[3], "picked": x[4], "remaining": x[3] - x[4],
+            "shortage": ({"quantity": report[1], "reason": report[2], "status": report[3],
+                          "employee_id": report[4], "manager_reason": report[5]} if report else None)})
+    approved_qty = sum(it["shortage"]["quantity"] for it in prepared
+                       if it["shortage"] and it["shortage"]["status"] == "approved")
+    pending_count = sum(1 for it in prepared if it["shortage"] and it["shortage"]["status"] == "pending")
     return {
         "id": row[0], "supply_id": row[1], "barcode": row[2],
         "destination": row[3], "label": row[4], "qty": row[5],
@@ -147,6 +174,13 @@ def _serialize(cargo_id):
         "supply_title": row[10], "employee": row[11],
         "picked": sum(it["picked"] for it in prepared),
         "remaining": sum(it["remaining"] for it in prepared),
+        "approved_shortage": approved_qty,
+        "pending_shortages": pending_count,
+        "ready_for_qr": pending_count == 0 and all(
+            it["remaining"] == 0 or (
+                it["shortage"] and it["shortage"]["status"] == "approved"
+                and it["shortage"]["quantity"] == it["remaining"]
+            ) for it in prepared),
         "items": prepared,
     }
 
@@ -278,6 +312,10 @@ def record_pick(cargo_id):
             row = cur.fetchone()
             if not row:
                 return jsonify(error="Неверный товар: такого штрихкода нет в этом грузоместе"), 422
+            cur.execute(sql("""SELECT status FROM ozon_fbo_shortages WHERE item_id=?"""), (row[0],))
+            shortage = cur.fetchone()
+            if shortage and shortage[0] in ("pending", "approved"):
+                return jsonify(error="По позиции есть недостача на согласовании или уже подтверждена. Действие руководителя обязательно."), 409
             remaining = row[2] - row[3]
             if qty > remaining:
                 return jsonify(error=f"Пересборка: нужно ещё {remaining} шт., введено {qty}"), 409
@@ -337,6 +375,10 @@ def undo_pick(cargo_id):
             if cur.rowcount != 1:
                 conn.rollback()
                 return jsonify(error="Этот скан уже отменён"), 409
+            cur.execute(sql("""SELECT status FROM ozon_fbo_shortages WHERE item_id=?"""), (last[1],))
+            shortage = cur.fetchone()
+            if shortage and shortage[0] in ("pending", "approved"):
+                return jsonify(error="Нельзя отменить скан позиции с недостачей на согласовании."), 409
             cur.execute(sql("""UPDATE ozon_fbo_items SET picked_qty=picked_qty-?
                 WHERE id=? AND picked_qty>=?"""), (last[2], last[1], last[2]))
             if cur.rowcount != 1:
@@ -351,6 +393,120 @@ def undo_pick(cargo_id):
         finally:
             cur.close()
     return jsonify(ok=True, cargo=_serialize(cargo_id))
+
+
+@fbo_picking_bp.post("/api/ozon-fbo/pick/cargo/<cargo_id>/shortage")
+def report_shortage(cargo_id):
+    """Worker reports physical deficit; never alters Ozon plan or picked quantities."""
+    employee = _worker()
+    if not employee:
+        return jsonify(error="Войди по бейджу"), 401
+    _ensure_picking_db()
+    data = request.get_json(silent=True) or {}
+    item_id = str(data.get("item_id") or "").strip()
+    request_id = str(data.get("request_id") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+    if not item_id or not 8 <= len(reason) <= 500:
+        return jsonify(error="Выбери позицию и укажи причину (минимум 8 символов)"), 400
+    try:
+        request_id = str(uuid.UUID(request_id))
+    except (ValueError, AttributeError):
+        return jsonify(error="Некорректный номер операции"), 400
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            _begin(cur)
+            cargo = _locked(cur, cargo_id)
+            if not cargo:
+                return jsonify(error="Грузоместо не найдено"), 404
+            if cargo[3] != "started" or cargo[4] != employee["id"]:
+                return jsonify(error="Только исполнитель открытого грузоместа может заявить недостачу"), 403
+            cur.execute(sql("""SELECT id,planned_qty,picked_qty FROM ozon_fbo_items
+                WHERE id=? AND cargo_id=?"""), (item_id,cargo_id))
+            item = cur.fetchone()
+            if not item:
+                return jsonify(error="Позиция не входит в грузоместо"), 404
+            missing = item[1] - item[2]
+            if missing <= 0:
+                return jsonify(error="Эта позиция уже собрана полностью"), 409
+            cur.execute(sql("""SELECT request_id,employee_id,missing_qty,reason,status
+                FROM ozon_fbo_shortages WHERE item_id=?"""), (item_id,))
+            previous = cur.fetchone()
+            if previous and previous[0] == request_id:
+                if previous[1] != employee["id"] or previous[3] != reason:
+                    return jsonify(error="Номер операции использован с другими данными"), 409
+                conn.commit()
+                return jsonify(ok=True,replayed=True,cargo=_serialize(cargo_id))
+            cur.execute(sql("SELECT item_id FROM ozon_fbo_shortages WHERE request_id=?"), (request_id,))
+            reused = cur.fetchone()
+            if reused:
+                return jsonify(error="Номер операции уже использован для другой позиции"), 409
+            if previous and previous[4] != "rejected":
+                return jsonify(error="Недостача уже направлена или согласована"), 409
+            if previous:
+                cur.execute(sql("""UPDATE ozon_fbo_shortages SET request_id=?,employee_id=?,
+                    missing_qty=?,reason=?,status='pending',created_at=?,resolved_at=NULL,
+                    manager_reason=NULL WHERE item_id=?"""),
+                    (request_id,employee["id"],missing,reason,now_iso(),item_id))
+            else:
+                cur.execute(sql("""INSERT INTO ozon_fbo_shortages
+                    (id,request_id,cargo_id,item_id,employee_id,missing_qty,reason,status,created_at)
+                    VALUES (?,?,?,?,?,?,?,'pending',?)"""),
+                    (str(uuid.uuid4()),request_id,cargo_id,item_id,employee["id"],missing,reason,now_iso()))
+            _audit(cur,cargo_id,employee["id"],employee["name"],"shortage_report",
+                   f"Позиция {item_id}: отсутствует {missing} шт.; {reason}",request_id=request_id)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось зарегистрировать недостачу"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True,replayed=False,cargo=_serialize(cargo_id))
+
+
+@fbo_picking_bp.post("/api/manager/ozon-fbo/shortage/decide")
+def decide_shortage():
+    if not manager_access():
+        return jsonify(error="Требуется доступ руководителя"), 403
+    _ensure_picking_db()
+    data = request.get_json(silent=True) or {}
+    cargo_id = str(data.get("cargo_id") or "").strip()
+    item_id = str(data.get("item_id") or "").strip()
+    decision = str(data.get("decision") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+    if not cargo_id or not item_id or decision not in ("approve","reject") or not 8 <= len(reason) <= 500:
+        return jsonify(error="Выбери позицию, решение и причину от 8 символов"), 400
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            _begin(cur)
+            cargo = _locked(cur,cargo_id)
+            if not cargo or cargo[3] != "started":
+                return jsonify(error="Грузоместо уже закрыто или не найдено"), 409
+            cur.execute(sql("""SELECT sh.status,sh.missing_qty,i.planned_qty-i.picked_qty
+                FROM ozon_fbo_shortages sh JOIN ozon_fbo_items i ON i.id=sh.item_id
+                WHERE sh.cargo_id=? AND sh.item_id=?"""), (cargo_id,item_id))
+            shortage = cur.fetchone()
+            if not shortage or shortage[0] != "pending":
+                return jsonify(error="Нет ожидающей решения недостачи"), 409
+            if shortage[1] != shortage[2]:
+                return jsonify(error="Количество изменилось, требуется повторная проверка"), 409
+            state = "approved" if decision == "approve" else "rejected"
+            cur.execute(sql("""UPDATE ozon_fbo_shortages SET status=?,resolved_at=?,
+                manager_reason=? WHERE cargo_id=? AND item_id=? AND status='pending'"""),
+                (state,now_iso(),reason,cargo_id,item_id))
+            if cur.rowcount != 1:
+                conn.rollback()
+                return jsonify(error="Решение уже принято"), 409
+            _audit(cur,cargo_id,cargo[4],"Руководитель (ПК)","shortage_"+state,
+                   f"Позиция {item_id}: {shortage[1]} шт.; {reason}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось сохранить решение"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True,cargo=_serialize(cargo_id))
 
 
 @fbo_picking_bp.post("/api/ozon-fbo/pick/cargo/<cargo_id>/complete")
@@ -379,8 +535,18 @@ def finish_cargo(cargo_id):
             cur.execute(sql("""SELECT COUNT(*), COALESCE(SUM(planned_qty - picked_qty),0)
                 FROM ozon_fbo_items WHERE cargo_id=?"""), (cargo_id,))
             count,remaining = cur.fetchone()
-            if not count or remaining:
-                return jsonify(error=f"Сначала дособери все позиции. Осталось {remaining} шт."), 409
+            if not count:
+                return jsonify(error="Нет товарных позиций в грузоместе"), 409
+            cur.execute(sql("""SELECT i.id,i.planned_qty-i.picked_qty,
+                sh.missing_qty,sh.status FROM ozon_fbo_items i
+                LEFT JOIN ozon_fbo_shortages sh ON sh.item_id=i.id
+                WHERE i.cargo_id=?"""), (cargo_id,))
+            lines=cur.fetchall()
+            if any(left != 0 and (status != "approved" or left != missing)
+                   for _,left,missing,status in lines):
+                return jsonify(error="Не все позиции собраны или недостачи ещё не согласованы руководителем."), 409
+            if any(status == "pending" for _,left,missing,status in lines):
+                return jsonify(error="Есть недостача в ожидании согласования."), 409
             cur.execute(sql("UPDATE ozon_fbo_cargo SET status='done',completed_at=? WHERE id=?"),
                         (now_iso(), cargo_id))
             _audit(cur, cargo_id, employee["id"], employee["name"], "complete",
@@ -412,6 +578,14 @@ def manager_progress():
                "qty":r[4],"status":r[5],"employee_id":r[6],"employee":r[7],
                "completed_at":r[8],"supply":r[9],"supply_id":r[10],"picked":r[11]}
               for r in rows]
+    for entry in result:
+        entry["shortages"] = [
+            {"item_id": x[0], "article": x[1], "missing": x[2], "status": x[3],
+             "reason": x[4], "manager_reason": x[5]}
+            for x in query_all("""SELECT sh.item_id,i.article,sh.missing_qty,sh.status,
+                sh.reason,sh.manager_reason FROM ozon_fbo_shortages sh
+                JOIN ozon_fbo_items i ON i.id=sh.item_id WHERE sh.cargo_id=?""",
+                (entry["id"],))]
     return jsonify(cargo=result)
 
 
