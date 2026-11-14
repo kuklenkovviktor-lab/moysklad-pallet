@@ -78,7 +78,8 @@ def _moysklad_health():
     try:
         response = requests.get(
             "https://api.moysklad.ru/api/remap/1.2/entity/product",
-            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json",
+                     "Accept-Encoding": "gzip"},
             params={"limit": 1},
             timeout=8,
             allow_redirects=False,
@@ -106,7 +107,8 @@ def _moysklad_health():
         return {"state": "unavailable", "label": "Лимит запросов",
                 "checked_at": checked_at, "details": "МойСклад ограничил частоту запросов. Повтори позже."}
     return {"state": "unavailable", "label": "API не отвечает штатно",
-            "checked_at": checked_at, "details": "МойСклад вернул ошибку при проверке."}
+            "checked_at": checked_at,
+            "details": "МойСклад вернул HTTP " + str(response.status_code) + " при проверке."}
 
 
 @integrations_bp.post("/api/manager/integrations/moysklad/check")
