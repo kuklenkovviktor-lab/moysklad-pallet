@@ -888,6 +888,27 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
  #reader{min-height:62px;max-height:88px}#reader video{max-height:88px!important}
  .barcode-zone{min-height:74px;padding-top:3px}.barcode-wrap{height:70px;padding:2px 5px}#zebraBarcode{height:66px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+body .card,body .barcode-zone,body .scanbox{background:#142337!important}
+body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!important;color:#111!important}
+@media(orientation:landscape) and (max-height:600px){html,body{background:#09121e!important}}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body><div class="wrap"><div class="card">
 <div class="header">
@@ -1213,7 +1234,7 @@ FBS_PAGE = """<!doctype html>
 <title>FBS · Выработка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-:root{--bg:#12202e;--panel:#1f3548;--panel2:#233d52;--text:#f2f7fc;--muted:#b9cbda;--line:#345067;--accent:#36546e;--accent2:#29465d}
+:root{--bg:#09121e;--panel:#1f3548;--panel2:#233d52;--text:#f2f7fc;--muted:#b9cbda;--line:#345067;--accent:#36546e;--accent2:#29465d}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text)}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%;min-height:100dvh}
@@ -1718,6 +1739,25 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
  .secondary{grid-column:1;grid-row:4;margin:0;font-size:10px;align-self:end}
  .err,.ok{margin:0;padding:7px;font-size:10px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#reader{background:#101f30}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🚪 Завершение смены</h1>
 <div class="muted">Самостоятельный выход заблокирован. Для завершения смены отсканируй QR старшего в точке сдачи TSD/сканера.</div>
@@ -1769,6 +1809,25 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#qr,#qr img,#qr canvas{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap">
 <div class="top"><a href="/manager">← Панель управления</a><button onclick="print()">Печать</button></div>
 <div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
@@ -1797,6 +1856,25 @@ SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Терминал выхода</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#qr,#qr img,#qr canvas{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>📟 Терминал выхода</h1>
 <div class="muted">Авторизуй это устройство один раз. После этого твоя учётка Виктора будет удалена из этой браузерной сессии, а устройство сможет показывать только динамический QR выхода.</div>
@@ -1826,6 +1904,26 @@ SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+.qr{display:flex;justify-content:center}
+.qr canvas,.qr img{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🔐 QR старшего</h1>
 <div class="muted">Терминал авторизован отдельно от учётки руководителя. QR меняется каждые 30 секунд.</div>
@@ -1872,6 +1970,25 @@ h1{margin:0 0 8px;font-size:25px}.muted{color:#6b7785;font-size:14px;line-height
 input{width:100%;margin-top:16px;padding:14px;border:1px solid #cbd9e2;border-radius:10px;font-size:16px;background:#fff}
 button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}
 .err{margin-top:10px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+body .wrap .card{background:linear-gradient(145deg,#16283b,#101c2a)!important}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🖥️ Панель управления</h1>
 <div class="muted">Отдельный вход с компьютера. Сканер и бейдж здесь не нужны.</div>
@@ -3795,6 +3912,26 @@ h1{font-size:30px;margin:4px 0 6px}
  .stage{height:100%;min-height:0}
  h1{font-size:26px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+:root{--bg:#09121e;--panel:#142337;--panel2:#192e43;--text:#f1f6ff;--muted:#9eb5ca;--line:#30465c;--accent:#176eae;--accent2:#233b50}
+body .nav a{color:#e0f0ff!important}
 </style>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body>
