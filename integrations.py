@@ -68,6 +68,27 @@ def integrations_list_api():
     return jsonify(integrations=_catalog(), secrets_exposed=False)
 
 
+def _moysklad_error_codes(response):
+    """Expose only numeric MoySklad error IDs; never its raw error messages."""
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    errors = payload.get("errors")
+    if not isinstance(errors, list):
+        return []
+    codes = []
+    for entry in errors[:8]:
+        if not isinstance(entry, dict):
+            continue
+        code = entry.get("code")
+        if type(code) is int and 0 <= code <= 999999 and code not in codes:
+            codes.append(code)
+    return codes
+
+
 def _moysklad_health():
     """One explicit read-only probe. Never return credentials or upstream body."""
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
@@ -106,9 +127,12 @@ def _moysklad_health():
     if response.status_code == 429:
         return {"state": "unavailable", "label": "Лимит запросов",
                 "checked_at": checked_at, "details": "МойСклад ограничил частоту запросов. Повтори позже."}
+    codes = _moysklad_error_codes(response)
+    diagnostic = (" · код ошибки МойСклад: " + ", ".join(map(str, codes))) if codes else (
+        " · код ошибки в ответе отсутствует")
     return {"state": "unavailable", "label": "API не отвечает штатно",
             "checked_at": checked_at,
-            "details": "МойСклад вернул HTTP " + str(response.status_code) + " при проверке."}
+            "details": "МойСклад вернул HTTP " + str(response.status_code) + diagnostic + "."}
 
 
 @integrations_bp.post("/api/manager/integrations/moysklad/check")
