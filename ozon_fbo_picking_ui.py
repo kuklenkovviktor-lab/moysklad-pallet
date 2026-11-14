@@ -43,6 +43,14 @@ td,th{border-color:#2b4255}th{background:#1b3146;color:#b8d7ed}
 .complete{background:linear-gradient(145deg,#173b35,#11272a);border-color:#2e705b}
 #message{background:#1b2d40;border:1px solid #415e78;color:#f1f6ff}
 input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--g-orange);outline-offset:2px}
+/* Mobile picking: completed positions are visibly distinct and move below unfinished ones. */
+#items tr.position-done{background:#173b35;color:#a4dfc9}
+#items tr.position-done td{border-color:#2e705b}
+#items tr.position-done b{color:#a4dfc9}
+#items tr.position-pending{background:#142337;color:#f1f6ff}
+.position-state{display:inline-block;width:22px;color:#ff9230;font-size:18px;font-weight:800}
+.position-done .position-state{color:#81e9b9}
+@media(max-width:620px){#items td{padding:10px 6px;font-variant-numeric:tabular-nums}}
 </style></head><body><main>
 <a href="/ozon-fbo">← Все грузоместа Ozon FBO</a><h1>📦 Сборка Ozon FBO</h1>
 <p class="small" id="identity">Определяю сотрудника…</p>
@@ -143,7 +151,8 @@ async function draw(c){
  E('finishCard').classList.toggle('hidden',c.status!=='started'||!own||!c.ready_for_qr);
  E('finishHint').textContent=c.approved_shortage?'Руководитель согласовал недостачу '+c.approved_shortage+' шт. Подтверди ШК грузоместа.':'Все позиции собраны. Подтверди ШК грузоместа.';
  E('shortageCard').classList.toggle('hidden',c.status!=='started'||!own);
- E('items').innerHTML=c.items.map(i=>'<tr><td><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div><div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div></td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>').join('');
+ E('items').innerHTML=[...c.items].sort((a,b)=>Number(a.remaining===0)-Number(b.remaining===0)).map(i=>
+   '<tr class="'+(i.remaining===0?'position-done':'position-pending')+'"><td><span class="position-state" aria-label="'+(i.remaining===0?'Собрано':'Осталось собрать')+'">'+(i.remaining===0?'✓':'○')+'</span><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div><div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div></td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>').join('');
  const canReport=c.items.filter(i=>i.remaining>0&&(!i.shortage||i.shortage.status==='rejected'));
  const oldItem=E('shortageItem').value;
  E('shortageItem').innerHTML=canReport.map(i=>'<option value="'+esc(i.id)+'">'+esc(i.article)+' · недостаёт '+i.remaining+' шт.</option>').join('');
