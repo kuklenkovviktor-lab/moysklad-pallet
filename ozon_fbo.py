@@ -126,12 +126,20 @@ loadSupplies().catch(e=>{document.getElementById('supplies').textContent=e.messa
 
 WORKER_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GRIT WMS · Ozon FBO · Задания</title><style>
+<meta name="theme-color" content="#09121e"><title>GRIT WMS · Ozon FBO · Задания</title><style>
 *{box-sizing:border-box}body{font-family:system-ui,Arial;background:#e9eef3;color:#263643;margin:0}
 main{max-width:840px;margin:auto;padding:15px}.card{background:#f7f9fb;border:1px solid #d7e0e7;border-radius:15px;padding:15px;margin:12px 0}
 h1{margin:14px 0}h2{font-size:19px}a{color:#48647a}.small{font-size:13px;color:#657683}
 .item{border-top:1px solid #dce5eb;padding:11px 0}.item:first-child{border:0}.item summary{cursor:pointer;font-weight:750}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px;text-align:left;border-bottom:1px solid #dfe7ec}
+
+/* GRIT WMS unified dark worker screen. Manager page receives /grit-ui.css. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-panel:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca}
+html,body{background:var(--g-bg);color:var(--g-text)}
+.card{background:linear-gradient(145deg,#16283b,#101c2a);border-color:var(--g-line)}
+h1,h2{color:#f1f6ff}a{color:#77c0ff}.small{color:var(--g-muted)}
+.item{border-color:#30465c}th,td{color:#e4eef8;border-color:#2b4255}
+a:focus-visible,summary:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
 </style></head><body><main><a href="/fbs">← Рабочая панель</a>
 <h1>📦 Ozon FBO</h1><p class="small">Выбери грузоместо и начни сборку со сканером. Прогресс сохраняется на сервере.</p>
 <p><a href="/ozon-fbo/pick">▶ Продолжить мою сборку</a></p>
