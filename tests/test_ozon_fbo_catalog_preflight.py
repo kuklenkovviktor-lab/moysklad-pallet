@@ -139,7 +139,7 @@ class ImportEndpointTests(unittest.TestCase):
             "catalog_decisions": json.dumps(decisions or {}),
             "excluded_cargo": json.dumps(excluded or []),
         }
-        with patch("ozon_fbo._manifest_from_request", return_value=plan), \\
+        with patch("ozon_fbo._manifest_from_request", return_value=plan), \
              patch("ozon_fbo.check_catalog", return_value=self.issues):
             return self.client.post("/api/manager/ozon-fbo/import", data=fields)
 
@@ -171,7 +171,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(response.json["excluded"], 1)
 
     def test_preview_and_import_fail_closed_if_moysklad_offline(self):
-        with patch("ozon_fbo._manifest_from_request", return_value=self.plan), \\
+        with patch("ozon_fbo._manifest_from_request", return_value=self.plan), \
              patch("ozon_fbo.check_catalog", side_effect=CatalogUnavailable("offline")):
             response = self.client.post("/api/manager/ozon-fbo/preview")
             self.assertEqual(response.status_code, 503)
