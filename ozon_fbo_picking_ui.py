@@ -48,9 +48,18 @@ th{background:#e8eef2;position:sticky;top:0}.scroll{overflow:auto;max-height:48v
 <div id="reader" class="hidden"></div>
 <p class="small">Скан товара без подтверждения количества не изменяет план. При сбое сети незавершённое подтверждение будет повторено безопасно.</p>
 </section>
+<section class="card hidden" id="shortageCard">
+<h2>2. Отсутствует товар</h2>
+<p class="small">Проверил ячейку, но товара не хватает? Отправь недостачу руководителю. План Ozon автоматически не меняется.</p>
+<label for="shortageItem">Позиция</label><select id="shortageItem" style="width:100%;padding:11px;margin-bottom:10px"></select>
+<label for="shortageReason">Причина</label><select id="shortageReason" style="width:100%;padding:11px;margin-bottom:10px">
+<option>Товар не найден в ячейке</option><option>Фактический остаток меньше плана</option><option>Товар повреждён, требуется проверка</option>
+</select><button id="shortageBtn">Отправить недостачу на согласование</button>
+<div id="shortageStatus" class="small" style="margin-top:10px"></div>
+</section>
 <section class="card hidden complete" id="finishCard">
-<h2>2. Подтверди готовое грузоместо</h2>
-<p class="small">Все позиции собраны. Отсканируй ШК грузоместа с его этикетки, чтобы завершить задание.</p>
+<h2>3. Подтверди грузоместо по ШК</h2>
+<p class="small" id="finishHint">Все позиции собраны или недостача согласована руководителем. Отсканируй существующий ШК грузоместа.</p>
 <div class="grid"><input id="cargoCode" class="full" autocomplete="off" autocapitalize="none" placeholder="ШК грузоместа">
 <button id="finishBtn">Завершить грузоместо</button></div>
 <p><button class="secondary" id="cameraCargo">📷 Камера ШК грузоместа</button></p>
@@ -67,6 +76,7 @@ const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
 const pendingKey='onix_fbo_pending_scan_v1';
 const pendingUndoKey='onix_fbo_pending_undo_v1';
+const pendingShortageKey='grit_fbo_pending_shortage_v1';
 let camera=null,cameraTarget='',cameraBusy=false;
 async function stopCamera(){
  const active=camera;camera=null;cameraBusy=false;
@@ -107,12 +117,20 @@ async function draw(c){
  E('planned').textContent=c.qty;E('picked').textContent=c.picked;E('remaining').textContent=c.remaining;
  E('bar').style.width=(c.qty?Math.min(100,100*c.picked/c.qty):0).toFixed(1)+'%';
  const own=c.employee_id===employee.id;
- E('owner').textContent=c.status==='done'?'Грузоместо полностью собрано · '+(c.employee||''):c.employee_id?
+ E('owner').textContent=c.status==='done'?(c.approved_shortage?'Грузоместо закрыто с согласованной недостачей '+c.approved_shortage+' шт. · ':'Грузоместо полностью собрано · ')+(c.employee||''):c.employee_id?
  ('Исполнитель: '+(c.employee||c.employee_id)+(own?' (ты)':'')):'Грузоместо свободно';
  E('claimBtn').classList.toggle('hidden',c.status==='done'||!!c.employee_id);
  E('workCard').classList.toggle('hidden',c.status!=='started'||!own);
- E('finishCard').classList.toggle('hidden',c.status!=='started'||!own||c.remaining!==0);
- E('items').innerHTML=c.items.map(i=>'<tr><td><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div></td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>').join('');
+ E('finishCard').classList.toggle('hidden',c.status!=='started'||!own||!c.ready_for_qr);
+ E('finishHint').textContent=c.approved_shortage?'Руководитель согласовал недостачу '+c.approved_shortage+' шт. Подтверди ШК грузоместа.':'Все позиции собраны. Подтверди ШК грузоместа.';
+ E('shortageCard').classList.toggle('hidden',c.status!=='started'||!own);
+ E('items').innerHTML=c.items.map(i=>'<tr><td><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div><div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div></td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>').join('');
+ const canReport=c.items.filter(i=>i.remaining>0&&(!i.shortage||i.shortage.status==='rejected'));
+ const oldItem=E('shortageItem').value;
+ E('shortageItem').innerHTML=canReport.map(i=>'<option value="'+esc(i.id)+'">'+esc(i.article)+' · недостаёт '+i.remaining+' шт.</option>').join('');
+ if(canReport.some(i=>i.id===oldItem))E('shortageItem').value=oldItem;
+ E('shortageBtn').disabled=!canReport.length||!!c.pending_shortages;
+ E('shortageStatus').textContent=c.pending_shortages?'Ожидают согласования: '+c.pending_shortages+' поз.':c.approved_shortage?'Согласовано: '+c.approved_shortage+' шт.':'';
  E('undoBtn').disabled=!c.picked||!own||c.status!=='started';
  if(c.status==='done')status('Грузоместо собрано и подтверждено. Можно переходить к следующему.',false);
  if(verifiedItem){
@@ -129,6 +147,7 @@ function verifyBarcode(){
  const barcode=code(E('barcode').value),item=cargo.items.find(i=>i.barcode===barcode);
  if(!item){verifiedItem=null;status('Неверный товар: этого штрихкода нет в задании.',true);vibrate(false);E('barcode').value='';E('barcode').focus();return}
  if(!item.remaining){verifiedItem=null;status('Этот артикул уже собран полностью.',true);vibrate(false);E('barcode').value='';E('barcode').focus();return}
+ if(item.shortage&&['pending','approved'].includes(item.shortage.status)){verifiedItem=null;status('По позиции есть недостача. Требуется решение руководителя.',true);E('barcode').value='';return}
  // A new SKU always starts at 1. Do not carry over quantity from a previous SKU.
  if(!verifiedItem||verifiedItem.barcode!==item.barcode)E('quantity').value=1;
  verifiedItem=item;E('selected').textContent=item.article+' · необходимо ещё '+item.remaining+' шт.';
@@ -209,11 +228,38 @@ E('undoBtn').addEventListener('click',async()=>{
  }));
  await recoverUndo();
 });
+function pendingShortage(){try{return JSON.parse(localStorage.getItem(pendingShortageKey)||'null')}catch(e){return null}}
+async function recoverShortage(){
+ const p=pendingShortage();if(!p)return;
+ if(p.employee_id!==employee.id){localStorage.removeItem(pendingShortageKey);return}
+ if(p.cargo_id!==cargoId){location.replace('/ozon-fbo/pick?cargo_id='+encodeURIComponent(p.cargo_id));return}
+ if(busy)return;
+ busy=true;E('shortageBtn').disabled=true;
+ try{
+  const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/shortage','POST',p);
+  localStorage.removeItem(pendingShortageKey);await draw(d.cargo);
+  status('Недостача передана руководителю. Ожидай согласования.');
+ }catch(e){
+  if(e.status&&e.status<500){localStorage.removeItem(pendingShortageKey);status(e.message,true)}
+  else status('Неизвестен результат отправки. Запрос сохранён для безопасного повтора.',true);
+ }finally{busy=false;E('shortageBtn').disabled=false}
+}
+E('shortageBtn').addEventListener('click',async()=>{
+ if(pendingShortage()){await recoverShortage();return}
+ if(busy||!cargo||cargo.status!=='started'||cargo.employee_id!==employee.id)return;
+ if(getPending()||getPendingUndo())return status('Сначала сверь ожидающее подтверждение скана.',true);
+ const item=cargo.items.find(i=>i.id===E('shortageItem').value);
+ if(!item||!item.remaining||(item.shortage&&item.shortage.status!=='rejected'))return status('Выбери позицию с неподтверждённой недостачей.',true);
+ const reason=E('shortageReason').value;
+ if(!confirm('Зафиксировать отсутствие '+item.remaining+' шт. товара '+item.article+'? План Ozon не изменится.'))return;
+ const p={cargo_id:cargoId,employee_id:employee.id,item_id:item.id,reason,request_id:makeId()};
+ localStorage.setItem(pendingShortageKey,JSON.stringify(p));await recoverShortage();
+});
 E('cargoCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();E('finishBtn').click()}});
 E('finishBtn').addEventListener('click',async()=>{
  if(busy||getPending())return status('Сначала восстанови последнее подтверждение.',true);
  const scanned=code(E('cargoCode').value);if(!scanned)return status('Сканируй ШК грузоместа.',true);
- if(!confirm('Все '+cargo.qty+' шт. собраны. Завершить грузоместо после проверки ШК?'))return;
+ if(!confirm('Собрано '+cargo.picked+' шт., согласованная недостача '+cargo.approved_shortage+' шт. Завершить после проверки ШК грузоместа?'))return;
  busy=true;E('finishBtn').disabled=true;
  try{const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/complete','POST',{cargo_barcode:scanned});await draw(d.cargo)}
  catch(e){status(e.message,true)}finally{busy=false;E('finishBtn').disabled=false}
@@ -222,7 +268,7 @@ async function startup(){
  const response=await fetch('/api/auth/me',{cache:'no-store'});
  if(!response.ok){location.href='/login';return}
  const d=await response.json();employee=d.employee;E('identity').textContent='Сотрудник: '+employee.name;
- for(const key of [pendingKey,pendingUndoKey]){
+ for(const key of [pendingKey,pendingUndoKey,pendingShortageKey]){
   const p=(()=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){return null}})();
   if(p&&p.employee_id!==employee.id)localStorage.removeItem(key);
   else if(p&&p.cargo_id!==cargoId){
@@ -237,6 +283,7 @@ async function startup(){
  await refresh();
  await recoverPending();
  await recoverUndo();
+ await recoverShortage();
 }
 startup().catch(e=>status('Ошибка подключения: '+e.message+'. При восстановлении сети обнови страницу.',true));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&employee&&cargoId&&!busy)refresh().catch(()=>{})});
