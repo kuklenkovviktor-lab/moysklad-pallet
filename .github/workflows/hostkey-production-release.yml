@@ -1,4 +1,4 @@
-name: HOSTKEY production release (guarded)
+name: HOSTKEY automated production release (guarded)
 
 on:
   push:
@@ -112,7 +112,7 @@ jobs:
           ssh -o StrictHostKeyChecking=yes "$USER@$HOST" \
             "test -s '$DEST/image.tar.gz' && test -s '$DEST/compose.yaml' && cd '$DEST' && sha256sum -c image.tar.gz.sha256"
       - name: Invoke root-owned deployment gate
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy')
         run: |
           set -euo pipefail
           # The only permitted sudo entry point is a fixed, root-owned dispatcher.

@@ -31,13 +31,20 @@ chmod 700 "$backup_dir"
 grep -qx "GRIT_DATABASE_NAME=$database" "$envfile" || {
   echo "Production database not explicitly selected in .env"; exit 1;
 }
-# Explicit production gate. Operator creates this receipt ONLY after a recent
-# production backup has been uploaded, downloaded and restored off the VPS.
-# Do not satisfy this gate with a backup of the old 'grit' database.
-[[ -s /opt/grit-data/deployment/verified-production-offsite-recovery.txt ]] || {
-  echo "Blocked: no verified off-site recovery receipt for production database"
-  exit 1
-}
+# Explicitly acknowledge unattended production releases without off-site recovery.
+# The marker is a root-owned operator decision, NEVER written by GitHub or gritdeploy.
+# No marker and no verified off-site recovery -> deployment stays blocked.
+offsite_receipt=/opt/grit-data/deployment/verified-production-offsite-recovery.txt
+risk_waiver=/opt/grit-data/deployment/allow-deploy-without-offsite-backup
+if [[ ! -s "$offsite_receipt" ]]; then
+  [[ -f "$risk_waiver" && ! -L "$risk_waiver" &&
+     "$(stat -c '%U:%G:%a' "$risk_waiver")" == "root:root:600" &&
+     "$(cat "$risk_waiver")" == "I_ACCEPT_NO_OFFSITE_RECOVERY" ]] || {
+    echo "Blocked: no off-site restore or explicit root-owned risk waiver"
+    exit 1
+  }
+  echo "WARNING: production update authorized WITHOUT verified off-site recovery"
+fi
 grep -qx 'GRIT_PRODUCTION_MODE=1' "$envfile" || {
   echo "Set GRIT_PRODUCTION_MODE=1 after verifying production Compose"
   exit 1
@@ -65,9 +72,16 @@ old_db=$(docker inspect grit-wms-test-app-1 --format '{{range .Config.Env}}{{pri
 
 # Use exactly the existing Compose overlays; only replace its BASE file.
 # Legacy cutover and MoySklad overlays must remain in the deployment context.
-[[ "${old_files[0]}" == "$base" ]] || {
-  echo "Unexpected Compose base path: refusing to drop live overrides"; exit 1;
-}
+# After the first release, Docker labels refer to the last immutable candidate,
+# not /opt/grit-wms/compose.yaml. Accept only our known root-owned release path.
+prior_base="${old_files[0]}"
+if [[ "$prior_base" != "$base" ]]; then
+  [[ "$prior_base" == "$incoming"/releases/*/compose.yaml &&
+     -f "$prior_base" && ! -L "$prior_base" &&
+     "$(stat -c '%U:%G' "$prior_base")" == "root:root" ]] || {
+    echo "Unexpected Compose base path: refusing to drop live overrides"; exit 1;
+  }
+fi
 new_args=(-f "$candidate")
 for ((i=1; i<${#old_files[@]}; i++)); do
   new_args+=(-f "${old_files[i]}")
