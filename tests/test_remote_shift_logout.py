@@ -68,6 +68,19 @@ class RemoteShiftLogoutTests(unittest.TestCase):
                 (next_id,self.employee,datetime.now(timezone.utc).isoformat()))
         self.assertEqual(self.client.get("/api/auth/me").status_code,401)
 
+    def test_closed_shift_rejects_fresh_fbs_scan(self):
+        from fbs_skip_authorization import record_pending_item
+        from fbs_transactions import close_shift
+        from wms import query_one
+        record_pending_item(self.shift_id,self.employee,"PRODUCT-TEST","SKU","Test")
+        close_shift(self.shift_id,self.employee)
+        response=self.client.post("/api/fbs/scan",json={
+            "shift_id":self.shift_id,"request_id":str(uuid.uuid4()),
+            "barcode":"FRESH-ORDER","product_barcode":"PRODUCT-TEST"})
+        self.assertEqual(response.status_code,401)
+        self.assertEqual(query_one("SELECT count(*) FROM scans WHERE shift_id=?",
+                                   (self.shift_id,))[0],0)
+
     def test_terminal_pages_receive_client_poll_not_manager(self):
         self.assertIn("setInterval(verifyShift,15000)",app._TERMINAL_RECHECK_JS)
         self.assertIn("window.addEventListener('pageshow',verifyShift)",app._TERMINAL_RECHECK_JS)
