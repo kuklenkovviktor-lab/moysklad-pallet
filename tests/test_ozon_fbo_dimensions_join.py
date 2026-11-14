@@ -85,7 +85,7 @@ class DimensionsJoinTests(unittest.TestCase):
         app.register_blueprint(route_lab_bp);client=app.test_client()
         with client.session_transaction() as sess:sess["manager_web"]=True
         page=client.get("/manager/ozon-fbo/route-lab").get_data(as_text=True)
-        self.assertIn("Справочник NEW +",page)
+        self.assertIn("Синхронизировать Google Sheets",page)
         self.assertIn("Синтетическая палета",page)
         self.assertIn("#09121e",page)
 

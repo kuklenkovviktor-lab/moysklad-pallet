@@ -75,6 +75,43 @@ def read_dimensions_xlsx(raw):
         book.close()
 
 
+def read_dimensions_values(dimension_rows, summary_rows):
+    """Same catalogue schema as XLSX parser, directly from Google Sheets values."""
+    header = dimension_rows[0] if dimension_rows else []
+    expected = ("Артикул", "Длина", "Ширина", "Высота", "Вес")
+    if tuple(str(c or "").strip() for c in (list(header) + [""] * 5)[:5]) != expected:
+        raise ValueError("колонки «Габариты» не совпадают с ожидаемыми")
+    entries, incomplete = {}, []
+    for rownum, original in enumerate(dimension_rows[1:3001], 2):
+        values = list(original) + [None] * max(0, 5 - len(original))
+        article = str(values[0] or "").strip()
+        if not article:
+            continue
+        if len(article) > 120:
+            incomplete.append({"row": rownum, "article": article[:120],
+                               "reason": "Длинный артикул"})
+            continue
+        dims = [_number(v, max_value=1000) for v in values[1:4]]
+        if any(v is None for v in dims):
+            incomplete.append({"row": rownum, "article": article,
+                               "reason": "Нет полного набора Д×Ш×В"})
+            continue
+        key = article.casefold()
+        weight = _number(values[4], max_value=10000) if values[4] is not None else None
+        if key in entries and entries[key]["dimensions_cm"] != dims:
+            raise ValueError("конфликт габаритов: " + article)
+        entries[key] = {"article": article, "dimensions_cm": dims, "weight_kg": weight}
+    barcodes = {}
+    for original in summary_rows[:12000]:
+        values = list(original) + [None, None]
+        article, barcode = str(values[0] or "").strip(), str(values[1] or "").strip()
+        if article and barcode:
+            barcodes.setdefault(article.casefold(), set()).add(barcode)
+    return {"items": entries, "incomplete": incomplete,
+            "barcodes": {a: sorted(codes) for a, codes in barcodes.items()},
+            "tab_names": ["Габариты", "Сводный"]}
+
+
 def parse_synthetic_basket(text):
     """A manager-supplied virtual basket, never a live FBO cargo."""
     if not isinstance(text, str) or len(text) > 12000:

@@ -13,3 +13,6 @@ certifi>=2026.10.19
 
 # Patched vendored CA bundle in Python package installer.
 pip>=26.2.2
+
+# Server-side service account, Sheets read-only OAuth scope.
+google-auth>=2.35,<3
