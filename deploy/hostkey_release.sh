@@ -86,6 +86,14 @@ new_args=(-f "$candidate")
 for ((i=1; i<${#old_files[@]}; i++)); do
   new_args+=(-f "${old_files[i]}")
 done
+
+# Legacy cutover overlays pin app.image to a stale tag. The LAST overlay
+# selects the immutable tested release without changing any other live setting.
+image_overlay="$release_dir/release-image.yaml"
+printf 'services:\n  app:\n    image: %s\n' "$image" > "$image_overlay"
+chmod 600 "$image_overlay"
+new_args+=(-f "$image_overlay")
+
 # Validate effective merged configuration, not the standalone base compose.
 GRIT_IMAGE_TAG="release-$sha" docker compose --project-directory "$root" \
   --env-file "$envfile" "${new_args[@]}" config --format json | \
