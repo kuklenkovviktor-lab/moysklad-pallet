@@ -146,16 +146,14 @@ def parse_ozon_xlsx(blob):
                 continue
             headers = rows[0][1]
             blocks = []
-            for start in range(0, MAX_COLUMNS, 4):
-                if not any(start <= col < start + 4 for col in headers):
+            # Each manifest block starts with its own "ШК товара" header.
+            # Blank separator columns are allowed (A:D, E:H, J:M, O:R).
+            # Do not infer block origins from fixed multiples of four.
+            for start in range(MAX_COLUMNS - 3):
+                first = _value_text(headers.get(start, ("", ""))[0]).casefold()
+                if not ("шк" in first and ("товар" in first or first == "шк")):
                     continue
                 captions = [_value_text(headers.get(start + i, ("", ""))[0]).casefold() for i in range(4)]
-                # Ignore auxiliary headings but reject malformed cargo blocks.
-                candidate = (
-                    "шк" in captions[0] or "кол" in captions[2] or "шк" in captions[3]
-                )
-                if not candidate:
-                    continue
                 if "шк" not in captions[0] or "кол" not in captions[2] or "шк" not in captions[3]:
                     errors.append(
                         f"Лист «{sheet_name}», блок {_column_label(start)}–{_column_label(start + 3)}: "
@@ -206,13 +204,15 @@ def parse_ozon_xlsx(blob):
                         continue
                     barcode_articles[barcode] = article
                     previous_source = gm_sources.get(gm)
-                    if previous_source and previous_source != (sheet_name, start):
+                    if previous_source and previous_source[0] != sheet_name:
                         errors.append(
-                            f"{location}: ШК грузоместа {gm} указан в разных блоках "
-                            "или направлениях. Проверь Excel."
+                            f"{location}: ШК грузоместа {gm} указан в разных "
+                            "направлениях. Проверь Excel."
                         )
                         continue
-                    gm_sources[gm] = (sheet_name, start)
+                    # Repeated cargo in different blocks of the same sheet is
+                    # valid. Exact repeated product lines are handled by seen.
+                    gm_sources.setdefault(gm, (sheet_name, start))
                     key = (gm, barcode, article.casefold())
                     old = seen.get(key)
                     if old:
