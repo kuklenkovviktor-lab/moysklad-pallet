@@ -67,6 +67,31 @@ class IntegrationConnectivityTests(unittest.TestCase):
         self.assertIn("HTTP 415", response.json["details"])
         self.assertNotIn("synthetic", response.get_data(as_text=True))
 
+    def test_api_400_reports_only_numeric_moysklad_codes(self):
+        class Response:
+            status_code = 400
+            def json(self):
+                return {"errors": [{"code": 1014, "error": "secret catalog information"},
+                                   {"code": "unsafe", "error": "token in text"}]}
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic-token"}), \
+             patch("integrations.requests.get", return_value=Response()):
+            response = self.client.post("/api/manager/integrations/moysklad/check")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("HTTP 400", response.json["details"])
+        self.assertIn("1014", response.json["details"])
+        self.assertNotIn("secret catalog information", response.get_data(as_text=True))
+        self.assertNotIn("synthetic-token", response.get_data(as_text=True))
+
+    def test_api_error_diagnostics_with_non_json_body(self):
+        class Response:
+            status_code = 400
+            def json(self):
+                raise ValueError("Invalid JSON")
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic-token"}), \
+             patch("integrations.requests.get", return_value=Response()):
+            response = self.client.post("/api/manager/integrations/moysklad/check")
+        self.assertIn("код ошибки в ответе отсутствует", response.json["details"])
+
     def test_timeout_is_unavailable_and_never_exposes_exception(self):
         import requests
         with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
