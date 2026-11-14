@@ -400,12 +400,12 @@ def require_employee_login():
             """<!doctype html><html lang="ru"><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <title>GRIT WMS · запуск</title>
-            <body style="font-family:system-ui;background:#e9eef3;color:#25313d;display:grid;place-items:center;min-height:100vh;margin:0">
-            <div style="max-width:520px;background:#fff;padding:24px;border-radius:16px;border:1px solid #d7e0e7">
+            <body style="font-family:system-ui;background:#09121e;color:#f1f6ff;display:grid;place-items:center;min-height:100vh;margin:0">
+            <div style="max-width:520px;background:#142337;padding:24px;border-radius:16px;border:1px solid #30465c">
             <h2 style="margin-top:0">GRIT WMS запускается</h2>
             <p>Восстанавливаю рабочую базу данных. Страница обновится автоматически.</p>
-            <p style="color:#6b7785">""" + _startup_public_message() + """</p>
-            <p style="color:#8a5a12;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """ · этап: """ + str(_startup_snapshot().get("stage", "unknown")) + """</p>
+            <p style="color:#9eb5ca">""" + _startup_public_message() + """</p>
+            <p style="color:#ffba70;font-size:13px">Попытка №""" + str(_startup_snapshot().get("attempts", 0)) + """ · этап: """ + str(_startup_snapshot().get("stage", "unknown")) + """</p>
             <p style="color:#8b96a3;font-size:12px">Сборка: """ + _build_id()[:12] + """</p>
             <script>setTimeout(()=>location.reload(),5000)</script>
             </div></body></html>""",
@@ -748,7 +748,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#111111">
+<meta name="theme-color" content="#09121e">
 <title>Оприходование палет</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -837,6 +837,29 @@ button:disabled{opacity:.45;cursor:not-allowed}
  .scan-counters>div{min-width:62px;padding:5px}.scan-counters span{font-size:19px}
  .quick-row button{font-size:10px;padding:6px}
  #reader{max-height:115px}
+}
+
+/* GRIT WMS terminal appearance, including landscape mode: visual-only. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-panel:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-orange:#ff9230}
+html,body{background:#09121e!important;color:var(--g-text)!important}
+body .card,body #docCard,body #scanCard,body .activeDoc,body .stats,body .scan-counters>div{
+ background:#142337!important;color:var(--g-text)!important;border:1px solid var(--g-line)!important;box-shadow:none!important}
+body h1,body h2,body h3{color:#f1f6ff!important}
+body .muted,body .small,body label{color:#9eb5ca!important}
+body input,body select{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#9eb5ca}
+body button:not(.danger):not(.action){background:#176eae!important;color:#fff!important;border:1px solid #358acc!important}
+body button.secondary,body .nav a,body .qtypad button{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .qtypad button.action{background:#176eae!important;color:#fff!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+body .err{background:#41282f!important;color:#ffb9bd!important}
+body .info{background:#1b3146!important;color:#d3e8f7!important}
+body .progress{background:#283e54!important}
+body input:focus-visible,body select:focus-visible,body button:focus-visible,body a:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+@media(orientation:landscape) and (max-height:600px){
+ html,body{background:#09121e!important}
+ .wrap>.card:first-of-type,#docCard,#scanCard{background:#142337!important;color:#f1f6ff!important;border-color:#30465c!important}
 }
 </style>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1"></head>
