@@ -36,6 +36,23 @@ th{background:#eaf0f4}.scroll{overflow-x:auto}details{border-top:1px solid #dce4
 summary{cursor:pointer;font-weight:750}#warnings{margin-top:10px}
 #importBtn{background:#2d6757}.tag{font-size:11px;background:#dce8ee;padding:3px 7px;border-radius:8px}
 @media(max-width:650px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.controls{align-items:stretch;flex-direction:column}}
+/* GRIT unified dark manager import and discrepancy resolution */
+:root{color-scheme:dark;--g-bg:#09121e;--g-panel:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca}
+html,body{background:var(--g-bg);color:var(--g-text)}
+.card{background:linear-gradient(145deg,#16283b,#101c2a);border-color:var(--g-line)}
+h1,h2{color:var(--g-text)}a{color:#77c0ff}.small{color:var(--g-muted)}
+.kpi{background:#1b3045;border:1px solid #345069}.kpi span{color:var(--g-muted)}
+table{background:transparent}td,th{color:#e4eef8;border-color:#30465c}
+th{background:#1b3146}details{border-color:#30465c}
+button{background:#176eae}button:disabled{opacity:.45}
+input,select{background:#0d1d2c;color:#f1f6ff;border:1px solid #42607a}
+.tag{background:#233b50;color:#d3e9fa}.danger{color:#ff999c}.warn{color:#ffc17e}.ok{color:#81e9b9}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
+.issue{border:1px solid #81583d;background:#302c2a;border-radius:11px;padding:13px;margin:10px 0}
+.issue label{display:block;margin-top:9px;font-size:13px}.issue select{width:100%;max-width:690px;margin-top:5px;padding:10px}
+.exclude-cargo{display:inline-flex;align-items:center;gap:7px;color:#ffbd82;font-weight:650;margin:8px 0}
+.exclude-cargo input{width:18px;height:18px}
+#catalogIssues{margin:15px 0}
 </style></head><body><main>
 <a href="/manager">← Панель руководителя</a><h1>📦 Ozon FBO</h1>
 <p><a href="/manager/ozon-fbo/picking">📊 Открыть монитор фактической сборки →</a></p>
@@ -45,7 +62,7 @@ summary{cursor:pointer;font-weight:750}#warnings{margin-top:10px}
 <label>Excel-файл <input id="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
 <button id="previewBtn" type="button">Проверить файл</button></div>
 <div id="notice" role="status" class="small"></div><div id="preview"></div>
-<div id="warnings"></div>
+<div id="warnings"></div><div id="catalogIssues" aria-live="polite"></div>
 <label id="warningConfirm" style="display:none;margin:14px 0"><input id="agree" type="checkbox"> Подтверждаю исключение точных повторов из плана</label>
 <button id="importBtn" type="button" disabled>Создать задания по грузоместам</button></section>
 <section class="card"><h2>Загруженные поставки</h2><div id="supplies">Загрузка…</div></section>
@@ -54,19 +71,48 @@ summary{cursor:pointer;font-weight:750}#warnings{margin-top:10px}
 const fileEl=document.getElementById('file'),notice=document.getElementById('notice');
 const previewEl=document.getElementById('preview'),warningsEl=document.getElementById('warnings');
 const importBtn=document.getElementById('importBtn');
-let current=null,busy=false;
+let current=null,busy=false,catalogChoices={},excludedCargo=new Set();
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function kpis(d){return '<div class="kpis">'+[['Направлений',(d.destinations||[]).length],['Грузомест',d.places],['Строк плана',d.unique_rows],['Товаров, шт.',d.qty]].map(x=>
  '<div class="kpi"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join('')+'</div>'}
 function itemsTable(items){return '<div class="scroll"><table><thead><tr><th>Артикул</th><th>ШК товара</th><th>Количество</th></tr></thead><tbody>'+
  items.map(i=>'<tr><td>'+esc(i.article)+'</td><td>'+esc(i.barcode)+'</td><td>'+esc(i.qty)+'</td></tr>').join('')+'</tbody></table></div>'}
 function cargoBlock(p){return '<details><summary>'+esc(p.destination)+' · '+esc(p.label)+' · ГМ '+esc(p.barcode)+' · '+esc(p.qty)+' шт. · '+esc(p.items.length)+' поз.</summary>'+itemsTable(p.items)+'</details>'}
+function cargoPreview(p){
+ const affected=(current.discrepancies||[]).some(i=>i.cargo_barcodes.includes(p.barcode));
+ return '<details><summary>'+esc(p.destination)+' · '+esc(p.label)+' · ГМ '+esc(p.barcode)+' · '+esc(p.qty)+' шт.</summary>'+
+ (affected?'<label class="exclude-cargo"><input type="checkbox" data-exclude="'+esc(p.barcode)+'" '+(excludedCargo.has(p.barcode)?'checked':'')+'> Исключить всё грузоместо из импорта</label>':'')+
+ itemsTable(p.items)+'</details>';
+}
+function unresolved(issue){return issue.cargo_barcodes.some(x=>!excludedCargo.has(x))&&!issue.barcodes.includes(catalogChoices[issue.key])}
+function renderCatalog(){
+ const el=document.getElementById('catalogIssues');
+ if(!current)return el.innerHTML='';
+ const issues=current.discrepancies||[];
+ el.innerHTML=!issues.length?'<p class="ok">✓ Все артикулы и штрихкоды сверены с МойСклад.</p>':
+ '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Подтверди правильный ШК либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
+ issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':'У товара нет ШК')+'</span>'+
+ '<div class="small">Excel: '+esc(i.excel_barcode)+' · Строки: '+esc(i.sources.join(', '))+' · Грузоместа: '+esc(i.cargo_barcodes.join(', '))+'</div>'+
+ (i.barcodes.length?'<label>ШК из МойСклад<select data-choice="'+esc(i.key)+'"><option value="">Выбери правильный ШК</option>'+
+ i.barcodes.map(b=>'<option value="'+esc(b)+'" '+(catalogChoices[i.key]===b?'selected':'')+'>'+esc(b)+'</option>').join('')+'</select></label>':
+ '<div class="small">Нет безопасного варианта замены. Исправь карточку МойСклад и проверь файл заново либо исключи все затронутые грузоместа.</div>')+
+ (unresolved(i)?'<p class="danger">Требует решения</p>':'<p class="ok">Разрешено</p>')+'</div>').join('');
+}
+document.getElementById('catalogIssues').addEventListener('change',e=>{
+ if(e.target.matches('select[data-choice]'))catalogChoices[e.target.dataset.choice]=e.target.value;
+ renderCatalog();checkButton();
+});
+previewEl.addEventListener('change',e=>{
+ if(!e.target.matches('input[data-exclude]'))return;
+ if(e.target.checked)excludedCargo.add(e.target.dataset.exclude);else excludedCargo.delete(e.target.dataset.exclude);
+ renderCatalog();checkButton();
+});
 function resetPreview(){
- current=null;importBtn.disabled=true;previewEl.innerHTML='';warningsEl.innerHTML='';
+ current=null;catalogChoices={};excludedCargo=new Set();importBtn.disabled=true;previewEl.innerHTML='';warningsEl.innerHTML='';document.getElementById('catalogIssues').innerHTML='';
  document.getElementById('agree').checked=false;
  document.getElementById('warningConfirm').style.display='none';
 }
-function checkButton(){importBtn.disabled=!current||current.errors.length>0||(current.warnings.length>0&&!document.getElementById('agree').checked)||busy}
+function checkButton(){importBtn.disabled=!current||current.errors.length>0||(current.warnings.length>0&&!document.getElementById('agree').checked)||(current.discrepancies||[]).some(unresolved)||!!current&&current.cargo.every(c=>excludedCargo.has(c.barcode))||busy}
 document.getElementById('agree').addEventListener('change',checkButton);
 fileEl.addEventListener('change',function(){
  resetPreview();
@@ -86,23 +132,24 @@ document.getElementById('previewBtn').addEventListener('click',async function(){
  if(busy)return;busy=true;resetPreview();this.disabled=true;notice.className='small';notice.textContent='Читаю Excel…';
  try{
   const d=await sendUpload('/api/manager/ozon-fbo/preview',{});
-  current=d;previewEl.innerHTML=kpis(d)+'<div style="margin-top:12px">'+d.cargo.map(cargoBlock).join('')+'</div>';
+  current=d;previewEl.innerHTML=kpis(d)+'<div style="margin-top:12px">'+d.cargo.map(cargoPreview).join('')+'</div>';renderCatalog();
   warningsEl.innerHTML=d.warnings.length?'<p class="warn"><b>Найдены точные повторы: '+d.warnings.length+'</b></p><ol>'+d.warnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ol>':'<p class="ok">Точных повторов нет.</p>';
   if(d.errors.length){warningsEl.innerHTML+='<p class="danger"><b>Ошибки, импорт заблокирован:</b></p><ol>'+d.errors.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol>'}
   document.getElementById('warningConfirm').style.display=d.warnings.length?'block':'none';
-  notice.textContent=d.errors.length?'Исправь Excel и проверь снова.':'Предпросмотр готов. Подтверди создание заданий.';
+  notice.textContent=d.errors.length?'Исправь Excel и проверь снова.':(d.discrepancies||[]).length?'Обнаружены расхождения. Исправь ШК или исключи грузоместа.':'Проверка МойСклад пройдена. Можно создавать задания.';
  }catch(e){notice.className='danger';notice.textContent=e.message}
  finally{busy=false;this.disabled=false;checkButton()}
 });
 importBtn.addEventListener('click',async function(){
  if(busy||!current||this.disabled)return;
  if(!document.getElementById('title').value.trim()){notice.className='danger';notice.textContent='Введи название поставки';return}
- if(!confirm('Создать '+current.places+' грузомест и план на '+current.qty+' шт. без подтверждения фактической сборки?'))return;
+ if(!confirm('Создать '+(current.places-excludedCargo.size)+' проверенных грузомест? Исключённые грузоместа не попадут в задания.'))return;
  busy=true;checkButton();notice.className='small';notice.textContent='Сохраняю поставку…';
  try{
   const d=await sendUpload('/api/manager/ozon-fbo/import',{
    title:document.getElementById('title').value.trim(),source_hash:current.source_hash,
-   plan_hash:current.plan_hash,accept_duplicates:document.getElementById('agree').checked?'1':'0'
+   plan_hash:current.plan_hash,accept_duplicates:document.getElementById('agree').checked?'1':'0',
+   catalog_decisions:JSON.stringify(catalogChoices),excluded_cargo:JSON.stringify([...excludedCargo])
   });
   notice.className='ok';notice.textContent='Поставка создана. '+d.places+' грузомест, '+d.qty+' шт.';
   resetPreview();fileEl.value='';
