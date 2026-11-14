@@ -38,6 +38,7 @@ class IntegrationConnectivityTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json["state"], "connected")
         self.assertNotIn("not-a-real-token", result.get_data(as_text=True))
+        self.assertEqual(get.call_args.kwargs["headers"]["Accept-Encoding"], "gzip")
         self.assertEqual(get.call_args.kwargs["params"], {"limit": 1})
         self.assertEqual(get.call_args.kwargs["timeout"], 8)
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
@@ -54,6 +55,17 @@ class IntegrationConnectivityTests(unittest.TestCase):
                 with self.subTest(code=code), \
                      patch("integrations.requests.get", return_value=Response(code)):
                     self.assertEqual(_moysklad_health()["state"], expected)
+
+    def test_nonstandard_response_has_safe_http_status(self):
+        class Response:
+            status_code = 415
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("integrations.requests.get", return_value=Response()):
+            response = self.client.post("/api/manager/integrations/moysklad/check")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["state"], "unavailable")
+        self.assertIn("HTTP 415", response.json["details"])
+        self.assertNotIn("synthetic", response.get_data(as_text=True))
 
     def test_timeout_is_unavailable_and_never_exposes_exception(self):
         import requests
