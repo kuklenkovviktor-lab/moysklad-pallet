@@ -121,6 +121,29 @@ class FboShortageTests(unittest.TestCase):
         self.assertEqual(next_report.json["cargo"]["remaining"],3)
         self.assertEqual(next_report.json["cargo"]["pending_shortages"],1)
 
+    def test_multiple_missing_skus_require_individual_manager_approval(self):
+        second=str(uuid.uuid4())
+        execute("INSERT INTO ozon_fbo_items (id,cargo_id,barcode,article,planned_qty,source_cell) VALUES (?,?,?,?,?,?)",
+                (second,self.cargo,"SKU456","ART-2",4,"Test!E2"))
+        execute("UPDATE ozon_fbo_cargo SET planned_qty=9,lines_count=2 WHERE id=?",(self.cargo,))
+        first=self.report()
+        self.assertEqual(first.status_code,200,first.json)
+        second_report=self.report(item=second)
+        self.assertEqual(second_report.status_code,200,second_report.json)
+        self.assertEqual(second_report.json["cargo"]["pending_shortages"],2)
+        self.manager()
+        self.assertEqual(self.decide("approve").status_code,200)
+        self.employee("anton")
+        state=self.client.get("/api/ozon-fbo/pick/cargo/"+self.cargo).json["cargo"]
+        self.assertFalse(state["ready_for_qr"])
+        self.manager()
+        approved=self.client.post("/api/manager/ozon-fbo/shortage/decide",json={
+            "cargo_id":self.cargo,"item_id":second,"decision":"approve",
+            "reason":"Проверено по учёту и ячейке"})
+        self.assertEqual(approved.status_code,200,approved.json)
+        self.assertEqual(approved.json["cargo"]["approved_shortage"],9)
+        self.assertTrue(approved.json["cargo"]["ready_for_qr"])
+
     def test_manager_only_and_cross_employee_blocked(self):
         self.assertEqual(self.decide("approve").status_code,403)
         self.assertEqual(self.report(item="other").status_code,404)
