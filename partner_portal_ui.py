@@ -79,6 +79,44 @@ tbody tr:nth-child(odd){background:#fafcfd}tbody tr:hover{background:#edf5fa}
   td .article{max-width:65%;text-align:right}.action-links{justify-content:flex-end}
   .toolbar .field{flex-basis:100%}.toolbar .status-filter{flex:1}
 }
+/* GRIT WMS design tokens. Partner portal uses the same dark surface as manager pages. */
+:root{color-scheme:dark;--bg:#09121e;--paper:#142337;--ink:#f1f6ff;--muted:#9eb5ca;--navy:#2d92e2;--line:#30465c;--soft:#192e43;--blue:#203b52}
+body{background:var(--bg);color:var(--ink)}
+.topbar,section,.panel,.kpi{background:linear-gradient(145deg,#16283b,#101c2a);border-color:var(--line);box-shadow:none}
+.logo{background:#176eae}
+.brand b,h1,h2,h3,.article{color:#f1f6ff}
+.partner-pill,.panel-icon,.dropzone,.btn-secondary,.btn-ghost,.pages a,.pages span,.status{background:#203b50;color:#d9eafa;border-color:#375a75}
+.kpi .number.blue{color:#7fc8ff}.kpi .number.green{color:#64d8a6}.kpi .number.amber{color:#ffba70}
+label{color:#b9cde0}
+input:not([type=hidden]),select{background:#0d1d2c;color:#ecf5ff;border-color:#42607a}
+input::placeholder{color:#819bb1}
+input[type=file]{background:#102235}
+input:focus,select:focus{border-color:#ff9230;box-shadow:0 0 0 2px #ff923044}
+.btn-primary{background:#176eae;color:#fff}
+.btn-secondary,.btn-ghost{color:#e0f0ff}
+.dropzone{background:#152a3d;border-color:#52728a}
+.notice{background:#173e36;color:#81e9b9;border-color:#2c6a57}
+.notice.error{background:#41282f;color:#ffb9bd;border-color:#874853}
+th{color:#b8d7ed;border-color:#345068}
+td{color:#e4eef8;border-color:#2b4255}
+tbody tr:nth-child(odd){background:#15283a}
+tbody tr:hover{background:#1e3549}
+.pallet-num{color:#c9e4f7}
+.status-accepted{background:#173e36;color:#81e9b9}
+.status-processing{background:#493521;color:#ffcd85}
+.status-uncertain{background:#41282f;color:#ffb9bd}
+.action-links a{background:#203b50;color:#9fd3fb}
+a{color:#77c0ff}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
+@media(max-width:620px){
+ tbody tr,tbody tr:hover{background:#14283b!important}
+ td:before{color:#9eb5ca}
+}
+@media print{
+ :root{color-scheme:light}
+ html,body{background:#fff!important;color:#000!important}
+}
+
 """
 FORM_JS = """
 <script>

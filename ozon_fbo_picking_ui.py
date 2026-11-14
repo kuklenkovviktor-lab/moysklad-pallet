@@ -2,7 +2,7 @@
 
 WORKER_PICK_HTML = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ONIX · Ozon FBO · Сборка</title>
+<meta name="theme-color" content="#09121e"><title>GRIT WMS · Ozon FBO · Сборка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
 *{box-sizing:border-box}body{margin:0;background:#e9eef3;color:#25313d;font-family:system-ui,Arial}
 main{max-width:940px;margin:auto;padding:12px}.card{background:#f7f9fb;padding:16px;border:1px solid #d7e0e7;border-radius:14px;margin:10px 0}
@@ -24,6 +24,25 @@ th{background:#e8eef2;position:sticky;top:0}.scroll{overflow:auto;max-height:48v
 #reader{margin-top:12px;max-width:490px;overflow:hidden;border-radius:12px}
 #message{padding:12px;background:#eef3f6;border-radius:9px;min-height:42px;overflow-wrap:anywhere}
 @media(max-width:620px){.grid{grid-template-columns:1fr}.metrics{gap:5px}.metric{padding:9px}.metric b{font-size:20px}}
+
+/* Shared GRIT WMS dark UI: Ozon FBO employee terminal */
+:root{color-scheme:dark;--g-bg:#09121e;--g-panel:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-orange:#ff9230}
+html,body{background:var(--g-bg);color:var(--g-text)}
+.card{background:linear-gradient(145deg,#16283b,#101c2a);border:1px solid var(--g-line);color:var(--g-text)}
+a{color:#77c0ff}h1,h2{color:#f1f6ff}
+.small{color:var(--g-muted)}.error{color:#ff999c}.ok{color:#81e9b9}
+button{background:#176eae;border:1px solid #358acc;color:#fff}
+button:hover{background:#2488cf}
+button.secondary{background:#233b50;color:#e0f0ff;border:1px solid #375a75}
+input,select{background:#0d1d2c;color:#ecf5ff;border:1px solid #42607a}
+input::placeholder{color:#819bb1}
+.metric{background:#1b3045;border:1px solid #345069}
+.metric span{color:#9eb5ca}
+.progress{background:#283e54}.progress>div{background:linear-gradient(90deg,#288ce0,#ff942f)}
+td,th{border-color:#2b4255}th{background:#1b3146;color:#b8d7ed}
+.complete{background:linear-gradient(145deg,#173b35,#11272a);border-color:#2e705b}
+#message{background:#1b2d40;border:1px solid #415e78;color:#f1f6ff}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--g-orange);outline-offset:2px}
 </style></head><body><main>
 <a href="/ozon-fbo">← Все грузоместа Ozon FBO</a><h1>📦 Сборка Ozon FBO</h1>
 <p class="small" id="identity">Определяю сотрудника…</p>

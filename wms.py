@@ -888,6 +888,27 @@ button{border:0;border-radius:8px;background:#48647a;color:white;font-size:11px;
  #reader{min-height:62px;max-height:88px}#reader video{max-height:88px!important}
  .barcode-zone{min-height:74px;padding-top:3px}.barcode-wrap{height:70px;padding:2px 5px}#zebraBarcode{height:66px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+body .card,body .barcode-zone,body .scanbox{background:#142337!important}
+body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!important;color:#111!important}
+@media(orientation:landscape) and (max-height:600px){html,body{background:#09121e!important}}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body><div class="wrap"><div class="card">
 <div class="header">
@@ -1213,7 +1234,7 @@ FBS_PAGE = """<!doctype html>
 <title>FBS · Выработка</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-:root{--bg:#12202e;--panel:#1f3548;--panel2:#233d52;--text:#f2f7fc;--muted:#b9cbda;--line:#345067;--accent:#36546e;--accent2:#29465d}
+:root{--bg:#09121e;--panel:#1f3548;--panel2:#233d52;--text:#f2f7fc;--muted:#b9cbda;--line:#345067;--accent:#36546e;--accent2:#29465d}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text)}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%;min-height:100dvh}
@@ -1718,6 +1739,25 @@ button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:11px;backg
  .secondary{grid-column:1;grid-row:4;margin:0;font-size:10px;align-self:end}
  .err,.ok{margin:0;padding:7px;font-size:10px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#reader{background:#101f30}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🚪 Завершение смены</h1>
 <div class="muted">Самостоятельный выход заблокирован. Для завершения смены отсканируй QR старшего в точке сдачи TSD/сканера.</div>
@@ -1769,6 +1809,25 @@ SUPERVISOR_QR_PAGE = """<!doctype html>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:520px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px;text-align:center}.qr{display:flex;justify-content:center;margin:18px 0}.muted{color:#6b7785;font-size:13px}.top{display:flex;gap:8px;margin-bottom:12px}.top a,.top button{flex:1;padding:10px;border:0;border-radius:10px;background:#48647a;color:#fff;text-decoration:none;font-weight:750}
 @media print{.top{display:none}body{background:#fff}.wrap{padding:0}.card{border:0}}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#qr,#qr img,#qr canvas{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap">
 <div class="top"><a href="/manager">← Панель управления</a><button onclick="print()">Печать</button></div>
 <div class="card"><h1>QR завершения смены</h1><div class="muted">QR автоматически меняется каждые 30 секунд. Старый код быстро перестаёт работать.</div><div id="qr" class="qr"></div><b>СТАРШИЙ · ВЫХОД</b><div class="muted" style="margin-top:8px">Обновление через <span id="ttl">—</span> сек.</div></div>
@@ -1797,6 +1856,25 @@ SUPERVISOR_TERMINAL_SETUP_PAGE = """<!doctype html>
 <meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Терминал выхода</title>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}.wrap{max-width:560px;margin:auto;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:18px;padding:20px}.muted{color:#6b7785;font-size:14px;line-height:1.45}.note{margin-top:14px;padding:12px;border-radius:11px;background:#eef3f6}.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:11px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}.back{display:block;text-align:center;margin-top:12px;color:#536f83;text-decoration:none}.err{margin-top:12px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+#qr,#qr img,#qr canvas{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>📟 Терминал выхода</h1>
 <div class="muted">Авторизуй это устройство один раз. После этого твоя учётка Виктора будет удалена из этой браузерной сессии, а устройство сможет показывать только динамический QR выхода.</div>
@@ -1826,6 +1904,26 @@ SUPERVISOR_TERMINAL_PAGE = """<!doctype html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d;min-height:100dvh;display:flex;align-items:center;justify-content:center}.wrap{width:100%;max-width:560px;padding:16px}.card{background:#fff;border:1px solid #d7e0e7;border-radius:20px;padding:22px;text-align:center;box-shadow:0 2px 12px rgba(52,72,91,.08)}.muted{color:#6b7785;font-size:14px;line-height:1.4}.qr{display:flex;justify-content:center;margin:20px 0}.ttl{font-size:34px;font-weight:850}.err{margin-top:12px;padding:12px;border-radius:10px;background:#f6e4e4;color:#8a4343}.link{display:inline-block;margin-top:12px;color:#536f83;text-decoration:none}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+.qr{display:flex;justify-content:center}
+.qr canvas,.qr img{background:#fff!important;padding:8px;border-radius:7px}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🔐 QR старшего</h1>
 <div class="muted">Терминал авторизован отдельно от учётки руководителя. QR меняется каждые 30 секунд.</div>
@@ -1872,6 +1970,25 @@ h1{margin:0 0 8px;font-size:25px}.muted{color:#6b7785;font-size:14px;line-height
 input{width:100%;margin-top:16px;padding:14px;border:1px solid #cbd9e2;border-radius:10px;font-size:16px;background:#fff}
 button{width:100%;margin-top:10px;padding:13px;border:0;border-radius:10px;background:#48647a;color:#fff;font-size:16px;font-weight:750;cursor:pointer}
 .err{margin-top:10px;padding:10px;border-radius:10px;background:#f6e4e4;color:#8a4343}
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+body .wrap .card{background:linear-gradient(145deg,#16283b,#101c2a)!important}
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body><div class="wrap"><div class="card">
 <h1>🖥️ Панель управления</h1>
 <div class="muted">Отдельный вход с компьютера. Сканер и бейдж здесь не нужны.</div>
@@ -2489,38 +2606,58 @@ document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')l
 
 BADGES_PAGE = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#e9eef3"><title>GRIT WMS · Бейджи</title>
+<meta name="theme-color" content="#09121e"><title>GRIT WMS · Бейджи</title>
 <style>
+:root{color-scheme:dark;--bg:#09121e;--panel:#122438;--panel-deep:#101e2d;--line:#314d64;--text:#eef6ff;--muted:#a4bbce;--blue:#176eae;--orange:#ff983b}
 *{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#e9eef3;color:#25313d}
-.wrap{max-width:900px;margin:auto;padding:16px}
-.top{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.top a,.top button,.print-one{padding:10px 12px;border:0;border-radius:10px;background:#48647a;color:white;text-decoration:none;font-weight:750;cursor:pointer}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-.badge{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center}
-.brand{font-size:11px;color:#6b7785;letter-spacing:.04em}
-.name{font-size:22px;font-weight:850;margin-top:8px}
-.qr{width:220px;height:220px;max-width:100%;margin:16px auto 12px;display:block;image-rendering:pixelated}
-.num{font-size:18px;font-weight:850}
-.print-one{margin-top:16px;width:100%}
-.status{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:18px}
+html{min-height:100%;background:var(--bg)}
+body{font:14px/1.48 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1060px;margin:auto;padding:20px 24px 40px}
+.top{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.top a,.top button,.print-one{display:inline-flex;align-items:center;justify-content:center;padding:10px 15px;border:1px solid #438ac1;border-radius:9px;background:var(--blue);color:#f7fbff;text-decoration:none;font-weight:750;cursor:pointer;font:inherit}
+.top a{background:#203a50;border-color:#365976;color:#cae7ff}
+.top a:hover{background:#2a516c}
+.top button:hover,.print-one:hover{background:#2488cf}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.badge{background:linear-gradient(140deg,#14273b,#0f1e2e);border:1px solid var(--line);border-radius:14px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;min-width:0}
+.brand{font-size:11px;color:var(--muted);letter-spacing:.05em}
+.name{font-size:21px;font-weight:800;margin-top:8px;overflow-wrap:anywhere}
+.qr{width:220px;height:220px;max-width:100%;margin:16px auto 12px;display:block;image-rendering:pixelated;background:#fff;padding:8px;border-radius:4px}
+.num{font-size:18px;font-weight:800}
+.print-one{margin-top:15px;width:100%}
+.status{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:18px;color:var(--text)}
 .manage{display:flex;width:100%;gap:8px;margin-top:10px}
-.manage button{flex:1;background:#315e7d;color:white;border:0;border-radius:8px;padding:10px;cursor:pointer;font-weight:700}
-.manage button.archive{background:#743d3d}
-.create{background:#fff;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin-bottom:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.create input{flex:1;min-width:180px;border:1px solid #b8cbd7;padding:12px;border-radius:9px}
-.create button{background:#176eae;color:white;border:0;border-radius:9px;padding:12px;font-weight:750;cursor:pointer}
-.archived{background:#fff;border:1px solid #d7e0e7;border-radius:14px;margin-top:20px;padding:14px}
-.archived-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-top:1px solid #e2eaf0}
-.archived-row button{background:#315e7d;color:white;border:0;border-radius:8px;padding:9px}
-.message{margin:10px 0;color:#15557a;font-weight:650}
+.manage button{flex:1;background:#203a50;color:#cae7ff;border:1px solid #365976;border-radius:9px;padding:10px;cursor:pointer;font-weight:700}
+.manage button:hover{background:#2a516c}
+.manage button.archive{background:#462b36;color:#ffb8bb;border-color:#744250}
+.manage button.archive:hover{background:#60343d}
+.create{background:linear-gradient(140deg,#14273b,#0f1e2e);border:1px solid var(--line);border-radius:13px;padding:15px;margin-bottom:15px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.create label{color:var(--text);white-space:nowrap}
+.create input{flex:1;min-width:180px;background:#0b1927;color:var(--text);border:1px solid #365976;padding:12px;border-radius:9px;font:inherit}
+.create input::placeholder{color:#94adbf}
+.create input:focus{outline:2px solid var(--orange);outline-offset:1px}
+.create button{background:var(--blue);color:white;border:1px solid #438ac1;border-radius:9px;padding:12px;font-weight:750;cursor:pointer}
+.create button:hover{background:#2488cf}
+.archived{background:linear-gradient(140deg,#14273b,#0f1e2e);border:1px solid var(--line);border-radius:13px;margin-top:20px;padding:18px}
+.archived h3{margin:0 0 5px}
+.archived p{color:var(--muted);margin:0 0 14px}
+.archived-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-top:1px solid #294158;overflow-wrap:anywhere}
+.archived-row button{background:#203a50;color:#cae7ff;border:1px solid #365976;border-radius:8px;padding:9px;cursor:pointer}
+.message{margin:10px 0;color:#77c0ff;font-weight:650}
 .badge button:disabled,.create button:disabled{opacity:.5;cursor:wait}
+button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+@media(max-width:620px){.wrap{padding:14px}.create{align-items:stretch}.create label{width:100%}.create input{width:100%}.create button{width:100%}.grid{grid-template-columns:1fr}}
 @media print{
- body{background:#fff}
+ :root{color-scheme:light}
+ html,body{background:#fff!important;color:#111!important}
+ .wrap{padding:0}
  .top,.print-one,.manage,.create,.archived,.message{display:none!important}
- .badge{break-inside:avoid;box-shadow:none}
+ .badge{break-inside:avoid;box-shadow:none;background:#fff!important;border:1px solid #ddd!important;color:#111!important}
+ .brand{color:#333!important}
+ .name,.num{color:#111!important}
+ .qr{padding:0}
  body.print-single .badge{display:none!important}
- body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0}
+ body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0!important}
 }
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="wrap">
@@ -3775,6 +3912,26 @@ h1{font-size:30px;margin:4px 0 6px}
  .stage{height:100%;min-height:0}
  h1{font-size:26px}
 }
+
+/* GRIT WMS unified dark shell. Functional scanning/QR graphics retain contrast. */
+:root{color-scheme:dark;--g-bg:#09121e;--g-surface:#142337;--g-line:#30465c;--g-text:#f1f6ff;--g-muted:#9eb5ca;--g-blue:#176eae;--g-orange:#ff9230}
+html,body{background:var(--g-bg)!important;color:var(--g-text)!important}
+body .card,body .panel,body .scanbox,body .stats,body .activeDoc,body #topbar{background:#142337!important;color:var(--g-text)!important;border-color:var(--g-line)!important;box-shadow:none!important}
+body .muted,body .small,body .meta{color:var(--g-muted)!important}
+body h1,body h2,body h3{color:#f3f8fd!important}
+body a{color:#85caff}
+body input,body select,body textarea{background:#0d1d2c!important;color:#ecf5ff!important;border:1px solid #42607a!important;border-radius:9px}
+body input::placeholder{color:#92aec3}
+body button:not(.danger){background:#176eae;color:#fff;border:1px solid #358acc}
+body button.secondary,body .nav a,body a.secondary{background:#233b50!important;color:#e0f0ff!important;border:1px solid #375a75!important}
+body .nav a.active{background:#176eae!important;color:#fff!important}
+body .warning,body .note{background:#35291d!important;color:#ffe0ad!important;border:1px solid #805b34!important}
+body .err,body .bad{background:#40272e!important;color:#ff9da1!important}
+body .ok{background:#173e36!important;color:#81e9b9!important}
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid var(--g-orange)!important;outline-offset:2px}
+
+:root{--bg:#09121e;--panel:#142337;--panel2:#192e43;--text:#f1f6ff;--muted:#9eb5ca;--line:#30465c;--accent:#176eae;--accent2:#233b50}
+body .nav a{color:#e0f0ff!important}
 </style>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head>
 <body>

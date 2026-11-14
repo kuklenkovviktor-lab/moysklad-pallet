@@ -73,6 +73,34 @@ body section.grit-manager-partners-card table{width:100%;border-collapse:collaps
 body section.grit-manager-partners-card th,body section.grit-manager-partners-card td{padding:12px 14px;text-align:left}
 @media(max-width:650px){body section.grit-manager-partners-card{padding:14px!important}}
 
+/* Universal manager visual surfaces. Add new module classes to this shared layer. */
+:root{color-scheme:dark}
+html{background:#09121e!important}
+body form.create,body section.archived,body .create,body .archived,body .dropzone,
+body .upload-area,body .filter-panel,body .summary-card,body .data-card,
+body .summary,body .filterbar,body .form-card,body .control-card{
+ background:linear-gradient(145deg,#16283b,#101c2a)!important;
+ color:#f1f6ff!important;
+ border-color:#30465c!important;
+ box-shadow:none!important;
+}
+body .kpi,body .stat,body .stat-card,body .mini-card,body .count,body .stat-box{
+ background:#1b3045!important;color:#f1f6ff!important;border-color:#345069!important
+}
+body .row-card,body details,body .dropzone,body .scanbox,body .hint{
+ background-color:#172b3e!important;border-color:#30465c!important;color:#e4eef8!important
+}
+body .create label,body .archived p,body .help-text,body .field-note{color:#9eb5ca!important}
+body select,body option,body input,body textarea{color-scheme:dark}
+body .warn,body .warning{background:#35291d!important;color:#ffe0ad!important;border-color:#805b34!important}
+body .error,body .danger-message{background:#41282f!important;color:#ffb9bd!important;border-color:#874853!important}
+body .success{background:#173e36!important;color:#81e9b9!important;border-color:#2c6a57!important}
+body button.archive,body .btn-danger{background:#462b36!important;color:#ffb8bb!important;border-color:#744250!important}
+body img.qr,body .qr img,body .qr canvas{background:#fff!important}
+@media print{
+ body form.create,body section.archived,body .create,body .archived{display:none!important}
+}
+
 /* Printed staff credentials and pallet labels must remain high-contrast on white. */
 @media print{
  :root{color-scheme:light}
