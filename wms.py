@@ -2661,7 +2661,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-off
 }
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="wrap">
- <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div>
+ <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех · 58×40</button></div>
  <form id="createEmployee" class="create"><label for="employeeName"><b>Новый сотрудник</b></label><input id="employeeName" maxlength="80" minlength="2" required placeholder="Имя сотрудника"><button type="submit">Добавить и создать QR</button></form>
  <div id="message" class="message" role="status" aria-live="polite"></div>
  <div id="grid" class="grid"></div>
@@ -2683,7 +2683,7 @@ async function load(){
  const g=document.getElementById('grid');
  g.innerHTML='<div class="status"><b>Загружаю бейджи…</b></div>';
  try{
-  const d=await fetchJson('/api/admin/badges',5000);
+  const d=await fetchJson('/api/admin/badges?refresh='+Date.now(),5000);
   if(!d)return;
   g.innerHTML=d.employees.map(x=>
    '<div class="badge" id="badge_'+esc(x.id)+'">'+
@@ -2691,7 +2691,7 @@ async function load(){
     '<div class="name">'+esc(x.name)+'</div>'+
     '<img class="qr" src="'+x.qr_png+'" alt="QR '+esc(x.name)+'">'+
     '<div class="num">№'+esc(x.badge_number)+'</div>'+
-    '<button type="button" class="print-one" data-employee-id="'+esc(x.id)+'" onclick="printBadge(this.dataset.employeeId)">Печать</button>'+
+    '<button type="button" class="print-one" data-employee-id="'+esc(x.id)+'" onclick="printBadge(this.dataset.employeeId)">Печать 58×40</button>'+
     '<div class="manage"><button type="button" data-action="rename" data-id="'+esc(x.id)+'">Переименовать</button><button type="button" class="archive" data-action="archive" data-id="'+esc(x.id)+'">Удалить</button></div>'+
    '</div>'
   ).join('')||'<div class="status">Активных бейджей нет.</div>';
@@ -2743,22 +2743,31 @@ async function handleBadgeAction(event){
   method='POST';url='/api/admin/badges/'+encodeURIComponent(id)+'/restore';success='Сотрудник восстановлен.';
  }else{return}
  button.disabled=true;
- try{await mutate(url,method,data);await load();info(success)}
- catch(error){info(error.message)}
+ try{
+  const result=await mutate(url,method,data);
+  if(!result)return;
+  if(action==='rename'){
+   if(result.name!==name)throw Error('Сервер не подтвердил новое имя. Изменение не выполнено.');
+   const title=card?.querySelector('.name');
+   if(title)title.textContent=result.name;
+  }
+  await load();
+  if(action==='rename'){
+   const saved=document.getElementById('badge_'+id)?.querySelector('.name')?.textContent;
+   if(saved!==name)throw Error('При обновлении отображается старое имя. Сохранение требует проверки.');
+  }
+  info(success);
+ }catch(error){info(error.message)}
  finally{button.disabled=false}
 }
 function clearPrintSelection(){
  document.body.classList.remove('print-single');
  document.querySelectorAll('.badge.print-target').forEach(el=>el.classList.remove('print-target'));
 }
-function printAllBadges(){clearPrintSelection();window.print()}
+function printAllBadges(){window.open('/manager/badges/labels/all','_blank','noopener')}
 function printBadge(id){
- clearPrintSelection();
- const badge=document.getElementById('badge_'+id);
- if(!badge)return;
- badge.classList.add('print-target');
- document.body.classList.add('print-single');
- window.print();
+ if(!id)return;
+ window.open('/manager/badges/label?id='+encodeURIComponent(id),'_blank','noopener');
 }
 window.addEventListener('afterprint',clearPrintSelection);
 load();
@@ -3304,6 +3313,110 @@ def badges_page():
     return BADGES_PAGE
 
 
+def _thermal_badge_qr(code):
+    """The existing issued badge payload remains unchanged; only print format differs."""
+    import qrcode
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
+                       box_size=12, border=4)
+    qr.add_data(code)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _thermal_badge_page(rows):
+    """One 58x40 mm page per active badge, same physical format as QR cell labels."""
+    from html import escape
+    cards=[]
+    for employee_id,name,number,code in rows:
+        if not code:
+            # New print requests must never generate an unissued credential.
+            continue
+        png=_thermal_badge_qr(code)
+        cards.append(
+            '<div class="sheet"><div class="qr-zone"><img class="qr" alt="QR бейджа" '
+            'src="data:image/png;base64,' + png + '"></div>'
+            '<div class="meta"><div class="brand">GRIT WMS</div>'
+            '<div class="employee">' + escape(str(name),quote=True) + '</div>'
+            '<div class="badge-no">№' + escape(str(number),quote=True) + '</div>'
+            '</div></div>'
+        )
+    if not cards:
+        return Response("Активных бейджей с действующим QR нет",status=404,
+                        mimetype="text/plain")
+    content=''.join(cards)
+    page="""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09121e">
+<title>GRIT WMS · Печать бейджа · 58×40 мм</title>
+<style>
+@page {size:58mm 40mm; margin:0}
+*{box-sizing:border-box}
+:root{color-scheme:dark}
+html,body{margin:0;padding:0;font:14px/1.3 Arial,Helvetica,sans-serif}
+body{background:#09121e;color:#f1f6ff}
+.tools{padding:14px;text-align:center}
+.tools button{padding:11px 19px;background:#176eae;color:#fff;border:1px solid #358acc;border-radius:9px;cursor:pointer;font-weight:700}
+.tools small{display:block;margin-top:8px;color:#9eb5ca}
+.sheet{width:58mm;height:40mm;margin:12px auto;background:white;color:black;
+ display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1.5mm;
+ break-after:page;page-break-after:always}
+.sheet:last-of-type{break-after:auto;page-break-after:auto}
+.qr-zone{width:31mm;height:33mm;flex:none;display:flex;justify-content:center;align-items:center}
+.qr{width:30mm;height:30mm;display:block;image-rendering:pixelated;object-fit:contain}
+.meta{width:23mm;min-width:0;height:34mm;display:flex;flex-direction:column;
+ align-items:center;justify-content:center;text-align:center;gap:2mm;color:#000}
+.brand{font-size:7pt;font-weight:700;letter-spacing:.2pt}
+.employee{font-size:11pt;font-weight:800;line-height:1.12;overflow-wrap:anywhere;word-break:normal;
+ max-width:100%;max-height:19mm;overflow:hidden}
+.badge-no{font-size:12pt;font-weight:800}
+@media print{
+ :root{color-scheme:light}
+ html,body{width:58mm;background:#fff!important;color:#000!important;margin:0;padding:0}
+ .tools{display:none!important}
+ .sheet{margin:0;width:58mm;height:40mm;background:#fff!important;color:#000!important;border:0!important;
+  box-shadow:none!important;break-inside:avoid}
+ .sheet:last-of-type{break-after:auto;page-break-after:auto}
+}
+</style></head><body>
+<div class="tools"><button type="button" onclick="window.print()">Печать · 58×40 мм</button>
+<small>Принтер: 58×40 мм, масштаб 100%, поля 0, без колонтитулов.</small></div>
+""" + content + "</body></html>"
+    response=Response(page,mimetype="text/html")
+    response.headers["Cache-Control"]="no-store"
+    return response
+
+
+@wms_bp.get("/manager/badges/label")
+def admin_print_one_badge():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    employee_id=str(request.args.get("id") or "").strip()
+    if not employee_id:
+        return Response("Укажи сотрудника",status=400,mimetype="text/plain")
+    row=query_one("""SELECT id,name,badge_number,badge_code FROM employees
+        WHERE id=? AND active=1""",(employee_id,))
+    if not row:
+        return Response("Активный бейдж не найден",status=404,mimetype="text/plain")
+    return _thermal_badge_page([row])
+
+
+@wms_bp.get("/manager/badges/labels/all")
+def admin_print_all_badges():
+    ensure_db()
+    if not manager_access():
+        return redirect("/manager-login")
+    rows=query_all("""SELECT id,name,badge_number,badge_code FROM employees
+        WHERE active=1 ORDER BY badge_number,name LIMIT 501""")
+    if len(rows)>500:
+        return Response("Слишком много бейджей за одну печать",status=413,
+                        mimetype="text/plain")
+    return _thermal_badge_page(rows)
+
+
 @wms_bp.get("/api/admin/badges")
 def admin_badges():
     ensure_db()
@@ -3439,14 +3552,22 @@ def admin_rename_badge(employee_id):
                 return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
             if old[0] != name:
                 cur.execute(sql("UPDATE employees SET name=? WHERE id=? AND active=1"),(name,employee_id))
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    return jsonify(error="Изменение имени не сохранилось. Обнови страницу."), 409
                 _badge_audit(cur,employee_id,"rename",old[0],name)
+            cur.execute(sql("SELECT name FROM employees WHERE id=? AND active=1"),(employee_id,))
+            persisted_name = cur.fetchone()
+            if not persisted_name or persisted_name[0] != name:
+                conn.rollback()
+                return jsonify(error="Сервер не подтвердил сохранение имени"), 409
             conn.commit()
         except Exception:
             conn.rollback()
             return jsonify(error="Не удалось переименовать сотрудника"), 503
         finally:
             cur.close()
-    return jsonify(ok=True)
+    return jsonify(ok=True,id=employee_id,name=persisted_name[0])
 
 
 @wms_bp.post("/api/admin/badges/<employee_id>/archive")
