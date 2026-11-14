@@ -3115,6 +3115,9 @@ def admin_badges():
     rows = query_all(
         "SELECT id, name, badge_number, badge_code FROM employees WHERE active = 1 ORDER BY badge_number, name"
     )
+    archived_rows = query_all(
+        "SELECT id,name,badge_number FROM employees WHERE active=0 ORDER BY badge_number,name"
+    )
     employees = []
     for employee_id, name, badge_number, badge_code in rows:
         code = str(badge_code or "").strip()
@@ -3142,7 +3145,178 @@ def admin_badges():
             "qr_png": qr_png,
         })
 
-    return jsonify(employees=employees)
+    return jsonify(employees=employees, archived=[
+        {"id": x[0], "name": x[1], "badge_number": x[2]} for x in archived_rows
+    ])
+
+
+def _badge_audit_table(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS employee_badge_audit (
+        id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        old_name TEXT,
+        new_name TEXT,
+        recorded_at TEXT NOT NULL
+    )""")
+
+
+def _badge_audit(cur, employee_id, action, old_name=None, new_name=None):
+    cur.execute(sql("""INSERT INTO employee_badge_audit
+        (id,employee_id,action,old_name,new_name,recorded_at)
+        VALUES (?,?,?,?,?,?)"""),
+        (str(uuid.uuid4()),employee_id,action,old_name,new_name,now_iso()))
+
+
+def _badge_valid_name(value):
+    name = str(value or "").strip()
+    if not 2 <= len(name) <= 80 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return None
+    return name
+
+
+@wms_bp.post("/api/admin/badges")
+def admin_create_badge():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    data = request.get_json(silent=True) or {}
+    name = _badge_valid_name(data.get("name"))
+    if not name:
+        return jsonify(error="Имя сотрудника: от 2 до 80 символов, без управляющих символов"), 400
+    employee_id = str(uuid.uuid4())
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            if DATABASE_URL:
+                # Serialize number assignment across API processes.
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT id FROM employees WHERE active=1 AND LOWER(name)=LOWER(?) LIMIT 1"),(name,))
+            if cur.fetchone():
+                return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
+            cur.execute("SELECT COALESCE(MAX(badge_number),0) FROM employees")
+            badge_number=int(cur.fetchone()[0] or 0)+1
+            cur.execute(sql("""INSERT INTO employees
+                (id,name,rate,target,active,role,badge_number,badge_code,scanner_code)
+                VALUES (?,?,?,?,1,'staff',?,?,?)"""),
+                (employee_id,name,RATE,TARGET,badge_number,
+                 make_badge_code(employee_id),make_badge_scanner_code(employee_id)))
+            _badge_audit(cur,employee_id,"create",None,name)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось создать сотрудника"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True,id=employee_id,badge_number=badge_number), 201
+
+
+@wms_bp.patch("/api/admin/badges/<employee_id>")
+def admin_rename_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    name = _badge_valid_name((request.get_json(silent=True) or {}).get("name"))
+    if not name:
+        return jsonify(error="Имя сотрудника: от 2 до 80 символов, без управляющих символов"), 400
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name FROM employees WHERE id=? AND active=1"),(employee_id,))
+            old=cur.fetchone()
+            if not old:
+                return jsonify(error="Активный сотрудник не найден"), 404
+            cur.execute(sql("SELECT 1 FROM employees WHERE active=1 AND id<>? AND LOWER(name)=LOWER(?) LIMIT 1"),(employee_id,name))
+            if cur.fetchone():
+                return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
+            if old[0] != name:
+                cur.execute(sql("UPDATE employees SET name=? WHERE id=? AND active=1"),(name,employee_id))
+                _badge_audit(cur,employee_id,"rename",old[0],name)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось переименовать сотрудника"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
+
+
+@wms_bp.post("/api/admin/badges/<employee_id>/archive")
+def admin_archive_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name,role,active FROM employees WHERE id=?"),(employee_id,))
+            row=cur.fetchone()
+            if not row:
+                return jsonify(error="Сотрудник не найден"), 404
+            if row[1] == "manager":
+                return jsonify(error="Бейдж руководителя архивировать нельзя"), 403
+            if not row[2]:
+                conn.commit()
+                return jsonify(ok=True,already_archived=True)
+            cur.execute(sql("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL LIMIT 1"),(employee_id,))
+            if cur.fetchone():
+                return jsonify(error="У сотрудника открыта смена. Сначала закрой её через кабинет руководителя."), 409
+            cur.execute(sql("UPDATE employees SET active=0 WHERE id=? AND active=1"),(employee_id,))
+            _badge_audit(cur,employee_id,"archive",row[0],None)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось архивировать бейдж"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
+
+
+@wms_bp.post("/api/admin/badges/<employee_id>/restore")
+def admin_restore_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name,active FROM employees WHERE id=?"),(employee_id,))
+            row=cur.fetchone()
+            if not row:
+                return jsonify(error="Сотрудник не найден"), 404
+            if row[1]:
+                conn.commit()
+                return jsonify(ok=True,already_active=True)
+            cur.execute(sql("SELECT 1 FROM employees WHERE active=1 AND LOWER(name)=LOWER(?) LIMIT 1"),(row[0],))
+            if cur.fetchone():
+                return jsonify(error="Такое имя уже занято: сначала переименуй активного сотрудника"), 409
+            cur.execute(sql("UPDATE employees SET active=1 WHERE id=? AND active=0"),(employee_id,))
+            _badge_audit(cur,employee_id,"restore",None,row[0])
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось восстановить бейдж"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
 
 
 @wms_bp.get("/api/stats/employees")
