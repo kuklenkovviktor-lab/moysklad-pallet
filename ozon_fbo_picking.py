@@ -578,14 +578,22 @@ def manager_progress():
                "qty":r[4],"status":r[5],"employee_id":r[6],"employee":r[7],
                "completed_at":r[8],"supply":r[9],"supply_id":r[10],"picked":r[11]}
               for r in rows]
+    by_cargo = {entry["id"]: [] for entry in result}
+    # Batch reads instead of one DB query for every cargo in the dashboard.
+    ids = list(by_cargo)
+    for offset in range(0, len(ids), 300):
+        batch = ids[offset:offset + 300]
+        placeholders = ",".join("?" for _ in batch)
+        detail_rows = query_all("""SELECT sh.cargo_id,sh.item_id,i.article,sh.missing_qty,
+            sh.status,sh.reason,sh.manager_reason FROM ozon_fbo_shortages sh
+            JOIN ozon_fbo_items i ON i.id=sh.item_id
+            WHERE sh.cargo_id IN (""" + placeholders + ")", tuple(batch))
+        for x in detail_rows:
+            by_cargo[x[0]].append({"item_id": x[1], "article": x[2],
+                "missing": x[3], "status": x[4], "reason": x[5],
+                "manager_reason": x[6]})
     for entry in result:
-        entry["shortages"] = [
-            {"item_id": x[0], "article": x[1], "missing": x[2], "status": x[3],
-             "reason": x[4], "manager_reason": x[5]}
-            for x in query_all("""SELECT sh.item_id,i.article,sh.missing_qty,sh.status,
-                sh.reason,sh.manager_reason FROM ozon_fbo_shortages sh
-                JOIN ozon_fbo_items i ON i.id=sh.item_id WHERE sh.cargo_id=?""",
-                (entry["id"],))]
+        entry["shortages"] = by_cargo[entry["id"]]
     return jsonify(cargo=result)
 
 
