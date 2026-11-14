@@ -208,6 +208,50 @@ def picking_manager_screen():
     return MANAGER_PICK_HTML
 
 
+@fbo_picking_bp.get("/api/ozon-fbo/pick/overview")
+def worker_cargo_overview():
+    """Mobile picking list: authoritative claims, progress and position states."""
+    employee = _worker()
+    if not employee:
+        return jsonify(error="Войди по бейджу"), 401
+    _ensure_picking_db()
+    supplies = query_all("""
+        SELECT id,title,places,qty FROM ozon_fbo_supplies
+        ORDER BY created_at DESC LIMIT 60
+    """)
+    result = []
+    for supply in supplies:
+        cargo_rows = query_all("""
+            SELECT c.id,c.barcode,c.destination,c.label,c.planned_qty,c.status,
+                   c.claimed_employee_id,e.name,COALESCE(SUM(i.picked_qty),0)
+            FROM ozon_fbo_cargo c
+            LEFT JOIN employees e ON e.id=c.claimed_employee_id
+            LEFT JOIN ozon_fbo_items i ON i.cargo_id=c.id
+            WHERE c.supply_id=?
+            GROUP BY c.id,c.barcode,c.destination,c.label,c.planned_qty,
+                     c.status,c.claimed_employee_id,e.name
+            ORDER BY c.destination,c.label,c.barcode
+        """, (supply[0],))
+        cargo = []
+        for row in cargo_rows:
+            items = query_all("""
+                SELECT article,barcode,planned_qty,picked_qty
+                FROM ozon_fbo_items WHERE cargo_id=? ORDER BY article,barcode
+            """, (row[0],))
+            cargo.append({
+                "id":row[0],"barcode":row[1],"destination":row[2],
+                "label":row[3],"qty":row[4],"status":row[5],
+                "employee_id":row[6],"employee":row[7],
+                "own":row[6] == employee["id"],
+                "picked":row[8],
+                "items":[{"article":it[0],"barcode":it[1],"qty":it[2],
+                          "picked":it[3],"remaining":it[2]-it[3]} for it in items],
+            })
+        result.append({"id":supply[0],"title":supply[1],"places":supply[2],
+                       "qty":supply[3],"cargo":cargo})
+    return jsonify(supplies=result)
+
+
 @fbo_picking_bp.get("/api/ozon-fbo/pick/active")
 def active_cargo():
     employee = _worker()

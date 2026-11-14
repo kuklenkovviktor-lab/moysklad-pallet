@@ -140,28 +140,67 @@ html,body{background:var(--g-bg);color:var(--g-text)}
 h1,h2{color:#f1f6ff}a{color:#77c0ff}.small{color:var(--g-muted)}
 .item{border-color:#30465c}th,td{color:#e4eef8;border-color:#2b4255}
 a:focus-visible,summary:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
+.item summary{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;min-height:44px}
+.cargo-title{flex:1;min-width:140px}
+.cargo-badge{display:inline-block;padding:5px 9px;border:1px solid;border-radius:8px;font-size:12px;font-weight:750}
+.cargo-badge.free{background:#19344c;border-color:#39668b;color:#c4e9ff}
+.cargo-badge.mine{background:#51351c;border-color:#a56a32;color:#ffd19d}
+.cargo-badge.busy{background:#493229;border-color:#8b5541;color:#ffb49c}
+.cargo-badge.done{background:#173b35;border-color:#2e705b;color:#81e9b9}
+.cargo-progress{height:7px;background:#263c50;border-radius:9px;overflow:hidden;margin:10px 0}
+.cargo-progress>div{height:100%;background:#ff9230}
+.cargo-done .cargo-progress>div{background:#46c395}
+.cargo-action{display:inline-block;padding:10px 12px;border-radius:9px;background:#176eae;color:#fff;font-weight:750;text-decoration:none}
+.cargo-positions{border:1px solid #30465c;border-radius:10px;overflow:hidden}
+.cargo-position{display:flex;align-items:center;gap:10px;padding:10px 9px;border-top:1px solid #30465c}
+.cargo-position:first-child{border-top:0}
+.position-pending{background:#142337}
+.position-done{background:#173b35;color:#a4dfc9}
+.position-icon{font-size:20px;color:#ff9230;min-width:18px}
+.position-done .position-icon{color:#81e9b9}
+.position-name{min-width:0;flex:1;overflow-wrap:anywhere}
+.position-done .position-name b{color:#a4dfc9}
+.position-count{font-variant-numeric:tabular-nums;font-weight:750;white-space:nowrap}
+@media(max-width:620px){.item summary{align-items:flex-start}.cargo-badge{font-size:11px}.cargo-position{padding:12px 8px}}
 </style></head><body><main><a href="/fbs">← Рабочая панель</a>
 <h1>📦 Ozon FBO</h1><p class="small">Выбери грузоместо и начни сборку со сканером. Прогресс сохраняется на сервере.</p>
 <p><a href="/ozon-fbo/pick">▶ Продолжить мою сборку</a></p>
 <div id="list">Загрузка…</div>
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function cargoState(p){
+ if(p.status==='done')return {kind:'done',label:'✓ Собрано',blocked:true};
+ if(p.status==='started'&&p.own)return {kind:'mine',label:'● Моя сборка',blocked:false};
+ if(p.status==='started')return {kind:'busy',label:'● Собирает '+(p.employee||'сотрудник'),blocked:true};
+ return {kind:'free',label:'○ Свободно',blocked:false};
+}
 async function load(){
- const r=await fetch('/api/ozon-fbo/supplies',{cache:'no-store'}),d=await r.json();
+ const r=await fetch('/api/ozon-fbo/pick/overview',{cache:'no-store'}),d=await r.json();
  if(!r.ok)throw Error(d.error||'Не удалось загрузить задания');
  const list=document.getElementById('list');
- list.innerHTML=d.supplies.length?d.supplies.map(s=>'<div class="card"><h2>'+esc(s.title)+'</h2><div class="small">'+esc(s.places)+' грузомест · '+esc(s.qty)+' шт. по плану</div><div id="s-'+esc(s.id)+'">Загрузка грузомест…</div></div>').join(''):'<div class="card">Активных заданий Ozon FBO нет.</div>';
- for(const s of d.supplies){
-  try{
-   const res=await fetch('/api/ozon-fbo/supplies/'+encodeURIComponent(s.id),{cache:'no-store'});
-   const data=await res.json();if(!res.ok)throw Error(data.error||'Ошибка');
-   document.getElementById('s-'+s.id).innerHTML=data.cargo.map(p=>
-    '<details class="item"><summary>'+esc(p.destination)+' · '+esc(p.label)+' · '+esc(p.qty)+' шт.</summary><div class="small">ШК грузоместа: '+esc(p.barcode)+'</div><p><a href="/ozon-fbo/pick?cargo_id='+encodeURIComponent(p.id)+'">▶ Открыть сборку грузоместа →</a></p><table><thead><tr><th>Артикул</th><th>ШК</th><th>План</th></tr></thead><tbody>'+
-    p.items.map(i=>'<tr><td>'+esc(i.article)+'</td><td>'+esc(i.barcode)+'</td><td>'+esc(i.qty)+'</td></tr>').join('')+'</tbody></table></details>').join('');
-  }catch(e){document.getElementById('s-'+s.id).textContent=e.message}
- }
+ const expanded=new Set([...list.querySelectorAll('details[open][data-cargo]')].map(e=>e.dataset.cargo));
+ list.innerHTML=d.supplies.length?d.supplies.map(s=>
+  '<div class="card"><h2>'+esc(s.title)+'</h2><div class="small">'+esc(s.places)+' грузомест · '+esc(s.qty)+' шт. по плану</div>'+
+  s.cargo.map(p=>{
+   const state=cargoState(p),pct=p.qty?Math.min(100,100*p.picked/p.qty):0;
+   const ordered=[...p.items].sort((a,b)=>Number(a.remaining===0)-Number(b.remaining===0));
+   const action=state.blocked?'<p class="small">'+(state.kind==='busy'?'Занято другим сотрудником. Повторная сборка заблокирована.':'Грузоместо уже завершено.')+'</p>':
+     '<p><a class="cargo-action" href="/ozon-fbo/pick?cargo_id='+encodeURIComponent(p.id)+'">'+(state.kind==='mine'?'▶ Продолжить мою сборку':'▶ Начать сборку')+'</a></p>';
+   return '<details class="item cargo-'+state.kind+'" data-cargo="'+esc(p.id)+'" '+(expanded.has(p.id)?'open':'')+'>'+
+    '<summary><span class="cargo-title">'+esc(p.destination)+' · '+esc(p.label)+'</span><span class="cargo-badge '+state.kind+'">'+esc(state.label)+'</span></summary>'+
+    '<div class="small">ШК: '+esc(p.barcode)+' · Собрано '+esc(p.picked)+' из '+esc(p.qty)+' шт.</div>'+
+    '<div class="cargo-progress" role="progressbar" aria-valuenow="'+pct.toFixed(0)+'" aria-valuemin="0" aria-valuemax="100"><div style="width:'+pct.toFixed(1)+'%"></div></div>'+
+    action+
+    '<div class="cargo-positions">'+ordered.map(i=>
+      '<div class="cargo-position '+(i.remaining===0?'position-done':'position-pending')+'">'+
+      '<span class="position-icon" aria-hidden="true">'+(i.remaining===0?'✓':'○')+'</span><div class="position-name"><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div></div>'+
+      '<span class="position-count">'+esc(i.picked)+'/'+esc(i.qty)+'</span></div>').join('')+'</div></details>';
+  }).join('')+'</div>'
+ ).join(''):'<div class="card">Активных заданий Ozon FBO нет.</div>';
 }
 load().catch(e=>{document.getElementById('list').textContent=e.message});
+setInterval(()=>{if(!document.hidden)load().catch(()=>{})},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load().catch(()=>{})});
 </script></main></body></html>"""
 
 

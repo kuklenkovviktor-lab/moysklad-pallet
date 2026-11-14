@@ -121,6 +121,52 @@ class FboPickingTests(unittest.TestCase):
         self.assertEqual(claimed.json["cargo"]["picked"],1)
         self.assertEqual(self.scan(4).status_code,200)
 
+    def test_worker_overview_shows_claims_and_live_position_progress(self):
+        route = "/api/ozon-fbo/pick/overview"
+        def current():
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 200, response.json)
+            return next(c for s in response.json["supplies"]
+                        for c in s["cargo"] if c["id"] == self.cid)
+
+        initial = current()
+        self.assertEqual(initial["status"], "planned")
+        self.assertIsNone(initial["employee_id"])
+        self.assertEqual(initial["picked"], 0)
+        self.assertEqual(initial["items"][0]["remaining"], 5)
+
+        self.assertEqual(self.post("claim", {}).status_code, 200)
+        self.assertEqual(self.scan(3).status_code, 200)
+        own = current()
+        self.assertEqual(own["status"], "started")
+        self.assertTrue(own["own"])
+        self.assertEqual(own["picked"], 3)
+        self.assertEqual(own["items"][0]["picked"], 3)
+        self.assertEqual(own["items"][0]["remaining"], 2)
+
+        self.as_employee("ilya")
+        occupied = current()
+        self.assertEqual(occupied["employee_id"], "anton")
+        self.assertFalse(occupied["own"])
+        self.assertEqual(occupied["picked"], 3)
+        self.assertEqual(self.post("claim", {}).status_code, 409)
+
+        self.as_employee("anton")
+        self.assertEqual(self.scan(2).status_code, 200)
+        finished_position = current()["items"][0]
+        self.assertEqual(finished_position["remaining"], 0)
+        self.assertEqual(self.post("complete", {
+            "cargo_barcode": "1000000000063374464"
+        }).status_code, 200)
+        self.assertEqual(current()["status"], "done")
+
+    def test_worker_overview_requires_badge(self):
+        with self.client.session_transaction() as ses:
+            ses.clear()
+        response = self.client.get("/api/ozon-fbo/pick/overview")
+        self.assertEqual(response.status_code, 401)
+
+
     def test_state_is_server_side_after_new_browser(self):
         self.post("claim",{})
         self.scan(2)
