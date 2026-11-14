@@ -95,7 +95,7 @@ class BadgeManagementTests(unittest.TestCase):
         self.assertEqual(created.status_code,201)
         self.assertEqual(self.create("ТЕСТОВОЕ ИМЯ").status_code,409)
         self.assertEqual(self.create(" ").status_code,400)
-        self.assertEqual(self.create("A\\nB").status_code,400)
+        self.assertEqual(self.create("A"+chr(10)+"B").status_code,400)
         with self.app.test_client() as stranger:
             self.assertEqual(stranger.post("/api/admin/badges",json={"name":"Неавторизованный"}).status_code,403)
             self.assertEqual(stranger.patch("/api/admin/badges/"+created.json["id"],json={"name":"Чужой"}).status_code,403)
