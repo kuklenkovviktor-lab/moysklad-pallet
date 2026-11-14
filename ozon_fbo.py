@@ -10,6 +10,8 @@ import uuid
 
 from flask import Blueprint, jsonify, redirect, request
 from ozon_fbo_parser import parse_ozon_xlsx
+from ozon_fbo_catalog_validation import (CatalogUnavailable, check_catalog,
+    resolved_manifest, resolved_plan_hash)
 from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 ozon_fbo_bp = Blueprint("ozon_fbo", __name__)
@@ -249,6 +251,14 @@ def _db():
                 UNIQUE (cargo_id, barcode, article),
                 FOREIGN KEY (cargo_id) REFERENCES ozon_fbo_cargo(id)
             )""",
+            """CREATE TABLE IF NOT EXISTS ozon_fbo_import_corrections (
+                id TEXT PRIMARY KEY, supply_id TEXT NOT NULL,
+                cargo_barcode TEXT NOT NULL, article TEXT NOT NULL,
+                source_cell TEXT NOT NULL, old_barcode TEXT NOT NULL,
+                new_barcode TEXT NOT NULL, actor TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (supply_id) REFERENCES ozon_fbo_supplies(id)
+            )""",
             """CREATE TABLE IF NOT EXISTS ozon_fbo_import_warnings (
                 id TEXT PRIMARY KEY,
                 supply_id TEXT NOT NULL,
@@ -363,7 +373,13 @@ def preview():
         data = _manifest_from_request()
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
-    return jsonify(**_response_summary(data))
+    if data["errors"]:
+        return jsonify(**_response_summary(data), discrepancies=[])
+    try:
+        issues = check_catalog(data)
+    except CatalogUnavailable as exc:
+        return jsonify(error=str(exc)), 503
+    return jsonify(**_response_summary(data), discrepancies=issues)
 
 
 @ozon_fbo_bp.post("/api/manager/ozon-fbo/import")
@@ -385,10 +401,20 @@ def import_plan():
         return jsonify(error="Файл изменился после предварительной проверки. Проверь Excel снова."), 409
     if plan["warnings"] and request.form.get("accept_duplicates") != "1":
         return jsonify(error="Подтверди исключение повторных строк из плана."), 409
+    try:
+        decisions = json.loads(request.form.get("catalog_decisions") or "{}")
+        excluded = json.loads(request.form.get("excluded_cargo") or "[]")
+        issues = check_catalog(plan)
+        safe_cargo, corrections = resolved_manifest(plan, issues, decisions, excluded)
+    except CatalogUnavailable as exc:
+        return jsonify(error=str(exc)), 503
+    except (ValueError, TypeError) as exc:
+        return jsonify(error=str(exc)), 409
+    final_hash = resolved_plan_hash(safe_cargo)
     duplicate = query_one("""
         SELECT id, title FROM ozon_fbo_supplies
         WHERE source_hash = ? OR plan_hash = ? LIMIT 1
-    """, (plan["source_hash"], plan["plan_hash"]))
+    """, (plan["source_hash"], final_hash))
     if duplicate:
         return jsonify(error="Такая поставка уже загружена: " + duplicate[1], existing_id=duplicate[0]), 409
 
@@ -404,9 +430,10 @@ def import_plan():
                  places,qty,lines_count,warning_count)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """), (sid, title, plan["filename"], plan["source_hash"],
-                    plan["plan_hash"], now_iso(), actor, plan["places"], plan["qty"],
-                    plan["unique_rows"], len(plan["warnings"])))
-            for place in plan["cargo"]:
+                    final_hash, now_iso(), actor, len(safe_cargo),
+                    sum(p["qty"] for p in safe_cargo),
+                    sum(len(p["items"]) for p in safe_cargo), len(plan["warnings"])))
+            for place in safe_cargo:
                 cid = str(uuid.uuid4())
                 cur.execute(sql("""
                     INSERT INTO ozon_fbo_cargo
@@ -421,6 +448,14 @@ def import_plan():
                         VALUES (?,?,?,?,?,?)
                     """), (str(uuid.uuid4()), cid, item["barcode"], item["article"],
                             item["qty"], item["source"]))
+            for change in corrections:
+                cur.execute(sql("""
+                    INSERT INTO ozon_fbo_import_corrections
+                    (id,supply_id,cargo_barcode,article,source_cell,old_barcode,
+                     new_barcode,actor,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """), (str(uuid.uuid4()),sid,change["cargo"],change["article"],
+                      change["source"],change["old"],change["new"],actor,now_iso()))
             for warning in plan["warnings"]:
                 cur.execute(sql("""
                     INSERT INTO ozon_fbo_import_warnings (id,supply_id,warning) VALUES (?,?,?)
@@ -432,7 +467,9 @@ def import_plan():
             return jsonify(error="Не удалось сохранить план; возможно, поставку уже импортировали. Обнови список."), 409
         finally:
             cur.close()
-    return jsonify(ok=True, id=sid, places=plan["places"], qty=plan["qty"]), 201
+    return jsonify(ok=True, id=sid, places=len(safe_cargo),
+                   qty=sum(p["qty"] for p in safe_cargo),
+                   corrections=len(corrections), excluded=len(excluded)), 201
 
 
 @ozon_fbo_bp.get("/api/manager/ozon-fbo/supplies")
