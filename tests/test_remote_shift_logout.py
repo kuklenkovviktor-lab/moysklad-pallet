@@ -69,10 +69,9 @@ class RemoteShiftLogoutTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/auth/me").status_code,401)
 
     def test_closed_shift_rejects_fresh_fbs_scan(self):
-        from fbs_skip_authorization import record_pending_item
         from fbs_transactions import close_shift
         from wms import query_one
-        record_pending_item(self.shift_id,self.employee,"PRODUCT-TEST","SKU","Test")
+        # Revocation is checked before any pending-item or activity validation.
         close_shift(self.shift_id,self.employee)
         response=self.client.post("/api/fbs/scan",json={
             "shift_id":self.shift_id,"request_id":str(uuid.uuid4()),
