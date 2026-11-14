@@ -3257,8 +3257,8 @@ def admin_create_badge():
             else:
                 cur.execute("BEGIN IMMEDIATE")
             _badge_audit_table(cur)
-            cur.execute(sql("SELECT id FROM employees WHERE active=1 AND LOWER(name)=LOWER(?) LIMIT 1"),(name,))
-            if cur.fetchone():
+            cur.execute("SELECT name FROM employees WHERE active=1")
+            if any(str(r[0]).casefold() == name.casefold() for r in cur.fetchall()):
                 return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
             cur.execute("SELECT COALESCE(MAX(badge_number),0) FROM employees")
             badge_number=int(cur.fetchone()[0] or 0)+1
@@ -3297,8 +3297,8 @@ def admin_rename_badge(employee_id):
             old=cur.fetchone()
             if not old:
                 return jsonify(error="Активный сотрудник не найден"), 404
-            cur.execute(sql("SELECT 1 FROM employees WHERE active=1 AND id<>? AND LOWER(name)=LOWER(?) LIMIT 1"),(employee_id,name))
-            if cur.fetchone():
+            cur.execute(sql("SELECT name FROM employees WHERE active=1 AND id<>?"),(employee_id,))
+            if any(str(r[0]).casefold() == name.casefold() for r in cur.fetchall()):
                 return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
             if old[0] != name:
                 cur.execute(sql("UPDATE employees SET name=? WHERE id=? AND active=1"),(name,employee_id))
@@ -3368,8 +3368,8 @@ def admin_restore_badge(employee_id):
             if row[1]:
                 conn.commit()
                 return jsonify(ok=True,already_active=True)
-            cur.execute(sql("SELECT 1 FROM employees WHERE active=1 AND LOWER(name)=LOWER(?) LIMIT 1"),(row[0],))
-            if cur.fetchone():
+            cur.execute("SELECT name FROM employees WHERE active=1")
+            if any(str(r[0]).casefold() == str(row[0]).casefold() for r in cur.fetchall()):
                 return jsonify(error="Такое имя уже занято: сначала переименуй активного сотрудника"), 409
             cur.execute(sql("UPDATE employees SET active=1 WHERE id=? AND active=0"),(employee_id,))
             _badge_audit(cur,employee_id,"restore",None,row[0])
