@@ -7,6 +7,8 @@ import os
 import hmac
 import json
 import secrets
+from datetime import datetime, timezone
+import requests
 from html import escape
 
 from flask import Blueprint, Response, jsonify, redirect, request, session
@@ -66,6 +68,55 @@ def integrations_list_api():
     return jsonify(integrations=_catalog(), secrets_exposed=False)
 
 
+def _moysklad_health():
+    """One explicit read-only probe. Never return credentials or upstream body."""
+    token = os.getenv("MOYSKLAD_TOKEN", "").strip()
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if not token:
+        return {"state": "unconfigured", "label": "Не настроено",
+                "checked_at": checked_at, "details": "Токен МойСклад не задан."}
+    try:
+        response = requests.get(
+            "https://api.moysklad.ru/api/remap/1.2/entity/product",
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+            params={"limit": 1},
+            timeout=8,
+            allow_redirects=False,
+        )
+    except (requests.Timeout, requests.ConnectionError):
+        return {"state": "unavailable", "label": "Нет соединения",
+                "checked_at": checked_at, "details": "МойСклад не ответил. Проверь сеть и повтори проверку."}
+    except requests.RequestException:
+        return {"state": "unavailable", "label": "Ошибка проверки",
+                "checked_at": checked_at, "details": "Запрос к МойСклад не выполнен."}
+    if response.status_code == 200:
+        try:
+            valid = isinstance(response.json().get("rows"), list)
+        except (ValueError, AttributeError):
+            valid = False
+        if valid:
+            return {"state": "connected", "label": "Подключено · API работает",
+                    "checked_at": checked_at, "details": "Каталог товаров доступен для чтения."}
+        return {"state": "unavailable", "label": "Неожиданный ответ",
+                "checked_at": checked_at, "details": "Ответ API не соответствует ожидаемому формату."}
+    if response.status_code in (401, 403):
+        return {"state": "unauthorized", "label": "Нет доступа к API",
+                "checked_at": checked_at, "details": "Проверь права или актуальность токена."}
+    if response.status_code == 429:
+        return {"state": "unavailable", "label": "Лимит запросов",
+                "checked_at": checked_at, "details": "МойСклад ограничил частоту запросов. Повтори позже."}
+    return {"state": "unavailable", "label": "API не отвечает штатно",
+            "checked_at": checked_at, "details": "МойСклад вернул ошибку при проверке."}
+
+
+@integrations_bp.post("/api/manager/integrations/moysklad/check")
+def moysklad_connection_check():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    # The request is explicitly triggered from the manager UI; does not mutate catalog.
+    return jsonify(_moysklad_health())
+
+
 @integrations_bp.get("/manager/integrations")
 def integrations_page():
     if not manager_access():
@@ -73,18 +124,22 @@ def integrations_page():
     cards = []
     for item in _catalog():
         if item["adapter"] == "existing":
-            status = "Действующие настройки найдены" if item["configured"] else "Ключ не настроен"
-            details = "Использует существующую конфигурацию GRIT. Проверка соединения и управление ключами пока не включены."
+            status = "Настройки найдены · не проверено" if item["configured"] else "Ключ не настроен"
+            details = "Использует существующую конфигурацию GRIT. Подключение проверяется по запросу руководителя, ключи не отображаются."
         else:
             status = "Адаптер запланирован"
             details = "Интеграция ещё не реализована. Подключение и ввод ключей станут доступны после разработки адаптера."
+        extra = ('<div class="health-controls"><button id="checkMoysklad" type="button">Проверить соединение</button>'
+                 '<div id="moyskladResult" class="health-result" role="status" aria-live="polite">'
+                 'Проверка ещё не выполнялась.</div></div>') if item["id"] == "moysklad" else ""
         cards.append(
             '<article class="card"><div class="between"><h2>' + escape(item["name"]) +
-            '</h2><span class="status">' + escape(status) + '</span></div><p>' +
-            escape(item["purpose"]) + '</p><small>' + escape(details) + '</small></article>'
+            '</h2><span class="status" id="' + escape(item["id"]) + '-status">' + escape(status) + '</span></div><p>' +
+            escape(item["purpose"]) + '</p><small>' + escape(details) + '</small>' + extra + '</article>'
         )
     html = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09121e">
 <title>GRIT WMS · Интеграции</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#e8edf2;color:#203247;font:15px Arial,sans-serif}
@@ -95,12 +150,55 @@ a{color:#345a73;text-decoration:none;font-weight:700}
 .card{background:#f8fafc;border:1px solid #d6e0e7;border-radius:12px;padding:20px}
 .between{display:flex;align-items:start;justify-content:space-between;gap:8px;flex-wrap:wrap}
 h1{margin:8px 0}h2{margin:0;font-size:19px}.status{background:#e7edf2;border-radius:6px;padding:6px;font-size:12px}
-p{line-height:1.5}small,.muted{color:#607388;line-height:1.5}.notice{padding:14px;border-left:3px solid #48647a;background:#f8fafc}
+p{line-height:1.5}small,.muted{color:#9eb5ca;line-height:1.5}.notice{padding:14px;border-left:3px solid #176eae;background:#142337}
+:root{color-scheme:dark}
+html,body{background:#09121e;color:#f1f6ff}
+.card{background:linear-gradient(145deg,#16283b,#101c2a);border-color:#30465c}
+a{color:#81c8ff}.status{background:#233b50;color:#cde7fa;border:1px solid #365976}
+button{background:#176eae;color:#fff;border:1px solid #358acc;border-radius:9px;padding:11px 14px;font-weight:700;cursor:pointer;min-height:42px}
+button:disabled{opacity:.55;cursor:wait}
+button:hover{background:#2488cf}
+button:focus-visible,a:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
+.health-controls{margin-top:16px;display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.health-result{color:#9eb5ca;font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.health-result.connected{color:#81e9b9}.health-result.unavailable,.health-result.unauthorized{color:#ffb68d}
+.health-result.unconfigured{color:#a7bdd0}
+.status.connected{background:#173b35;color:#81e9b9;border-color:#2e705b}
+.status.unavailable,.status.unauthorized{background:#463126;color:#ffb68d;border-color:#81583d}
+@media(max-width:620px){main{margin:18px auto;padding:0 12px}.card{padding:16px}.health-controls button{width:100%}}
 </style></head><body><main><header><div><div class="muted">GRIT WMS / Настройки</div>
 <h1>Интеграции</h1></div><a href="/manager">← Панель управления</a></header>
 <div class="notice">Первый этап: реестр интеграций. Токены не отображаются и не сохраняются на этой странице.
 Новые сервисы нельзя подключить до реализации и проверки их адаптеров. Уже работающие соединения не изменены.</div>
-<p><a href="/manager/integrations/lab">🧪 Открыть лабораторию маркетплейсов (без API-ключей)</a></p><p><a href="/manager/integrations/http">🌐 HTTP-адаптеры и журнал синхронизации (тестовый контур)</a></p>\n<section class="grid">""" + "".join(cards) + """</section></main></body></html>"""
+<p><a href="/manager/integrations/lab">🧪 Открыть лабораторию маркетплейсов (без API-ключей)</a></p><p><a href="/manager/integrations/http">🌐 HTTP-адаптеры и журнал синхронизации (тестовый контур)</a></p>\n<section class="grid">""" + "".join(cards) + """</section>
+<script>
+const check=document.getElementById('checkMoysklad');
+if(check){
+ check.addEventListener('click',async()=>{
+  if(check.disabled)return;
+  check.disabled=true;
+  const output=document.getElementById('moyskladResult');
+  const badge=document.getElementById('moysklad-status');
+  output.textContent='Проверяем доступ к каталогу…';output.className='health-result';
+  try{
+   const r=await fetch('/api/manager/integrations/moysklad/check',{
+    method:'POST',cache:'no-store',credentials:'same-origin',
+    headers:{'Accept':'application/json'}
+   });
+   const data=await r.json();
+   if(!r.ok)throw Error(data.error||'Не удалось проверить подключение');
+   const state=['connected','unconfigured','unauthorized','unavailable'].includes(data.state)?data.state:'unavailable';
+   badge.textContent=data.label;badge.className='status '+state;
+   output.className='health-result '+state;
+   const date=data.checked_at?new Date(data.checked_at).toLocaleString('ru-RU'):'';
+   output.textContent=data.details+(date?' · Проверено: '+date:'');
+  }catch(e){
+   output.className='health-result unavailable';
+   output.textContent='Не удалось выполнить проверку. '+e.message;
+  }finally{check.disabled=false}
+ });
+}
+</script></main></body></html>"""
     return Response(html, content_type="text/html; charset=utf-8")
 
 
