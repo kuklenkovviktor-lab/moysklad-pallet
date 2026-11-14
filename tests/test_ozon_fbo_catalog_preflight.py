@@ -153,7 +153,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(response.json["corrections"], 1)
         sid = response.json["id"]
         saved = query_all("""
-            SELECT article,barcode,source_cell FROM ozon_fbo_items i
+            SELECT i.article,i.barcode,i.source_cell FROM ozon_fbo_items i
             JOIN ozon_fbo_cargo c ON c.id=i.cargo_id
             WHERE c.supply_id=? ORDER BY article
         """, (sid,))
@@ -175,7 +175,10 @@ class ImportEndpointTests(unittest.TestCase):
              patch("ozon_fbo.check_catalog", side_effect=CatalogUnavailable("offline")):
             response = self.client.post("/api/manager/ozon-fbo/preview")
             self.assertEqual(response.status_code, 503)
-            response = self.client.post("/api/manager/ozon-fbo/import")
+            response = self.client.post("/api/manager/ozon-fbo/import", data={
+                "title": "Синтетическая поставка", "source_hash": self.plan["source_hash"],
+                "plan_hash": self.plan["plan_hash"]
+            })
             self.assertEqual(response.status_code, 503)
 
     def test_unauthorized_cannot_query_or_import(self):
