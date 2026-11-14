@@ -122,12 +122,42 @@ class OzonFboParserTests(unittest.TestCase):
         self.assertTrue(any("ШК грузоместа" in x for x in report["errors"]))
         self.assertEqual(report["places"], 0)
 
-    def test_same_gm_in_two_blocks_is_ambiguous(self):
+    def test_same_gm_in_two_blocks_on_same_sheet_is_one_cargo(self):
         rows = [header("МСК 1", "МСК 2"),
                 cargo_row(("201", "SKU1", 2, "GM1"),
                           ("202", "SKU2", 3, "GM1"))]
         report = parse_ozon_xlsx(make_xlsx({"мск": rows}))
-        self.assertTrue(any("в разных блоках" in x for x in report["errors"]))
+        self.assertEqual(report["errors"], [], report["errors"])
+        self.assertEqual(report["places"], 1)
+        self.assertEqual(report["unique_rows"], 2)
+        self.assertEqual(report["qty"], 5)
+
+    def test_separator_columns_and_exact_copy_do_not_double_count(self):
+        # Synthetic counterpart of a file with A:D, E:H, blank I, J:M, blank N, O:R.
+        names=["Ростов 3", "Ростов 4", "Ростов 5", "Ростов 6"]
+        starts=[0,4,9,14]
+        headings={}
+        for start,name in zip(starts,names):
+            headings.update({start:"ШК товара",start+1:name,
+                             start+2:"Кол-во товаров",start+3:"ШК ГМ"})
+        product1={0:"201",1:"SKU1",2:5,3:"GM2",
+                  4:"201",5:"SKU1",6:5,7:"GM2",
+                  9:"203",10:"SKU3",11:10,12:"GM3",
+                  14:"204",15:"SKU4",16:20,17:"GM4"}
+        product2={0:"202",1:"SKU2",2:3,3:"GM2",
+                  4:"202",5:"SKU2",6:3,7:"GM2"}
+        report=parse_ozon_xlsx(make_xlsx({"Ростов":[headings,product1,product2]}))
+        self.assertEqual(report["errors"],[],report["errors"])
+        self.assertEqual(report["places"],3)
+        self.assertEqual(report["unique_rows"],4)
+        self.assertEqual(report["qty"],38)
+        self.assertEqual(len(report["warnings"]),2)
+
+    def test_same_gm_different_quantities_across_blocks_stays_blocked(self):
+        rows=[header("Ростов 3","Ростов 4"),
+              cargo_row(("201","SKU1",2,"GM1"),("201","SKU1",3,"GM1"))]
+        report=parse_ozon_xlsx(make_xlsx({"Ростов":rows}))
+        self.assertTrue(any("разные количества" in x for x in report["errors"]))
 
     def test_conflict_across_destinations_rejected(self):
         sheets = {
@@ -135,7 +165,7 @@ class OzonFboParserTests(unittest.TestCase):
             "спб": [header("СПБ 1"), cargo_row(("201", "SKU", 2, "GM1"))],
         }
         report = parse_ozon_xlsx(make_xlsx(sheets))
-        self.assertTrue(any("в разных блоках" in x for x in report["errors"]))
+        self.assertTrue(any("в разных направлениях" in x for x in report["errors"]))
 
     def test_invalid_later_block_header_is_not_silently_ignored(self):
         rows = [header("МСК 1", "МСК 2"),
