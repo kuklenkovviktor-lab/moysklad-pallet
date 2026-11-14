@@ -56,6 +56,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 </style></head><body><main>
 <a href="/manager">← Панель руководителя</a><h1>📦 Ozon FBO</h1>
 <p><a href="/manager/ozon-fbo/picking">📊 Открыть монитор фактической сборки →</a></p>
+<p><a href="/manager/ozon-fbo/route-lab">📐 Лаборатория маршрута: размер и адрес (тестовые данные) →</a></p>
 <p class="small">Импорт Excel и создание плана грузомест. Фактическая сборка подтверждается на отдельном терминале сотрудника; остатки МойСклад не изменяются.</p>
 <section class="card"><h2>Загрузить поставку</h2>
 <div class="controls"><label>Название поставки <input id="title" maxlength="140" placeholder="Стекло · 17.10"></label>
