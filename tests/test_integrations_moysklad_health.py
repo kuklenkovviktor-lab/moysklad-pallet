@@ -39,6 +39,7 @@ class IntegrationConnectivityTests(unittest.TestCase):
         self.assertEqual(result.json["state"], "connected")
         self.assertNotIn("not-a-real-token", result.get_data(as_text=True))
         self.assertEqual(get.call_args.kwargs["headers"]["Accept-Encoding"], "gzip")
+        self.assertEqual(get.call_args.kwargs["headers"]["Accept"], "application/json;charset=utf-8")
         self.assertEqual(get.call_args.kwargs["params"], {"limit": 1})
         self.assertEqual(get.call_args.kwargs["timeout"], 8)
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
