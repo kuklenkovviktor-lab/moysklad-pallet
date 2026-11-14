@@ -2504,9 +2504,20 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
 .num{font-size:18px;font-weight:850}
 .print-one{margin-top:16px;width:100%}
 .status{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:18px}
+.manage{display:flex;width:100%;gap:8px;margin-top:10px}
+.manage button{flex:1;background:#315e7d;color:white;border:0;border-radius:8px;padding:10px;cursor:pointer;font-weight:700}
+.manage button.archive{background:#743d3d}
+.create{background:#fff;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin-bottom:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.create input{flex:1;min-width:180px;border:1px solid #b8cbd7;padding:12px;border-radius:9px}
+.create button{background:#176eae;color:white;border:0;border-radius:9px;padding:12px;font-weight:750;cursor:pointer}
+.archived{background:#fff;border:1px solid #d7e0e7;border-radius:14px;margin-top:20px;padding:14px}
+.archived-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-top:1px solid #e2eaf0}
+.archived-row button{background:#315e7d;color:white;border:0;border-radius:8px;padding:9px}
+.message{margin:10px 0;color:#15557a;font-weight:650}
+.badge button:disabled,.create button:disabled{opacity:.5;cursor:wait}
 @media print{
  body{background:#fff}
- .top,.print-one{display:none!important}
+ .top,.print-one,.manage,.create,.archived,.message{display:none!important}
  .badge{break-inside:avoid;box-shadow:none}
  body.print-single .badge{display:none!important}
  body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0}
@@ -2514,7 +2525,10 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="wrap">
  <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div>
+ <form id="createEmployee" class="create"><label for="employeeName"><b>Новый сотрудник</b></label><input id="employeeName" maxlength="80" minlength="2" required placeholder="Имя сотрудника"><button type="submit">Добавить и создать QR</button></form>
+ <div id="message" class="message" role="status" aria-live="polite"></div>
  <div id="grid" class="grid"></div>
+ <section class="archived"><h3>Архивные бейджи</h3><p>История смен сохраняется. Архивный бейдж не позволяет войти.</p><div id="archiveList"></div></section>
 </div>
 <script>
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
@@ -2541,11 +2555,60 @@ async function load(){
     '<img class="qr" src="'+x.qr_png+'" alt="QR '+esc(x.name)+'">'+
     '<div class="num">№'+esc(x.badge_number)+'</div>'+
     '<button type="button" class="print-one" data-employee-id="'+esc(x.id)+'" onclick="printBadge(this.dataset.employeeId)">Печать</button>'+
+    '<div class="manage"><button type="button" data-action="rename" data-id="'+esc(x.id)+'">Переименовать</button><button type="button" class="archive" data-action="archive" data-id="'+esc(x.id)+'">Удалить</button></div>'+
    '</div>'
-  ).join('');
+  ).join('')||'<div class="status">Активных бейджей нет.</div>';
+  document.getElementById('archiveList').innerHTML=(d.archived||[]).map(x=>
+   '<div class="archived-row"><span>'+esc(x.name)+' · №'+esc(x.badge_number)+'</span><button type="button" data-action="restore" data-id="'+esc(x.id)+'">Восстановить</button></div>'
+  ).join('')||'Нет архивных сотрудников.';
  }catch(e){
   g.innerHTML='<div class="status"><b>Не удалось загрузить бейджи</b><div style="margin-top:6px;font-size:12px;color:#6b7785">Обнови страницу. Если ошибка повторится, проверь журнал ONIX.</div></div>';
  }
+}
+async function mutate(url,method,data){
+ const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{}),cache:'no-store'});
+ const d=await r.json();
+ if(r.status===403 && !d.error){location.href='/manager-login';return null}
+ if(!r.ok)throw Error(d.error||'Не удалось сохранить изменение');
+ return d;
+}
+const info=message=>document.getElementById('message').textContent=message;
+document.getElementById('createEmployee').addEventListener('submit',async event=>{
+ event.preventDefault();
+ const name=document.getElementById('employeeName').value.trim();
+ if(name.length<2)return;
+ const button=event.currentTarget.querySelector('button');
+ button.disabled=true;
+ try{
+  const result=await mutate('/api/admin/badges','POST',{name});
+  if(result){document.getElementById('employeeName').value='';await load();info('Бейдж №'+result.badge_number+' создан. Распечатай QR для сотрудника.')}
+ }catch(error){info(error.message)}finally{button.disabled=false}
+});
+document.getElementById('grid').addEventListener('click',handleBadgeAction);
+document.getElementById('archiveList').addEventListener('click',handleBadgeAction);
+async function handleBadgeAction(event){
+ const button=event.target.closest('button[data-action]');
+ if(!button)return;
+ const id=button.dataset.id,action=button.dataset.action;
+ const card=button.closest('.badge'), row=button.closest('.archived-row');
+ const currentName=card?.querySelector('.name')?.textContent||row?.querySelector('span')?.textContent||'';
+ let name,method,url,data={},success;
+ if(action==='rename'){
+  name=prompt('Новое имя сотрудника',currentName);
+  if(name===null)return;
+  name=name.trim();if(name.length<2)return info('Укажи имя минимум из двух символов');
+  method='PATCH';url='/api/admin/badges/'+encodeURIComponent(id);data={name};success='Имя изменено. Старый QR продолжает работать.';
+ }else if(action==='archive'){
+  if(!confirm('Удалить бейдж сотрудника «'+currentName+'» из активных? История смен сохранится, вход по QR будет закрыт.'))return;
+  method='POST';url='/api/admin/badges/'+encodeURIComponent(id)+'/archive';success='Бейдж перемещён в архив.';
+ }else if(action==='restore'){
+  if(!confirm('Восстановить сотрудника «'+currentName+'»? Сохранённый QR снова станет действительным.'))return;
+  method='POST';url='/api/admin/badges/'+encodeURIComponent(id)+'/restore';success='Сотрудник восстановлен.';
+ }else{return}
+ button.disabled=true;
+ try{await mutate(url,method,data);await load();info(success)}
+ catch(error){info(error.message)}
+ finally{button.disabled=false}
 }
 function clearPrintSelection(){
  document.body.classList.remove('print-single');
