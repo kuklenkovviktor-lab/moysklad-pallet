@@ -498,6 +498,8 @@ def require_employee_login():
         "/fbs-journal",
         "/history",
         "/badges",
+        "/manager/badges/label",
+        "/manager/badges/labels/all",
         "/api/manager/logout",
         "/api/fbs/dashboard",
         "/api/fbs/overview",
@@ -517,7 +519,8 @@ def require_employee_login():
     }
     # Desktop manager routes are authenticated only by the dedicated
     # manager password/session. Do not fall through to employee badge auth.
-    if path in manager_paths or path.startswith("/api/manager/ozon-fbo/"):
+    if (path in manager_paths or path.startswith("/api/manager/ozon-fbo/")
+            or path.startswith("/api/admin/badges/")):
         if session.get("manager_web") is True:
             return None
         if path.startswith("/api/"):
