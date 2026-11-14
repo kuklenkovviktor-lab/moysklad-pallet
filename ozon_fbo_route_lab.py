@@ -128,7 +128,7 @@ def route_lab_data():
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     try:
-        return jsonify(plan_route(SYNTHETIC_ITEMS, request.args.get("mode", "hybrid")),
-                       synthetic=True, source="hardcoded_demo")
+        return jsonify({**plan_route(SYNTHETIC_ITEMS, request.args.get("mode", "hybrid")),
+                        "synthetic": True, "source": "hardcoded_demo"})
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
