@@ -2504,9 +2504,20 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
 .num{font-size:18px;font-weight:850}
 .print-one{margin-top:16px;width:100%}
 .status{background:#fff;border:1px solid #d7e0e7;border-radius:16px;padding:18px}
+.manage{display:flex;width:100%;gap:8px;margin-top:10px}
+.manage button{flex:1;background:#315e7d;color:white;border:0;border-radius:8px;padding:10px;cursor:pointer;font-weight:700}
+.manage button.archive{background:#743d3d}
+.create{background:#fff;border:1px solid #d7e0e7;border-radius:14px;padding:14px;margin-bottom:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.create input{flex:1;min-width:180px;border:1px solid #b8cbd7;padding:12px;border-radius:9px}
+.create button{background:#176eae;color:white;border:0;border-radius:9px;padding:12px;font-weight:750;cursor:pointer}
+.archived{background:#fff;border:1px solid #d7e0e7;border-radius:14px;margin-top:20px;padding:14px}
+.archived-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-top:1px solid #e2eaf0}
+.archived-row button{background:#315e7d;color:white;border:0;border-radius:8px;padding:9px}
+.message{margin:10px 0;color:#15557a;font-weight:650}
+.badge button:disabled,.create button:disabled{opacity:.5;cursor:wait}
 @media print{
  body{background:#fff}
- .top,.print-one{display:none!important}
+ .top,.print-one,.manage,.create,.archived,.message{display:none!important}
  .badge{break-inside:avoid;box-shadow:none}
  body.print-single .badge{display:none!important}
  body.print-single .badge.print-target{display:flex!important;margin:0 auto;max-width:360px;border:0}
@@ -2514,7 +2525,10 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;bac
 </style><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2"></head><body>
 <div class="wrap">
  <div class="top"><a href="/stats">← Статистика</a><button type="button" onclick="printAllBadges()">Печать всех</button></div>
+ <form id="createEmployee" class="create"><label for="employeeName"><b>Новый сотрудник</b></label><input id="employeeName" maxlength="80" minlength="2" required placeholder="Имя сотрудника"><button type="submit">Добавить и создать QR</button></form>
+ <div id="message" class="message" role="status" aria-live="polite"></div>
  <div id="grid" class="grid"></div>
+ <section class="archived"><h3>Архивные бейджи</h3><p>История смен сохраняется. Архивный бейдж не позволяет войти.</p><div id="archiveList"></div></section>
 </div>
 <script>
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
@@ -2541,11 +2555,60 @@ async function load(){
     '<img class="qr" src="'+x.qr_png+'" alt="QR '+esc(x.name)+'">'+
     '<div class="num">№'+esc(x.badge_number)+'</div>'+
     '<button type="button" class="print-one" data-employee-id="'+esc(x.id)+'" onclick="printBadge(this.dataset.employeeId)">Печать</button>'+
+    '<div class="manage"><button type="button" data-action="rename" data-id="'+esc(x.id)+'">Переименовать</button><button type="button" class="archive" data-action="archive" data-id="'+esc(x.id)+'">Удалить</button></div>'+
    '</div>'
-  ).join('');
+  ).join('')||'<div class="status">Активных бейджей нет.</div>';
+  document.getElementById('archiveList').innerHTML=(d.archived||[]).map(x=>
+   '<div class="archived-row"><span>'+esc(x.name)+' · №'+esc(x.badge_number)+'</span><button type="button" data-action="restore" data-id="'+esc(x.id)+'">Восстановить</button></div>'
+  ).join('')||'Нет архивных сотрудников.';
  }catch(e){
   g.innerHTML='<div class="status"><b>Не удалось загрузить бейджи</b><div style="margin-top:6px;font-size:12px;color:#6b7785">Обнови страницу. Если ошибка повторится, проверь журнал ONIX.</div></div>';
  }
+}
+async function mutate(url,method,data){
+ const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{}),cache:'no-store'});
+ const d=await r.json();
+ if(r.status===403 && !d.error){location.href='/manager-login';return null}
+ if(!r.ok)throw Error(d.error||'Не удалось сохранить изменение');
+ return d;
+}
+const info=message=>document.getElementById('message').textContent=message;
+document.getElementById('createEmployee').addEventListener('submit',async event=>{
+ event.preventDefault();
+ const name=document.getElementById('employeeName').value.trim();
+ if(name.length<2)return;
+ const button=event.currentTarget.querySelector('button');
+ button.disabled=true;
+ try{
+  const result=await mutate('/api/admin/badges','POST',{name});
+  if(result){document.getElementById('employeeName').value='';await load();info('Бейдж №'+result.badge_number+' создан. Распечатай QR для сотрудника.')}
+ }catch(error){info(error.message)}finally{button.disabled=false}
+});
+document.getElementById('grid').addEventListener('click',handleBadgeAction);
+document.getElementById('archiveList').addEventListener('click',handleBadgeAction);
+async function handleBadgeAction(event){
+ const button=event.target.closest('button[data-action]');
+ if(!button)return;
+ const id=button.dataset.id,action=button.dataset.action;
+ const card=button.closest('.badge'), row=button.closest('.archived-row');
+ const currentName=card?.querySelector('.name')?.textContent||row?.querySelector('span')?.textContent||'';
+ let name,method,url,data={},success;
+ if(action==='rename'){
+  name=prompt('Новое имя сотрудника',currentName);
+  if(name===null)return;
+  name=name.trim();if(name.length<2)return info('Укажи имя минимум из двух символов');
+  method='PATCH';url='/api/admin/badges/'+encodeURIComponent(id);data={name};success='Имя изменено. Старый QR продолжает работать.';
+ }else if(action==='archive'){
+  if(!confirm('Удалить бейдж сотрудника «'+currentName+'» из активных? История смен сохранится, вход по QR будет закрыт.'))return;
+  method='POST';url='/api/admin/badges/'+encodeURIComponent(id)+'/archive';success='Бейдж перемещён в архив.';
+ }else if(action==='restore'){
+  if(!confirm('Восстановить сотрудника «'+currentName+'»? Сохранённый QR снова станет действительным.'))return;
+  method='POST';url='/api/admin/badges/'+encodeURIComponent(id)+'/restore';success='Сотрудник восстановлен.';
+ }else{return}
+ button.disabled=true;
+ try{await mutate(url,method,data);await load();info(success)}
+ catch(error){info(error.message)}
+ finally{button.disabled=false}
 }
 function clearPrintSelection(){
  document.body.classList.remove('print-single');
@@ -3115,6 +3178,9 @@ def admin_badges():
     rows = query_all(
         "SELECT id, name, badge_number, badge_code FROM employees WHERE active = 1 ORDER BY badge_number, name"
     )
+    archived_rows = query_all(
+        "SELECT id,name,badge_number FROM employees WHERE active=0 ORDER BY badge_number,name"
+    )
     employees = []
     for employee_id, name, badge_number, badge_code in rows:
         code = str(badge_code or "").strip()
@@ -3142,7 +3208,178 @@ def admin_badges():
             "qr_png": qr_png,
         })
 
-    return jsonify(employees=employees)
+    return jsonify(employees=employees, archived=[
+        {"id": x[0], "name": x[1], "badge_number": x[2]} for x in archived_rows
+    ])
+
+
+def _badge_audit_table(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS employee_badge_audit (
+        id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        old_name TEXT,
+        new_name TEXT,
+        recorded_at TEXT NOT NULL
+    )""")
+
+
+def _badge_audit(cur, employee_id, action, old_name=None, new_name=None):
+    cur.execute(sql("""INSERT INTO employee_badge_audit
+        (id,employee_id,action,old_name,new_name,recorded_at)
+        VALUES (?,?,?,?,?,?)"""),
+        (str(uuid.uuid4()),employee_id,action,old_name,new_name,now_iso()))
+
+
+def _badge_valid_name(value):
+    name = str(value or "").strip()
+    if not 2 <= len(name) <= 80 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return None
+    return name
+
+
+@wms_bp.post("/api/admin/badges")
+def admin_create_badge():
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    data = request.get_json(silent=True) or {}
+    name = _badge_valid_name(data.get("name"))
+    if not name:
+        return jsonify(error="Имя сотрудника: от 2 до 80 символов, без управляющих символов"), 400
+    employee_id = str(uuid.uuid4())
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            if DATABASE_URL:
+                # Serialize number assignment across API processes.
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute("SELECT name FROM employees WHERE active=1")
+            if any(str(r[0]).casefold() == name.casefold() for r in cur.fetchall()):
+                return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
+            cur.execute("SELECT COALESCE(MAX(badge_number),0) FROM employees")
+            badge_number=int(cur.fetchone()[0] or 0)+1
+            cur.execute(sql("""INSERT INTO employees
+                (id,name,rate,target,active,role,badge_number,badge_code,scanner_code)
+                VALUES (?,?,?,?,1,'staff',?,?,?)"""),
+                (employee_id,name,RATE,TARGET,badge_number,
+                 make_badge_code(employee_id),make_badge_scanner_code(employee_id)))
+            _badge_audit(cur,employee_id,"create",None,name)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось создать сотрудника"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True,id=employee_id,badge_number=badge_number), 201
+
+
+@wms_bp.patch("/api/admin/badges/<employee_id>")
+def admin_rename_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    name = _badge_valid_name((request.get_json(silent=True) or {}).get("name"))
+    if not name:
+        return jsonify(error="Имя сотрудника: от 2 до 80 символов, без управляющих символов"), 400
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name FROM employees WHERE id=? AND active=1"),(employee_id,))
+            old=cur.fetchone()
+            if not old:
+                return jsonify(error="Активный сотрудник не найден"), 404
+            cur.execute(sql("SELECT name FROM employees WHERE active=1 AND id<>?"),(employee_id,))
+            if any(str(r[0]).casefold() == name.casefold() for r in cur.fetchall()):
+                return jsonify(error="Активный сотрудник с таким именем уже существует"), 409
+            if old[0] != name:
+                cur.execute(sql("UPDATE employees SET name=? WHERE id=? AND active=1"),(name,employee_id))
+                _badge_audit(cur,employee_id,"rename",old[0],name)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось переименовать сотрудника"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
+
+
+@wms_bp.post("/api/admin/badges/<employee_id>/archive")
+def admin_archive_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name,role,active FROM employees WHERE id=?"),(employee_id,))
+            row=cur.fetchone()
+            if not row:
+                return jsonify(error="Сотрудник не найден"), 404
+            if row[1] == "manager":
+                return jsonify(error="Бейдж руководителя архивировать нельзя"), 403
+            if not row[2]:
+                conn.commit()
+                return jsonify(ok=True,already_archived=True)
+            cur.execute(sql("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL LIMIT 1"),(employee_id,))
+            if cur.fetchone():
+                return jsonify(error="У сотрудника открыта смена. Сначала закрой её через кабинет руководителя."), 409
+            cur.execute(sql("UPDATE employees SET active=0 WHERE id=? AND active=1"),(employee_id,))
+            _badge_audit(cur,employee_id,"archive",row[0],None)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось архивировать бейдж"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
+
+
+@wms_bp.post("/api/admin/badges/<employee_id>/restore")
+def admin_restore_badge(employee_id):
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    with db_connect() as conn:
+        cur=conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("SELECT pg_advisory_xact_lock(731924105)")
+            else:
+                cur.execute("BEGIN IMMEDIATE")
+            _badge_audit_table(cur)
+            cur.execute(sql("SELECT name,active FROM employees WHERE id=?"),(employee_id,))
+            row=cur.fetchone()
+            if not row:
+                return jsonify(error="Сотрудник не найден"), 404
+            if row[1]:
+                conn.commit()
+                return jsonify(ok=True,already_active=True)
+            cur.execute("SELECT name FROM employees WHERE active=1")
+            if any(str(r[0]).casefold() == str(row[0]).casefold() for r in cur.fetchall()):
+                return jsonify(error="Такое имя уже занято: сначала переименуй активного сотрудника"), 409
+            cur.execute(sql("UPDATE employees SET active=1 WHERE id=? AND active=0"),(employee_id,))
+            _badge_audit(cur,employee_id,"restore",None,row[0])
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify(error="Не удалось восстановить бейдж"), 503
+        finally:
+            cur.close()
+    return jsonify(ok=True)
 
 
 @wms_bp.get("/api/stats/employees")
