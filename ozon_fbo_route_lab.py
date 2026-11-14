@@ -4,7 +4,8 @@ No reads from employee orders, no catalog/API calls and no write operations.
 Dimensions are EXAMPLE external box dimensions in centimetres, not stock data.
 """
 from flask import Blueprint, jsonify, redirect, request
-from wms import manager_access
+from wms import manager_access, query_all
+from ozon_fbo_dimensions import read_dimensions_xlsx, parse_synthetic_basket, join_virtual_basket
 from warehouse_map import line_of, location_sort_key
 
 route_lab_bp = Blueprint("fbo_route_lab", __name__)
@@ -76,6 +77,8 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #ff9
 .step{width:32px;height:32px;border-radius:8px;flex:none;background:#243e54;display:grid;place-items:center;font-weight:800}
 .info{min-width:0;flex:1}.meta{color:var(--muted);font-size:12px}
 .metrics{display:flex;gap:9px;flex-wrap:wrap}.metric{background:#1c3044;border-radius:9px;padding:10px 13px}
+textarea,input[type=file]{background:#0d1d2c;color:#f1f6ff;border:1px solid #42607a;border-radius:9px;padding:11px;width:100%}
+textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;padding:8px 12px;background:#312c2c;margin-top:10px}
 .metric strong{display:block;font-size:22px}
 @media(max-width:620px){main{padding:12px}.controls label,.controls select,.controls button{width:100%}.card{padding:13px}}
 </style></head><body><main>
@@ -90,6 +93,19 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #ff9
 <option value="address">По адресу ячейки</option></select></label>
 <button id="run">Рассчитать маршрут</button></div>
 <div id="state" class="small" role="status">Выбери режим и запусти расчёт.</div></section>
+<section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
+<p class="small">Экспортируй Google-таблицу «Справочник NEW +» в формате XLSX. Читаем вкладки «Габариты» и «Сводный»,
+а адреса получаем из существующих привязок карты GRIT только для просмотра. Данные не сохраняются; рабочие задания не изменяются.</p>
+<p class="small">Используй экспорт собственного разрешённого справочника. Ссылка на личную Google-таблицу намеренно не хранится в коммерческом приложении.</p>
+<form id="joinedForm" enctype="multipart/form-data">
+<label>Экспорт таблицы (.xlsx)<input type="file" name="catalog" accept=".xlsx" required></label>
+<label>Синтетическая палета: артикул;количество, одна позиция в строке
+<textarea name="basket" placeholder="1022_BOROCCO;2&#10;1088_NONE;1" required></textarea></label>
+<label>Алгоритм<select name="mode"><option value="hybrid">Габаритная группа → адрес</option>
+<option value="size">От крупного к мелкому</option><option value="address">По адресу</option></select></label>
+<button type="submit" id="joinedBtn">Проверить связи и рассчитать</button></form>
+<div class="small" id="joinedStatus" role="status">Проверка работает без изменения заказов и операций склада.</div>
+<div id="joinedReport"></div></section>
 <section class="card"><h2>Рекомендуемый порядок</h2>
 <div id="metrics" class="metrics"></div><div id="items"></div></section>
 <p class="small">Габариты здесь заданы вручную для демонстрации. Для реальных рекомендаций потребуется проверенная таблица
@@ -113,6 +129,26 @@ async function run(){
  finally{btn.disabled=false}
 }
 btn.addEventListener('click',run);run();
+const form=document.getElementById('joinedForm');
+form.addEventListener('submit',async e=>{
+ e.preventDefault();const b=document.getElementById('joinedBtn'),state=document.getElementById('joinedStatus'),
+ report=document.getElementById('joinedReport');b.disabled=true;state.textContent='Проверяю XLSX и привязки…';report.innerHTML='';
+ try{
+  const res=await fetch('/api/manager/ozon-fbo/route-lab/preview',{method:'POST',body:new FormData(form),cache:'no-store'});
+  const d=await res.json();if(!res.ok)throw Error(d.error||'Не удалось рассчитать');
+  state.textContent='Сопоставлено '+d.matched+' из '+d.requested+
+   ' позиций; габаритов в справочнике: '+d.catalog_complete+
+   '; строк с неполными габаритами: '+d.catalog_incomplete+'.';
+  const issues=d.issues.length?'<div class="issues"><b>Требуют проверки</b>'+
+   d.issues.map(i=>'<div>'+esc(i.article)+' · '+esc(i.reason)+'</div>').join('')+'</div>':'';
+  const items=d.route?d.route.items.map((i,index)=>
+   '<div class="item"><div class="step">'+(index+1)+'</div><div class="info"><b>'+esc(i.article)+'</b>'+
+   '<div class="meta">'+esc(i.location)+' · '+esc(i.volume_l)+' л · '+esc(i.weight_kg??'Вес не указан')+
+   ' кг · '+esc(i.qty)+' шт. · ШК: '+esc(i.barcodes.join(', ')||'нет в Сводном')+'</div></div></div>').join(''):'<p class="small">Нет позиций с одновременно известными габаритами и адресом. Маршрут не рассчитан.</p>';
+  report.innerHTML=issues+'<h2 style="margin-top:16px">Виртуальный порядок по связанным позициям</h2>'+items;
+ }catch(err){state.textContent=err.message}
+ finally{b.disabled=false}
+});
 </script></main></body></html>"""
 
 
@@ -132,3 +168,43 @@ def route_lab_data():
                         "synthetic": True, "source": "hardcoded_demo"})
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
+
+
+def _map_assignments_for_preview():
+    """Read-only current schematic bindings, without stock/production modifications."""
+    return query_all("""
+        SELECT a.article,l.label
+        FROM cell_sku_assignments a
+        JOIN replenishment_locations l ON l.id=a.location_id
+        WHERE l.active=1
+    """)
+
+
+@route_lab_bp.post("/api/manager/ozon-fbo/route-lab/preview")
+def route_lab_joined_preview():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if request.content_length and request.content_length > 3 * 1024 * 1024 + 15000:
+        return jsonify(error="Файл слишком большой"), 413
+    upload = request.files.get("catalog")
+    if not upload or not str(upload.filename or "").lower().endswith(".xlsx"):
+        return jsonify(error="Загрузи XLSX справочника"), 400
+    try:
+        catalog = read_dimensions_xlsx(upload.read(3 * 1024 * 1024 + 1))
+        basket = parse_synthetic_basket(request.form.get("basket", ""))
+        mode = request.form.get("mode", "hybrid")
+        if mode not in ("hybrid", "size", "address"):
+            raise ValueError("Некорректный алгоритм")
+        located, issues = join_virtual_basket(catalog, basket, _map_assignments_for_preview())
+        route = plan_route(located, mode) if located else None
+        return jsonify({
+            "synthetic_basket": True, "read_only": True, "saved": False,
+            "requested": len(basket), "matched": len(located),
+            "catalog_complete": len(catalog["items"]),
+            "catalog_incomplete": len(catalog["incomplete"]),
+            "issues": issues, "route": route,
+        })
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        return jsonify(error="Не удалось прочитать карту склада для предпросмотра"), 503
