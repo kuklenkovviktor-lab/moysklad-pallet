@@ -129,7 +129,7 @@ async function draw(c){
  const oldItem=E('shortageItem').value;
  E('shortageItem').innerHTML=canReport.map(i=>'<option value="'+esc(i.id)+'">'+esc(i.article)+' · недостаёт '+i.remaining+' шт.</option>').join('');
  if(canReport.some(i=>i.id===oldItem))E('shortageItem').value=oldItem;
- E('shortageBtn').disabled=!canReport.length||!!c.pending_shortages;
+ E('shortageBtn').disabled=!canReport.length;
  E('shortageStatus').textContent=c.pending_shortages?'Ожидают согласования: '+c.pending_shortages+' поз.':c.approved_shortage?'Согласовано: '+c.approved_shortage+' шт.':'';
  E('undoBtn').disabled=!c.picked||!own||c.status!=='started';
  if(c.status==='done')status('Грузоместо собрано и подтверждено. Можно переходить к следующему.',false);
