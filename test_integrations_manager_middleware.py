@@ -7,6 +7,7 @@ def test_integrations_are_registered_as_desktop_manager_routes():
     manager_section = app.split("manager_paths = {", 1)[1].split("\n    }", 1)[0]
     assert '"/manager/integrations"' in manager_section
     assert '"/api/manager/integrations"' in manager_section
+    assert '"/api/manager/integrations/moysklad/check"' in manager_section
 
 
 def test_integrations_manager_auth_and_redirect_consistent():
