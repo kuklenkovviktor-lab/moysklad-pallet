@@ -370,15 +370,15 @@ def undo_pick(cargo_id):
             last = cur.fetchone()
             if not last:
                 return jsonify(error="В этом грузоместе пока нечего отменять"), 409
+            cur.execute(sql("""SELECT status FROM ozon_fbo_shortages WHERE item_id=?"""), (last[1],))
+            shortage = cur.fetchone()
+            if shortage and shortage[0] in ("pending", "approved"):
+                return jsonify(error="Нельзя отменить скан позиции с недостачей на согласовании."), 409
             cur.execute(sql("UPDATE ozon_fbo_pick_events SET voided_at=? WHERE id=? AND voided_at IS NULL"),
                         (now_iso(), last[0]))
             if cur.rowcount != 1:
                 conn.rollback()
                 return jsonify(error="Этот скан уже отменён"), 409
-            cur.execute(sql("""SELECT status FROM ozon_fbo_shortages WHERE item_id=?"""), (last[1],))
-            shortage = cur.fetchone()
-            if shortage and shortage[0] in ("pending", "approved"):
-                return jsonify(error="Нельзя отменить скан позиции с недостачей на согласовании."), 409
             cur.execute(sql("""UPDATE ozon_fbo_items SET picked_qty=picked_qty-?
                 WHERE id=? AND picked_qty>=?"""), (last[2], last[1], last[2]))
             if cur.rowcount != 1:
