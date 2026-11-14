@@ -39,6 +39,7 @@ from fbs_pdf_import import fbs_pdf_bp
 from onix_print_bridge import print_bridge_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
+from ozon_fbo_route_lab import route_lab_bp
 from receiving_idempotency import (
     init_receiving_operations,
     claim_operation,
@@ -112,6 +113,7 @@ app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(print_bridge_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
+app.register_blueprint(route_lab_bp)
 
 _TERMINAL_RECHECK_JS = """<script>
 (function(){
@@ -492,6 +494,7 @@ def require_employee_login():
         "/manager/replenishment/labels/all",
         "/manager/ozon-fbo",
         "/manager/ozon-fbo/picking",
+        "/manager/ozon-fbo/route-lab",
         "/api/manager/ozon-fbo/preview",
         "/api/manager/ozon-fbo/import",
         "/api/manager/ozon-fbo/supplies",
