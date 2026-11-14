@@ -72,7 +72,7 @@ def _moysklad_error_codes(response):
     """Expose only numeric MoySklad error IDs; never its raw error messages."""
     try:
         payload = response.json()
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return []
     if not isinstance(payload, dict):
         return []
