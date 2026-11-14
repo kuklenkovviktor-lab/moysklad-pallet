@@ -348,7 +348,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-off
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let list=[];
 function progressState(c){return c.status==='done'?'is-done':c.status==='started'?'is-started':'is-planned'}
-function statusLabel(c){return ({planned:'План',started:'Собирается',done:'Собрано'}[c.status]||c.status)}
+function statusLabel(c){const approved=(c.shortages||[]).filter(x=>x.status==='approved').reduce((n,x)=>n+x.missing,0);return c.status==='done'&&approved?'Готово с недостачей':({planned:'План',started:'Собирается',done:'Собрано'}[c.status]||c.status)}
 async function load(){
  const r=await fetch('/api/manager/ozon-fbo/progress',{cache:'no-store'}),d=await r.json();
  if(!r.ok)throw Error(d.error||'Не удалось загрузить');
@@ -356,14 +356,35 @@ async function load(){
  document.getElementById('rows').innerHTML=list.length?list.map(c=>
  '<tr class="'+progressState(c)+'"><td><b>'+esc(c.supply)+'</b><div class="small">'+esc(c.destination)+' · '+esc(c.label)+'</div></td>'+
  '<td>'+esc(c.barcode)+'</td><td>'+esc(c.employee||'—')+'</td>'+
- '<td>'+esc(c.picked)+' / '+esc(c.qty)+'<div class="progress '+progressState(c)+'"><div style="width:'+Math.min(100,c.qty?100*c.picked/c.qty:0)+'%"></div></div></td>'+
+ '<td>'+esc(c.picked)+' / '+esc(c.qty)+'<div class="progress '+progressState(c)+'"><div style="width:'+Math.min(100,c.qty?100*c.picked/c.qty:0)+'%"></div></div><div class="small">'+esc((c.shortages||[]).filter(x=>x.status==='approved').reduce((n,x)=>n+x.missing,0)?'Согласованная недостача: '+(c.shortages||[]).filter(x=>x.status==='approved').reduce((n,x)=>n+x.missing,0)+' шт.':(c.shortages||[]).some(x=>x.status==='pending')?'Ожидается решение по недостаче':'')+'</div></td>'+
  '<td><span class="status-badge '+progressState(c)+'">'+(c.status==='done'?'✓ ':'')+esc(statusLabel(c))+'</span></td>'+
  '<td><button data-history="'+esc(c.id)+'" class="secondary">История</button> '+
- (c.status!=='done'&&c.employee_id?'<button data-release="'+esc(c.id)+'">Передать</button>':'')+'</td></tr>').join(''):
+ (c.status!=='done'&&c.employee_id?'<button data-release="'+esc(c.id)+'">Передать</button>':'')+
+ (c.shortages||[]).filter(x=>x.status==='pending').map(x=>'<div style="margin-top:8px;font-size:12px">'+esc(x.article)+' · '+esc(x.missing)+' шт.<div>'+esc(x.reason)+'</div><button data-shortage-cargo="'+esc(c.id)+'" data-shortage-item="'+esc(x.item_id)+'" data-decision="approve">Согласовать</button> <button class="secondary" data-shortage-cargo="'+esc(c.id)+'" data-shortage-item="'+esc(x.item_id)+'" data-decision="reject">Отклонить</button></div>').join('')+
+ '</td></tr>').join(''):
  '<tr><td colspan="6">Нет поставок.</td></tr>';
 }
 document.getElementById('rows').addEventListener('click',async e=>{
  const history=e.target.closest('button[data-history]'),release=e.target.closest('button[data-release]');
+ const shortage=e.target.closest('button[data-shortage-item]');
+ if(shortage){
+  const cargo=list.find(c=>c.id===shortage.dataset.shortageCargo);
+  const item=(cargo?.shortages||[]).find(x=>x.item_id===shortage.dataset.shortageItem);
+  if(!cargo||!item||item.status!=='pending')return alert('Недостача уже обработана. Обнови список.');
+  const approve=shortage.dataset.decision==='approve';
+  const reason=prompt((approve?'Результат проверки остатков: ':'Почему недостача отклонена: ')+item.article+' · '+item.missing+' шт.','Проверено руководителем');
+  if(reason===null)return;
+  if(reason.trim().length<8)return alert('Причина должна содержать не менее 8 символов.');
+  if(!confirm((approve?'Согласовать':'Отклонить')+' недостачу '+item.missing+' шт.? План Ozon не меняется автоматически.'))return;
+  shortage.disabled=true;
+  try{
+   const r=await fetch('/api/manager/ozon-fbo/shortage/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+     cargo_id:cargo.id,item_id:item.item_id,decision:approve?'approve':'reject',reason:reason.trim()})});
+   const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка согласования');
+   await load();
+  }catch(err){alert(err.message)}finally{shortage.disabled=false}
+  return;
+ }
  if(history){
   const r=await fetch('/api/manager/ozon-fbo/audit/'+encodeURIComponent(history.dataset.history)),d=await r.json();
   if(!r.ok)return document.getElementById('audit').textContent=d.error||'Ошибка';
