@@ -168,7 +168,10 @@ async function loadDetail(id){
  const r=await fetch('/api/manager/ozon-fbo/supplies/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json();
  if(!r.ok)throw Error(d.error||'Ошибка');
  document.getElementById('detail').innerHTML='<h2>'+esc(d.supply.title)+'</h2><p class="small">Статус: план создан. ШК грузоместа сохранены без изменения цифр.</p>'+
- d.cargo.map(cargoBlock).join('');
+ d.cargo.map(cargoBlock).join('')+
+ '<h2 style="margin-top:16px">Журнал исправленных ШК</h2>'+
+ (d.corrections.length?'<div class="scroll"><table><thead><tr><th>ГМ / строка</th><th>Артикул</th><th>Было</th><th>Стало</th><th>Подтвердил</th></tr></thead><tbody>'+
+ d.corrections.map(x=>'<tr><td>'+esc(x.cargo)+' / '+esc(x.source)+'</td><td>'+esc(x.article)+'</td><td>'+esc(x.old)+'</td><td>'+esc(x.new)+'</td><td>'+esc(x.actor)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small">Исправлений не было.</p>');
 }
 loadSupplies().catch(e=>{document.getElementById('supplies').textContent=e.message});
 </script></main></body></html>"""
@@ -387,7 +390,16 @@ def _details(supply_id):
             "items": [{"article": it[0], "barcode": it[1], "qty": it[2], "source": it[3]}
                       for it in items],
         })
+    corrections = query_all("""
+        SELECT cargo_barcode,article,source_cell,old_barcode,new_barcode,actor,created_at
+        FROM ozon_fbo_import_corrections WHERE supply_id=?
+        ORDER BY created_at,source_cell
+    """, (supply_id,))
     return {
+        "corrections": [
+            {"cargo": x[0], "article": x[1], "source": x[2], "old": x[3],
+             "new": x[4], "actor": x[5], "at": x[6]} for x in corrections
+        ],
         "supply": {"id": header[0], "title": header[1], "status": header[2],
                    "created_at": header[3], "created_by": header[4],
                    "places": header[5], "qty": header[6], "warning_count": header[7]},
