@@ -99,7 +99,7 @@ def _moysklad_health():
     try:
         response = requests.get(
             "https://api.moysklad.ru/api/remap/1.2/entity/product",
-            headers={"Authorization": "Bearer " + token, "Accept": "application/json",
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8",
                      "Accept-Encoding": "gzip"},
             params={"limit": 1},
             timeout=8,
