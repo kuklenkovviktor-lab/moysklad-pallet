@@ -96,7 +96,7 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
 <p class="small">Экспортируй Google-таблицу «Справочник NEW +» в формате XLSX. Читаем вкладки «Габариты» и «Сводный»,
 а адреса получаем из существующих привязок карты GRIT только для просмотра. Данные не сохраняются; рабочие задания не изменяются.</p>
-<p class="small"><a href="https://docs.google.com/spreadsheets/d/1BkALvifxhaOEdxXB3rzIzBAn0sHBLppqWMBx5pM4UAY/edit" target="_blank" rel="noopener noreferrer">Открыть исходный справочник в Google Sheets</a></p>
+<p class="small">Используй экспорт собственного разрешённого справочника. Ссылка на личную Google-таблицу намеренно не хранится в коммерческом приложении.</p>
 <form id="joinedForm" enctype="multipart/form-data">
 <label>Экспорт таблицы (.xlsx)<input type="file" name="catalog" accept=".xlsx" required></label>
 <label>Синтетическая палета: артикул;количество, одна позиция в строке
