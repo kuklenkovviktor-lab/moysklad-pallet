@@ -107,7 +107,7 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <div id="joinedReport"></div></section>
 <section class="card"><h2>Рекомендуемый порядок</h2>
 <div id="metrics" class="metrics"></div><div id="items"></div></section>
-<p class="small">Габариты здесь заданы вручную для демонстрации. Для реальных рекомендаций потребуется проверенная таблица
+<p class="small">Демонстрационный набор выше использует вымышленные габариты. Для рекомендаций используется подключённая Google-таблица
 «артикул → Д×Ш×В», привязка к ячейке и схема проходов. Без веса и прочности упаковки результат только подсказка.</p>
 <script>
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -147,7 +147,7 @@ syncGoogle();
 const form=document.getElementById('joinedForm');
 form.addEventListener('submit',async e=>{
  e.preventDefault();const b=document.getElementById('joinedBtn'),state=document.getElementById('joinedStatus'),
- report=document.getElementById('joinedReport');b.disabled=true;state.textContent='Проверяю XLSX и привязки…';report.innerHTML='';
+ report=document.getElementById('joinedReport');b.disabled=true;state.textContent='Проверяю Google Sheets и привязки…';report.innerHTML='';
  try{
   const res=await fetch('/api/manager/ozon-fbo/route-lab/preview',{method:'POST',body:new FormData(form),cache:'no-store'});
   const d=await res.json();if(!res.ok)throw Error(d.error||'Не удалось рассчитать');
