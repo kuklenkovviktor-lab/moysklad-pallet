@@ -3744,8 +3744,24 @@ def fbs_scan():
     if scan_type not in ("normal", "debt"):
         scan_type = "normal"
 
+    # A revoked badge cannot create new scans. But a lost ACK for an already
+    # committed request is safe to replay: same signed prior employee, bound
+    # shift and immutable request_id, verified against the durable ledger.
+    prior_employee_id = str(session.get("employee_id") or "").strip()
+    prior_shift_id = str(session.get("employee_shift_id") or "").strip()
     employee = get_session_employee()
     if not employee:
+        request_id = str(data.get("request_id") or "").strip()
+        if prior_employee_id and prior_shift_id == shift_id and request_id:
+            try:
+                request_id = str(uuid.UUID(request_id))
+                from fbs_transactions import replay
+                from wb_qr_codec import canonical_wb_sticker
+                replay_barcode = canonical_wb_sticker(barcode)
+                if replay(request_id, shift_id, prior_employee_id, replay_barcode, product_barcode):
+                    return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
+            except ValueError:
+                pass
         return jsonify(error="Требуется вход по бейджу"), 401
 
     shift = query_one(
