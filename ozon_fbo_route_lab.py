@@ -6,6 +6,7 @@ Dimensions are EXAMPLE external box dimensions in centimetres, not stock data.
 from flask import Blueprint, jsonify, redirect, request
 from wms import manager_access, query_all
 from ozon_fbo_dimensions import read_dimensions_xlsx, parse_synthetic_basket, join_virtual_basket
+from grit_google_sheets import get_google_catalog, sync_configuration, GoogleSheetsSyncError
 from warehouse_map import line_of, location_sort_key
 
 route_lab_bp = Blueprint("fbo_route_lab", __name__)
@@ -94,11 +95,9 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <button id="run">Рассчитать маршрут</button></div>
 <div id="state" class="small" role="status">Выбери режим и запусти расчёт.</div></section>
 <section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
-<p class="small">Экспортируй Google-таблицу «Справочник NEW +» в формате XLSX. Читаем вкладки «Габариты» и «Сводный»,
-а адреса получаем из существующих привязок карты GRIT только для просмотра. Данные не сохраняются; рабочие задания не изменяются.</p>
-<p class="small">Используй экспорт собственного разрешённого справочника. Ссылка на личную Google-таблицу намеренно не хранится в коммерческом приложении.</p>
-<form id="joinedForm" enctype="multipart/form-data">
-<label>Экспорт таблицы (.xlsx)<input type="file" name="catalog" accept=".xlsx" required></label>
+<p class="small">GRIT читает листы «Габариты» и «Сводный» напрямую по Google Sheets API (только чтение). Справочник автоматически обновляется при обращении, не чаще одного раза в 15 минут на процесс. Рабочие задания не меняются.</p>
+<div class="actions"><button type="button" id="syncBtn">↻ Синхронизировать Google Sheets</button><span class="small" id="syncState">Проверяю подключение…</span></div>
+<form id="joinedForm">
 <label>Синтетическая палета: артикул;количество, одна позиция в строке
 <textarea name="basket" placeholder="1022_BOROCCO;2&#10;1088_NONE;1" required></textarea></label>
 <label>Алгоритм<select name="mode"><option value="hybrid">Габаритная группа → адрес</option>
@@ -129,6 +128,22 @@ async function run(){
  finally{btn.disabled=false}
 }
 btn.addEventListener('click',run);run();
+async function syncGoogle(force=false){
+ const label=document.getElementById('syncState'),button=document.getElementById('syncBtn');
+ button.disabled=true;label.textContent='Проверяю подключение Google Sheets…';
+ try{
+  const res=await fetch('/api/manager/ozon-fbo/route-lab/google-sync'+(force?'?force=1':''),{
+   method:force?'POST':'GET',cache:'no-store'});
+  const d=await res.json();
+  if(!res.ok)throw Error(d.error||'Не удалось получить справочник');
+  label.textContent='Синхронизировано: '+d.catalog_complete+' артикулов с габаритами · '+
+   d.catalog_incomplete+' неполных · '+new Date(d.synced_at).toLocaleString('ru-RU')+
+   (d.cached?' · кэш':'');
+ }catch(err){label.textContent=err.message}
+ finally{button.disabled=false}
+}
+document.getElementById('syncBtn').addEventListener('click',()=>syncGoogle(true));
+syncGoogle();
 const form=document.getElementById('joinedForm');
 form.addEventListener('submit',async e=>{
  e.preventDefault();const b=document.getElementById('joinedBtn'),state=document.getElementById('joinedStatus'),
@@ -187,10 +202,15 @@ def route_lab_joined_preview():
     if request.content_length and request.content_length > 3 * 1024 * 1024 + 15000:
         return jsonify(error="Файл слишком большой"), 413
     upload = request.files.get("catalog")
-    if not upload or not str(upload.filename or "").lower().endswith(".xlsx"):
-        return jsonify(error="Загрузи XLSX справочника"), 400
     try:
-        catalog = read_dimensions_xlsx(upload.read(3 * 1024 * 1024 + 1))
+        # Backwards-compatible XLSX API for existing synthetic tests only.
+        # Main UI uses direct, private Google Sheets access, no file upload.
+        if upload:
+            if not str(upload.filename or "").lower().endswith(".xlsx"):
+                return jsonify(error="Файл должен быть XLSX"), 400
+            catalog = read_dimensions_xlsx(upload.read(3 * 1024 * 1024 + 1))
+        else:
+            catalog, _synced_at, _cached = get_google_catalog()
         basket = parse_synthetic_basket(request.form.get("basket", ""))
         mode = request.form.get("mode", "hybrid")
         if mode not in ("hybrid", "size", "address"):
@@ -206,5 +226,23 @@ def route_lab_joined_preview():
         })
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
+    except GoogleSheetsSyncError as exc:
+        return jsonify(error=str(exc)), 503
     except Exception:
         return jsonify(error="Не удалось прочитать карту склада для предпросмотра"), 503
+
+
+@route_lab_bp.route("/api/manager/ozon-fbo/route-lab/google-sync", methods=["GET", "POST"])
+def route_lab_google_sync():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    try:
+        catalog, timestamp, cached = get_google_catalog(
+            force=(request.method == "POST" and request.args.get("force") == "1"))
+        return jsonify(connected=True, configured=True, read_only=True,
+                       catalog_complete=len(catalog["items"]),
+                       catalog_incomplete=len(catalog["incomplete"]),
+                       synced_at=timestamp, cached=cached)
+    except GoogleSheetsSyncError as exc:
+        return jsonify(error=str(exc), configured=sync_configuration()["configured"],
+                       connected=False), 503
