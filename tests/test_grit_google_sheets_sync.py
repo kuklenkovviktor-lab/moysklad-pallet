@@ -21,7 +21,8 @@ class GoogleSyncTests(unittest.TestCase):
         c=read_dimensions_values(DIM)
         self.assertEqual(len(c["items"]),3)
         self.assertEqual(c["items"]["test-xl"]["dimensions_cm"],[50.0,40.0,35.0])
-        self.assertNotIn("weight_kg",c["items"]["test-xl"])\n        self.assertEqual(c["barcodes"],{})
+        self.assertNotIn("weight_kg",c["items"]["test-xl"])
+        self.assertEqual(c["barcodes"],{})
         self.assertEqual(len(c["incomplete"]),1)
 
     def test_incorrect_header_rejected(self):
