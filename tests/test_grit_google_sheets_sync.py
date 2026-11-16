@@ -25,6 +25,35 @@ class GoogleSyncTests(unittest.TestCase):
         self.assertEqual(c["barcodes"],{})
         self.assertEqual(len(c["incomplete"]),1)
 
+    def test_conflicting_dimensions_excluded_without_breaking_catalog(self):
+        rows = [
+            ["Артикул", "Габарит 1 см", "Габарит 2 см", "Габарит 3 см"],
+            ["2346_NONE", "26", "17", "16"],
+            ["GOOD-SKU", "17", "13", "10"],
+            ["2346_NONE", "24", "16", "16"],
+            ["GOOD-SKU", "17", "13", "10"],
+            ["2346_NONE", "26", "17", "16"],
+            ["7076_GRAFIT", "46", "29", "30"],
+            ["7076_GRAFIT", "47", "29", "31"],
+        ]
+        catalog = read_dimensions_values(rows)
+        self.assertEqual(set(catalog["items"]), {"good-sku"})
+        self.assertEqual(set(catalog["conflicts"]), {"2346_none", "7076_grafit"})
+        self.assertEqual(catalog["conflicts"]["2346_none"]["rows"], [2, 4, 6])
+        self.assertEqual(len(catalog["incomplete"]), 2)
+        from ozon_fbo_dimensions import join_virtual_basket
+        located, issues = join_virtual_basket(
+            catalog, [("2346_NONE", 1), ("GOOD-SKU", 2)],
+            [("2346_NONE", "А-01"), ("GOOD-SKU", "А-02")])
+        self.assertEqual([x["article"] for x in located], ["GOOD-SKU"])
+        self.assertIn("Конфликт габаритов", issues[0]["reason"])
+
+    def test_identical_duplicate_dimensions_allowed(self):
+        rows = [DIM[0], DIM[1], DIM[1]]
+        catalog = read_dimensions_values(rows)
+        self.assertEqual(len(catalog["items"]), 1)
+        self.assertEqual(catalog["conflicts"], {})
+
     def test_incorrect_header_rejected(self):
         with self.assertRaises(ValueError):
             read_dimensions_values([["SKU","L","W","H"]])
