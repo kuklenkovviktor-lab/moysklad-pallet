@@ -76,16 +76,18 @@ def read_dimensions_xlsx(raw):
 
 
 def read_dimensions_values(dimension_rows, summary_rows=None):
-    """Only columns A:D of our «Новая таблица» → «Товары».
+    """Read only article and dimensions A:D of our «Новая таблица» → «Товары».
 
-    Other sheets, addresses, weight, barcodes and supplementary columns are
-    deliberately ignored. Missing dimensions remain unknown, never guessed.
+    Conflicting duplicate dimensions fail closed for that SKU only: exclude it
+    completely rather than silently preferring first/last row. Other valid SKUs
+    remain available. No weight, addresses or barcode data is imported.
     """
     header = dimension_rows[0] if dimension_rows else []
     expected = ("Артикул", "Габарит 1 см", "Габарит 2 см", "Габарит 3 см")
     if tuple(str(c or "").strip() for c in (list(header) + [""] * 4)[:4]) != expected:
         raise ValueError("колонки «Товары» A:D не совпадают с ожидаемыми")
-    entries, incomplete = {}, []
+    entries, incomplete, conflicts = {}, [], {}
+    seen = {}
     for rownum, original in enumerate(dimension_rows[1:3001], 2):
         values = list(original)[:4] + [None] * max(0, 4-len(original))
         article = str(values[0] or "").strip()
@@ -95,17 +97,33 @@ def read_dimensions_values(dimension_rows, summary_rows=None):
             incomplete.append({"row": rownum, "article": article[:120],
                                "reason": "Длинный артикул"})
             continue
+        key = article.casefold()
         dims = [_number(v, max_value=1000) for v in values[1:4]]
         if any(v is None for v in dims):
             incomplete.append({"row": rownum, "article": article,
                                "reason": "Нет полного набора трёх габаритов"})
             continue
-        key = article.casefold()
-        if key in entries and entries[key]["dimensions_cm"] != dims:
-            raise ValueError("конфликт габаритов: " + article)
+        first = seen.get(key)
+        if first is not None and first["dimensions_cm"] != dims:
+            if key not in conflicts:
+                conflicts[key] = {"article": first["article"], "rows": [first["row"], rownum]}
+                incomplete.append({"row": rownum, "article": article,
+                                   "reason": "Конфликт габаритов между строками " +
+                                             str(first["row"]) + " и " + str(rownum)})
+            elif rownum not in conflicts[key]["rows"]:
+                conflicts[key]["rows"].append(rownum)
+            entries.pop(key, None)
+            continue
+        if key in conflicts:
+            # Once contradictory measurements have been observed, no later
+            # duplicate may reinstate the SKU into routable catalogue.
+            conflicts[key]["rows"].append(rownum)
+            continue
+        if first is None:
+            seen[key] = {"article": article, "dimensions_cm": dims, "row": rownum}
         entries[key] = {"article": article, "dimensions_cm": dims}
     return {"items": entries, "incomplete": incomplete,
-            "barcodes": {}, "tab_names": ["Товары"]}
+            "conflicts": conflicts, "barcodes": {}, "tab_names": ["Товары"]}
 
 
 def parse_synthetic_basket(text):
@@ -151,7 +169,9 @@ def join_virtual_basket(catalog, basket, assignments):
         key = article.casefold()
         record = catalog["items"].get(key)
         if not record:
-            issues.append({"article": article, "reason": "Габариты неизвестны"})
+            reason = ("Конфликт габаритов в Google Sheets"
+                      if key in catalog.get("conflicts", {}) else "Габариты неизвестны")
+            issues.append({"article": article, "reason": reason})
             continue
         if key in ambiguous:
             issues.append({"article": article, "reason": "Артикул привязан к нескольким ячейкам"})
