@@ -5,6 +5,7 @@ Only reads product cards. Never alters MoySklad products, stock or orders.
 import hashlib
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -35,26 +36,60 @@ def _barcodes(product):
 
 
 def lookup_article(article):
+    """Read and validate one article with bounded transient-error retries.
+
+    Diagnostic never includes token, response body or upstream URL.
+    """
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     if not token:
         raise CatalogUnavailable("API МойСклад не настроен. Импорт заблокирован.")
-    try:
-        response = requests.get(
-            API_BASE + "/entity/product",
-            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-            params={"filter": "article=" + article, "limit": 100},
-            timeout=12,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except (requests.RequestException, ValueError) as exc:
-        raise CatalogUnavailable("МойСклад недоступен: проверка товаров не завершена.") from exc
-    candidates = [row for row in payload.get("rows", [])
-                  if str(row.get("article") or "").strip().casefold() == article.casefold()]
-    if len(candidates) != 1:
-        return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
-    codes = _barcodes(candidates[0])
-    return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
+    article = str(article).strip()
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                API_BASE + "/entity/product",
+                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                params={"filter": "article=" + article, "limit": 100},
+                timeout=12,
+            )
+        except requests.Timeout as exc:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise CatalogUnavailable(
+                "МойСклад: тайм-аут проверки артикула " + article[:80] + " (3 попытки)."
+            ) from exc
+        except requests.RequestException as exc:
+            raise CatalogUnavailable(
+                "МойСклад: ошибка сети при проверке артикула " + article[:80] + "."
+            ) from exc
+        if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+            continue
+        if not response.ok:
+            raise CatalogUnavailable(
+                "МойСклад HTTP " + str(response.status_code) +
+                " при проверке артикула " + article[:80] + "."
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise CatalogUnavailable(
+                "МойСклад: некорректный JSON для артикула " + article[:80] + "."
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            raise CatalogUnavailable(
+                "МойСклад: неожиданный формат каталога для артикула " + article[:80] + "."
+            )
+        candidates = [row for row in payload["rows"]
+                      if isinstance(row, dict) and
+                      str(row.get("article") or "").strip().casefold() == article.casefold()]
+        if len(candidates) != 1:
+            return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
+        codes = _barcodes(candidates[0])
+        return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
+    raise CatalogUnavailable("МойСклад: проверка артикула не завершена.")
+
 
 
 def check_catalog(plan, lookup=lookup_article):
