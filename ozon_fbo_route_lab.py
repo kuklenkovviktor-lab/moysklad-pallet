@@ -53,7 +53,34 @@ def plan_route(items, mode="hybrid"):
     inversions = sum(a["volume_l"] < b["volume_l"] for a,b in zip(ordered, ordered[1:]))
     return {"mode": mode, "items": ordered, "line_switches": switches,
             "size_increases": inversions,
-            "notice": "Адреса заданы условно: это не расстояние в метрах. Вес и прочность упаковки неизвестны."}
+            "unique_lines": len({i["line"] for i in ordered}),
+            "notice": "Схематический маршрут по адресам: расстояния в метрах и проходы не измерены. Вес и прочность упаковки неизвестны."}
+
+
+def make_virtual_picking_sheet(located, issues, mode):
+    """Read-only manager-only Ozon FBO pick-list; never creates a real picking job.
+
+    Source addresses are provided by the internal map lookup; dimensions only
+    from authorized Google Sheets. The printed copy is conspicuously a test.
+    """
+    planned = plan_route(located, mode) if located else None
+    rows = []
+    for index, item in enumerate(planned["items"] if planned else (), 1):
+        rows.append({
+            "step": index, "article": item["article"],
+            "location": item["location"], "line": item["line"],
+            "qty": item["qty"], "dimensions_cm": item["dimensions_cm"],
+            "volume_l": item["volume_l"], "status": "planned",
+        })
+    return {"title": "Ozon FBO · Виртуальный сборочный лист",
+            "simulation_only": True, "printable": True,
+            "mode": mode, "rows": rows, "excluded": list(issues),
+            "positions": len(rows),
+            "units": sum(row["qty"] for row in rows),
+            "location_source": "grit_warehouse_map",
+            "dimension_source": "google_sheets_articles_dimensions_only",
+            "distance_optimized": False}
+
 
 
 HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -215,13 +242,20 @@ def route_lab_joined_preview():
         if mode not in ("hybrid", "size", "address"):
             raise ValueError("Некорректный алгоритм")
         located, issues = join_virtual_basket(catalog, basket, _map_assignments_for_preview())
+        sheet = make_virtual_picking_sheet(located, issues, mode)
         route = plan_route(located, mode) if located else None
+        alternatives = {
+            candidate: {"line_switches": plan_route(located, candidate)["line_switches"],
+                        "size_increases": plan_route(located, candidate)["size_increases"]}
+            for candidate in ("hybrid", "size", "address")
+        } if located else {}
         return jsonify({
             "synthetic_basket": True, "read_only": True, "saved": False,
             "requested": len(basket), "matched": len(located),
             "catalog_complete": len(catalog["items"]),
             "catalog_incomplete": len(catalog["incomplete"]),
-            "issues": issues, "route": route,
+            "issues": issues, "route": route, "picking_sheet": sheet,
+            "route_alternatives": alternatives,
         })
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
