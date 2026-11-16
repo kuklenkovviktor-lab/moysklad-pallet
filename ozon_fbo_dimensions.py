@@ -75,15 +75,19 @@ def read_dimensions_xlsx(raw):
         book.close()
 
 
-def read_dimensions_values(dimension_rows, summary_rows):
-    """Same catalogue schema as XLSX parser, directly from Google Sheets values."""
+def read_dimensions_values(dimension_rows, summary_rows=None):
+    """Only columns A:D of our «Новая таблица» → «Товары».
+
+    Other sheets, addresses, weight, barcodes and supplementary columns are
+    deliberately ignored. Missing dimensions remain unknown, never guessed.
+    """
     header = dimension_rows[0] if dimension_rows else []
-    expected = ("Артикул", "Длина", "Ширина", "Высота", "Вес")
-    if tuple(str(c or "").strip() for c in (list(header) + [""] * 5)[:5]) != expected:
-        raise ValueError("колонки «Габариты» не совпадают с ожидаемыми")
+    expected = ("Артикул", "Габарит 1 см", "Габарит 2 см", "Габарит 3 см")
+    if tuple(str(c or "").strip() for c in (list(header) + [""] * 4)[:4]) != expected:
+        raise ValueError("колонки «Товары» A:D не совпадают с ожидаемыми")
     entries, incomplete = {}, []
     for rownum, original in enumerate(dimension_rows[1:3001], 2):
-        values = list(original) + [None] * max(0, 5 - len(original))
+        values = list(original)[:4] + [None] * max(0, 4-len(original))
         article = str(values[0] or "").strip()
         if not article:
             continue
@@ -94,22 +98,14 @@ def read_dimensions_values(dimension_rows, summary_rows):
         dims = [_number(v, max_value=1000) for v in values[1:4]]
         if any(v is None for v in dims):
             incomplete.append({"row": rownum, "article": article,
-                               "reason": "Нет полного набора Д×Ш×В"})
+                               "reason": "Нет полного набора трёх габаритов"})
             continue
         key = article.casefold()
-        weight = _number(values[4], max_value=10000) if values[4] is not None else None
         if key in entries and entries[key]["dimensions_cm"] != dims:
             raise ValueError("конфликт габаритов: " + article)
-        entries[key] = {"article": article, "dimensions_cm": dims, "weight_kg": weight}
-    barcodes = {}
-    for original in summary_rows[:12000]:
-        values = list(original) + [None, None]
-        article, barcode = str(values[0] or "").strip(), str(values[1] or "").strip()
-        if article and barcode:
-            barcodes.setdefault(article.casefold(), set()).add(barcode)
+        entries[key] = {"article": article, "dimensions_cm": dims}
     return {"items": entries, "incomplete": incomplete,
-            "barcodes": {a: sorted(codes) for a, codes in barcodes.items()},
-            "tab_names": ["Габариты", "Сводный"]}
+            "barcodes": {}, "tab_names": ["Товары"]}
 
 
 def parse_synthetic_basket(text):
