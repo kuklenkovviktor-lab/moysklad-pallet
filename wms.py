@@ -2251,27 +2251,37 @@ function renderProgress(done){
 }
 
 async function loadWbAssemblyPlan(){
+ const info=document.getElementById('wbAssemblyInfo');
  try{
   const response=await fetchWithTimeout('/api/manager/integrations/wildberries/assembly-plan',{cache:'no-store'},5000);
   if(!response.ok)throw Error('HTTP '+response.status);
-  const result=await response.json(),info=document.getElementById('wbAssemblyInfo');
-  if(result.state==='connected'&&Number.isInteger(result.assembly_orders)){
-   wbAssemblyCount=result.assembly_orders;
-   info.textContent='WB · На сборке: '+wbAssemblyCount+' заказов · обновлено '+new Date(result.checked_at).toLocaleTimeString('ru-RU')+
-    ' · окно заказов '+result.window_days+' дней';
+  const result=await response.json();
+  if(result.state==='connected'&&Number.isInteger(result.total_units)&&
+     Number.isInteger(result.grit_picked_on_assembly)&&Number.isInteger(result.remaining_units)){
+   wbAssemblyCount=result.total_units;
+   const total=result.total_units,done=result.grit_picked_on_assembly,remaining=result.remaining_units;
+   const percent=total?Math.min(100,100*done/total):100;
+   document.getElementById('remaining').textContent=remaining;
+   document.getElementById('progressDone').textContent=done;
+   document.getElementById('progressPlan').textContent='/ '+total+' ед. WB на сборке';
+   document.getElementById('progressBar').style.width=percent.toFixed(1)+'%';
+   document.getElementById('progressText').textContent='WB · осталось '+remaining+' товаров · подтверждено в GRIT '+done+
+    ' · '+percent.toFixed(1)+'%';
+   info.textContent='WB · На сборке: '+total+' товарных единиц · обновлено '+
+     new Date(result.checked_at).toLocaleTimeString('ru-RU')+
+     '. Считаются только совпавшие ID заказов и ШК.';
   }else{
    wbAssemblyCount=null;
+   currentPlan=Number(document.getElementById('planInput').value||0);
+   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
    info.textContent='WB · На сборке: '+(result.state==='disabled'?'автоподсчёт выключен':
-    result.state==='unconfigured'?'ключ не настроен':'данные недоступны');
+     result.state==='unconfigured'?'ключ не настроен':'данные недоступны');
   }
-  // Only read-only UI aggregation. Never write the manual daily target.
-  const manual=Number(document.getElementById('planInput').value||0);
-  currentPlan=wbAssemblyCount!==null?wbAssemblyCount:manual;
-  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  document.getElementById('progressPlan').title=wbAssemblyCount!==null?'Из WB · На сборке':'Ручной план';
  }catch(e){
   wbAssemblyCount=null;
-  document.getElementById('wbAssemblyInfo').textContent='WB · На сборке: нет связи';
+  currentPlan=Number(document.getElementById('planInput').value||0);
+  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
+  info.textContent='WB · На сборке: ошибка связи, показан ручной план';
  }
 }
 
@@ -2294,13 +2304,13 @@ async function load(){
  if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
  const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
 
- currentPlan=wbAssemblyCount!==null?wbAssemblyCount:Number(plan.wb_fbs_plan||0);
+ currentPlan=Number(plan.wb_fbs_plan||0);
  document.getElementById('planInput').value=currentPlan||'';
  document.getElementById('todayOrders').textContent=f.orders||0;
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
  document.getElementById('active').textContent=d.workers.length;
- renderProgress(Number(f.orders||0));
+ if(wbAssemblyCount===null)renderProgress(Number(f.orders||0));
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');

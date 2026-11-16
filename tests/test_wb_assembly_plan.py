@@ -32,6 +32,7 @@ class WBAssemblyPlanTests(unittest.TestCase):
         get,post=self._responses()
         result=count_assembly_orders("FAKE-KEY", get=get, post=post, now=1800000000)
         self.assertEqual(result["assembly_orders"],1)
+        self.assertEqual(result["active_order_ids"], [11])
         self.assertEqual(result["checked_orders"],3)
         self.assertEqual(result["window_days"],30)
 
@@ -68,6 +69,34 @@ class WBAssemblyPlanTests(unittest.TestCase):
         self.assertIn("WB · На сборке",wms)
         self.assertIn("wbAssemblyCount",wms)
         self.assertIn("loadWbAssemblyPlan()",wms)
+
+
+    def test_manager_endpoint_excludes_only_scanned_active_wb_orders(self):
+        from flask import Flask
+        from integrations import integrations_bp
+        app=Flask(__name__);app.secret_key="fake";app.testing=True
+        app.register_blueprint(integrations_bp)
+        client=app.test_client()
+        current={"state":"connected","assembly_orders":3,"active_order_ids":[11,12,13],
+                 "checked_at":"2026-11-16T13:00:00Z"}
+        with client.session_transaction() as session:
+            session["manager_web"]=True
+        with patch("wb_assembly_plan.assembly_plan_status",return_value=current), \
+             patch("wms.query_all",return_value=[("11",)]) as query:
+            result=client.get("/api/manager/integrations/wildberries/assembly-plan")
+        self.assertEqual(result.status_code,200,result.json)
+        self.assertEqual(result.json["total_units"],3)
+        self.assertEqual(result.json["grit_picked_on_assembly"],1)
+        self.assertEqual(result.json["remaining_units"],2)
+        self.assertNotIn("active_order_ids",result.json)
+        query.assert_called_once()
+
+    def test_dashboard_not_mixing_all_daily_scans_with_current_wb_orders(self):
+        from pathlib import Path
+        wms=Path("wms.py").read_text(encoding="utf-8")
+        self.assertIn("result.grit_picked_on_assembly",wms)
+        self.assertIn("result.remaining_units",wms)
+        self.assertIn("if(wbAssemblyCount===null)renderProgress",wms)
 
 
 if __name__ == "__main__":
