@@ -108,6 +108,22 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #ff9
 textarea,input[type=file]{background:#0d1d2c;color:#f1f6ff;border:1px solid #42607a;border-radius:9px;padding:11px;width:100%}
 textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;padding:8px 12px;background:#312c2c;margin-top:10px}
 .metric strong{display:block;font-size:22px}
+.sheet-toolbar{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:12px 0}
+.sheet-toolbar button{background:#28485f}
+.pick-sheet{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.pick-sheet th,.pick-sheet td{padding:10px 8px;border-bottom:1px solid #30465c;text-align:left}
+.pick-sheet th{color:#aac4d9;font-size:12px}
+.pick-sheet .cell-code{font-size:16px;color:#f9b869;font-weight:800}
+.pick-sheet tr:nth-child(even){background:#1b2d40}
+.pick-meta{color:#aac4d9;font-size:12px;margin-bottom:10px}
+.sheet-demo{font-weight:800;color:#ffba79}
+@media print{body{background:white!important;color:black!important}main{max-width:none;padding:0}
+main>*,section.card{display:none!important}#joinedSection{display:block!important;border:0!important;background:white!important;padding:0!important}
+#joinedSection>h2,#joinedSection>p,#joinedSection>.actions,#joinedSection form,#joinedStatus{display:none!important}
+#joinedReport>*:not(#printSheet){display:none!important}#printSheet{display:block!important}
+#printSheet *{color:black!important;background:white!important;border-color:#777!important}
+#printSheet button{display:none!important}.sheet-demo{font-size:18px!important}}
+
 @media(max-width:620px){main{padding:12px}.controls label,.controls select,.controls button{width:100%}.card{padding:13px}}
 </style></head><body><main>
 <a href="/manager/ozon-fbo">← Ozon FBO</a>
@@ -121,7 +137,7 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <option value="address">По адресу ячейки</option></select></label>
 <button id="run">Рассчитать маршрут</button></div>
 <div id="state" class="small" role="status">Выбери режим и запусти расчёт.</div></section>
-<section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
+<section class="card" id="joinedSection"><h2>Виртуальный сборочный лист Ozon FBO</h2>
 <p class="small">GRIT читает только артикул и три габарита из вкладки «Товары» нашей Google-таблицы «Новая таблица» (только чтение). Справочник автоматически обновляется при обращении, не чаще одного раза в 15 минут на процесс. Рабочие задания не меняются.</p>
 <div class="actions"><button type="button" id="syncBtn">↻ Синхронизировать Google Sheets</button><span class="small" id="syncState">Проверяю подключение…</span></div>
 <form id="joinedForm">
@@ -186,7 +202,29 @@ form.addEventListener('submit',async e=>{
   const items=d.route?d.route.items.map((i,index)=>
    '<div class="item"><div class="step">'+(index+1)+'</div><div class="info"><b>'+esc(i.article)+'</b>'+
    '<div class="meta">'+esc(i.location)+' · '+esc(i.volume_l)+' л · '+esc(i.qty)+' шт.</div></div></div>').join(''):'<p class="small">Нет позиций с одновременно известными габаритами и адресом. Маршрут не рассчитан.</p>';
-  report.innerHTML=issues+'<h2 style="margin-top:16px">Виртуальный порядок по связанным позициям</h2>'+items;
+  const stats=Object.entries(d.route_alternatives||{}).map(([mode,v])=>
+    '<div class="metric">'+esc(({hybrid:'Габариты → адрес',size:'Крупные сначала',address:'Адреса по порядку'}[mode]||mode))+
+    '<strong>'+v.line_switches+' линий / '+v.size_increases+' увеличений</strong></div>').join('');
+  const sheet=d.picking_sheet;
+  const rows=sheet.rows.map(i=>'<tr><td>'+i.step+'</td><td class="cell-code">'+esc(i.location)+
+    '</td><td><b>'+esc(i.article)+'</b></td><td>'+i.qty+'</td><td>'+esc(i.dimensions_cm.join(' × '))+
+    '</td><td>'+i.volume_l+'</td><td>□</td></tr>').join('');
+  const omitted=sheet.excluded.length?
+    '<div class="issues"><b>Не включены, требуется уточнение</b>'+
+    sheet.excluded.map(i=>'<div>'+esc(i.article)+' · '+esc(i.reason)+'</div>').join('')+'</div>':'';
+  const printed=sheet.rows.length?
+    '<div id="printSheet"><div class="sheet-toolbar"><div><b class="sheet-demo">ТЕСТ · НЕ ДЛЯ РЕАЛЬНОЙ СБОРКИ</b>'+
+    '<h2>Ozon FBO · Виртуальный сборочный лист</h2></div>'+
+    '<button type="button" onclick="window.print()">Печать пробного листа</button></div>'+
+    '<div class="pick-meta">Позиций: '+sheet.positions+' · Штук: '+sheet.units+
+    ' · Адреса: карта GRIT · Размеры: Google Sheets · Дистанция не рассчитана</div>'+
+    '<div style="overflow-x:auto"><table class="pick-sheet"><thead><tr><th>№</th><th>Ячейка</th>'+
+    '<th>Артикул</th><th>Шт.</th><th>Габариты, см</th><th>Объём, л</th><th>✓</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div>'+omitted+'</div>':
+    '<p class="small">Не удалось сформировать маршрут: для товаров нужны габариты и однозначные адреса из карты.</p>';
+  report.innerHTML='<h2>Сравнение вариантов порядка</h2><div class="metrics">'+stats+'</div>'+
+   '<p class="small">Это сравнение по числу переходов между линиями и увеличений объёма. Не физически кратчайший путь.</p>'+
+   issues+'<h2 style="margin-top:16px">Предложенный маршрут · выбранный режим</h2>'+items+printed;
  }catch(err){state.textContent=err.message}
  finally{b.disabled=false}
 });
