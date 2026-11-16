@@ -143,6 +143,49 @@ def moysklad_connection_check():
     return jsonify(_moysklad_health())
 
 
+def _wb_api_health():
+    """Explicit token check only: Marketplace ping, no seller order reads."""
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    token = os.getenv("WB_API_TOKEN", "").strip()
+    if not token:
+        return {"state": "unconfigured", "label": "Ключ не задан",
+                "details": "Добавь WB_API_TOKEN на HOSTKEY.", "checked_at": checked_at}
+    try:
+        response = requests.get(
+            "https://marketplace-api.wildberries.ru/ping",
+            headers={"Authorization": token, "Accept": "application/json"},
+            timeout=10, allow_redirects=False)
+    except requests.RequestException:
+        return {"state": "unavailable", "label": "Нет соединения",
+                "details": "Не удалось связаться с WB API.", "checked_at": checked_at}
+    if response.status_code == 200:
+        try:
+            valid = response.json().get("Status") == "OK"
+        except (ValueError, AttributeError, TypeError):
+            valid = False
+        if valid:
+            return {"state": "connected", "label": "WB API подключён",
+                    "details": "Маркетплейс принял ключ; заказы не запрашивались.",
+                    "checked_at": checked_at}
+    if response.status_code in (401, 403):
+        return {"state": "unauthorized", "label": "Нет доступа",
+                "details": "Проверь срок действия и категорию Маркетплейс.",
+                "checked_at": checked_at}
+    if response.status_code == 429:
+        return {"state": "unavailable", "label": "Лимит WB API",
+                "details": "Слишком много проверок.", "checked_at": checked_at}
+    return {"state": "unavailable", "label": "Ошибка WB API",
+            "details": "Получен HTTP " + str(response.status_code),
+            "checked_at": checked_at}
+
+
+@integrations_bp.post("/api/manager/integrations/wildberries/check")
+def wb_connection_check():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    return jsonify(_wb_api_health())
+
+
 @integrations_bp.get("/manager/integrations")
 def integrations_page():
     if not manager_access():
@@ -158,6 +201,10 @@ def integrations_page():
         extra = ('<div class="health-controls"><button id="checkMoysklad" type="button">Проверить соединение</button>'
                  '<div id="moyskladResult" class="health-result" role="status" aria-live="polite">'
                  'Проверка ещё не выполнялась.</div></div>') if item["id"] == "moysklad" else ""
+        if item["id"] == "wildberries":
+            extra = ('<div class="health-controls"><button id="checkWb" type="button">Проверить WB API</button>'
+                     '<div id="wbResult" class="health-result" role="status" aria-live="polite">'
+                     'Только проверка ключа, без загрузки заказов.</div></div>')
         cards.append(
             '<article class="card"><div class="between"><h2>' + escape(item["name"]) +
             '</h2><span class="status" id="' + escape(item["id"]) + '-status">' + escape(status) + '</span></div><p>' +
@@ -224,6 +271,22 @@ if(check){
   }finally{check.disabled=false}
  });
 }
+const checkWb=document.getElementById('checkWb');
+if(checkWb)checkWb.addEventListener('click',async()=>{
+ if(checkWb.disabled)return;
+ checkWb.disabled=true;
+ const out=document.getElementById('wbResult'),badge=document.getElementById('wildberries-status');
+ out.textContent='Проверяю доступ к WB…';
+ try{
+  const response=await fetch('/api/manager/integrations/wildberries/check',{
+   method:'POST',cache:'no-store',credentials:'same-origin'});
+  const result=await response.json();
+  if(!response.ok)throw Error(result.error||'Нет ответа');
+  badge.textContent=result.label;badge.className='status '+result.state;
+  out.className='health-result '+result.state;out.textContent=result.details;
+ }catch(e){out.className='health-result unavailable';out.textContent=e.message}
+ finally{checkWb.disabled=false}
+});
 </script></main></body></html>"""
     return Response(html, content_type="text/html; charset=utf-8")
 

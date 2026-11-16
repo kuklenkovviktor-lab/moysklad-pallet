@@ -40,7 +40,7 @@ services:
       GRIT_GOOGLE_SPREADSHEET_ID: ${GRIT_GOOGLE_SPREADSHEET_ID:-}
       GRIT_GOOGLE_SERVICE_ACCOUNT_FILE: /run/grit-secrets/google-sa.json
       MOYSKLAD_TOKEN: ${MOYSKLAD_TOKEN:-}
-      WB_API_TOKEN: ""
+      WB_API_TOKEN: ${WB_API_TOKEN:-}
       ONIX_PRINT_AGENT_TOKEN: ""
       YC_S3_BUCKET: ""
       GIT_COMMIT: ${GIT_COMMIT:-hostkey-test}
