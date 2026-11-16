@@ -2135,6 +2135,8 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   <div class="progress"><div id="progressBar"></div></div>
   <div class="small" id="progressText">Задай план на день, чтобы видеть остаток и процент выполнения.</div>
   <div class="small" id="wbAssemblyInfo" style="margin-top:9px">WB · На сборке: источник не подключён</div>
+  <div class="small" style="margin-top:6px"><a href="/manager/integrations/wildberries/history">История WB FBS · сборка и отгрузка →</a></div>
+  <div id="wbDailyFlow" class="small" style="margin-top:7px">История: загрузка…</div>
  </div>
 
  <div class="card hourly-card">
@@ -2374,7 +2376,19 @@ async function runWbStatus(){
 async function dashboardLoop(){await runDashboardLoad();setTimeout(dashboardLoop,10000)}
 async function wbStatusLoop(){await runWbStatus();setTimeout(wbStatusLoop,15000)}
 dashboardLoop();wbStatusLoop();
-async function wbAssemblyLoop(){if(!document.hidden)await loadWbAssemblyPlan();setTimeout(wbAssemblyLoop,60000)}
+async function loadWbDailyHistory(){
+ try{
+  const r=await fetchWithTimeout('/api/manager/integrations/wildberries/history',{cache:'no-store'},5000);
+  if(!r.ok)throw Error('status');
+  const d=await r.json(),today=(d.days||[])[0];
+  if(!today)throw Error('missing');
+  document.getElementById('wbDailyFlow').textContent=
+    'За сегодня · поступило на сборку '+today.new_on_assembly_observed+
+    ' · собрано '+today.picked_in_grit+
+    ' · передано в доставку '+today.moved_to_delivery_observed;
+ }catch(e){document.getElementById('wbDailyFlow').textContent='История WB временно недоступна';}
+}
+async function wbAssemblyLoop(){if(!document.hidden){await loadWbAssemblyPlan();await loadWbDailyHistory()}setTimeout(wbAssemblyLoop,60000)}
 wbAssemblyLoop();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
