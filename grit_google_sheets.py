@@ -58,13 +58,11 @@ def _google_values(info, spreadsheet_id):
         credentials = service_account.Credentials.from_service_account_info(
             info, scopes=[SHEETS_SCOPE])
         credentials.refresh(Request())
-        url = "https://sheets.googleapis.com/v4/spreadsheets/" + spreadsheet_id + "/values:batchGet"
+        url = "https://sheets.googleapis.com/v4/spreadsheets/" + spreadsheet_id + "/values/\u0027Товары\u0027!A1:D3000"
         response = requests.get(
             url, headers={"Authorization": "Bearer " + credentials.token,
                           "Accept": "application/json"},
-            params=[("ranges", "'Габариты'!A1:E3000"),
-                    ("ranges", "'Сводный'!A3:B12000"),
-                    ("valueRenderOption", "FORMATTED_VALUE")],
+            params={"valueRenderOption": "FORMATTED_VALUE"},
             timeout=12, allow_redirects=False,
         )
     except Exception as exc:
@@ -77,10 +75,10 @@ def _google_values(info, spreadsheet_id):
     if response.status_code != 200:
         raise GoogleSheetsSyncError("Google Sheets вернул HTTP " + str(response.status_code))
     try:
-        ranges = response.json().get("valueRanges", [])
-        if len(ranges) != 2:
-            raise ValueError("unexpected ranges")
-        return (ranges[0].get("values", []), ranges[1].get("values", []))
+        rows = response.json().get("values", [])
+        if not isinstance(rows, list):
+            raise ValueError("unexpected rows")
+        return rows
     except (TypeError, ValueError, AttributeError, IndexError) as exc:
         raise GoogleSheetsSyncError("Google Sheets вернул неожиданный формат данных") from exc
 
@@ -94,9 +92,9 @@ def get_google_catalog(force=False):
         now = time.monotonic()
         if not force and _CACHE["catalog"] is not None and _CACHE["spreadsheet_id"] == sid and now < _CACHE["until"]:
             return _CACHE["catalog"], _CACHE["synced_at"], True
-        dim_rows, summary_rows = _google_values(info, sid)
+        dimension_rows = _google_values(info, sid)
         try:
-            catalog = read_dimensions_values(dim_rows, summary_rows)
+            catalog = read_dimensions_values(dimension_rows)
         except ValueError as exc:
             raise GoogleSheetsSyncError("Структура таблицы изменилась: " + str(exc)) from exc
         if not catalog["items"]:

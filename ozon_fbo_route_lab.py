@@ -95,7 +95,7 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <button id="run">Рассчитать маршрут</button></div>
 <div id="state" class="small" role="status">Выбери режим и запусти расчёт.</div></section>
 <section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
-<p class="small">GRIT читает листы «Габариты» и «Сводный» напрямую по Google Sheets API (только чтение). Справочник автоматически обновляется при обращении, не чаще одного раза в 15 минут на процесс. Рабочие задания не меняются.</p>
+<p class="small">GRIT читает только артикул и три габарита из вкладки «Товары» нашей Google-таблицы «Новая таблица» (только чтение). Справочник автоматически обновляется при обращении, не чаще одного раза в 15 минут на процесс. Рабочие задания не меняются.</p>
 <div class="actions"><button type="button" id="syncBtn">↻ Синхронизировать Google Sheets</button><span class="small" id="syncState">Проверяю подключение…</span></div>
 <form id="joinedForm">
 <label>Синтетическая палета: артикул;количество, одна позиция в строке
@@ -158,8 +158,7 @@ form.addEventListener('submit',async e=>{
    d.issues.map(i=>'<div>'+esc(i.article)+' · '+esc(i.reason)+'</div>').join('')+'</div>':'';
   const items=d.route?d.route.items.map((i,index)=>
    '<div class="item"><div class="step">'+(index+1)+'</div><div class="info"><b>'+esc(i.article)+'</b>'+
-   '<div class="meta">'+esc(i.location)+' · '+esc(i.volume_l)+' л · '+esc(i.weight_kg??'Вес не указан')+
-   ' кг · '+esc(i.qty)+' шт. · ШК: '+esc(i.barcodes.join(', ')||'нет в Сводном')+'</div></div></div>').join(''):'<p class="small">Нет позиций с одновременно известными габаритами и адресом. Маршрут не рассчитан.</p>';
+   '<div class="meta">'+esc(i.location)+' · '+esc(i.volume_l)+' л · '+esc(i.qty)+' шт.</div></div></div>').join(''):'<p class="small">Нет позиций с одновременно известными габаритами и адресом. Маршрут не рассчитан.</p>';
   report.innerHTML=issues+'<h2 style="margin-top:16px">Виртуальный порядок по связанным позициям</h2>'+items;
  }catch(err){state.textContent=err.message}
  finally{b.disabled=false}
