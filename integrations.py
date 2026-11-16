@@ -192,7 +192,33 @@ def wb_assembly_plan_api():
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
     from wb_assembly_plan import assembly_plan_status
-    return jsonify(assembly_plan_status())
+    result = dict(assembly_plan_status())
+    active_ids = result.pop("active_order_ids", None)
+    if result.get("state") == "connected" and active_ids is not None:
+        from wms import query_all
+        matched = set()
+        # Join by WB order ID or by a locally known WB sticker. No edits.
+        # Small chunks keep SQLite / PostgreSQL parameter counts bounded.
+        for start in range(0, len(active_ids), 200):
+            chunk = active_ids[start:start + 200]
+            if not chunk:
+                continue
+            placeholders = ",".join("?" for _ in chunk)
+            rows = query_all(
+                "SELECT DISTINCT COALESCE(o.order_id, s.wb_order_id) "
+                "FROM scans s LEFT JOIN wb_orders o ON o.wb_barcode=s.barcode "
+                "WHERE s.wb_order_id IN (" + placeholders + ") "
+                "OR o.order_id IN (" + placeholders + ")",
+                tuple(map(str, chunk)) * 2,
+            )
+            matched.update(str(row[0]) for row in rows if row[0] is not None)
+        confirmed_ids = set(map(str, active_ids))
+        completed = len(matched & confirmed_ids)
+        result["grit_picked_on_assembly"] = completed
+        result["remaining_units"] = len(confirmed_ids) - completed
+        result["total_units"] = len(confirmed_ids)
+        result["unit_kind"] = "WB FBS · 1 заказ = 1 товарная единица"
+    return jsonify(result)
 
 
 @integrations_bp.get("/manager/integrations")
