@@ -454,6 +454,7 @@ def require_employee_login():
         "/api/manager/integrations",
         "/api/manager/integrations/moysklad/check",
         "/api/manager/integrations/wildberries/check",
+        "/api/manager/integrations/wildberries/assembly-plan",
         "/manager/integrations/lab",
         "/api/manager/integrations/lab",
         "/manager/integrations/http",
