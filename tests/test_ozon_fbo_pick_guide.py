@@ -50,12 +50,32 @@ class SimplePickingGuideTests(unittest.TestCase):
                                      [("DEMO-S", "А-04"), ("demo-s", "А-04")])
         self.assertEqual(guide["small"]["location"], "А-04")
 
-    def test_worker_ui_mentions_free_order_and_locations(self):
+    def test_worker_ui_uses_one_active_position_and_compact_actions(self):
         from ozon_fbo_picking_ui import WORKER_PICK_HTML
-        self.assertIn("От большего к меньшему", WORKER_PICK_HTML)
-        self.assertIn("Произвольный", WORKER_PICK_HTML)
-        self.assertIn("pick-location", WORKER_PICK_HTML)
-        self.assertIn("Можно сканировать в любом порядке", WORKER_PICK_HTML)
+        from html.parser import HTMLParser
+
+        class Inputs(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.ids = set()
+            def handle_starttag(self, tag, attrs):
+                self.ids.update(value for name, value in attrs if name == "id")
+
+        parser = Inputs()
+        parser.feed(WORKER_PICK_HTML)
+        for element in ("activeCard", "activeLocation", "activeArticle",
+                        "activeQuantity", "positionStep", "barcode", "quantity",
+                        "addBtn", "otherPositions", "extraActions",
+                        "shortageCard", "finishCard", "items", "guideState"):
+            self.assertIn(element, parser.ids)
+        self.assertNotIn("pickOrder", parser.ids)
+        self.assertIn("Следующий товар · крупные сначала", WORKER_PICK_HTML)
+        self.assertIn("Другие позиции · выбор вручную", WORKER_PICK_HTML)
+        self.assertIn("Дополнительные действия", WORKER_PICK_HTML)
+        self.assertIn("Можно сканировать любой товар", WORKER_PICK_HTML)
+        self.assertIn("activeItemId=item.id", WORKER_PICK_HTML)
+        self.assertNotIn("hint.dimensions_cm.join", WORKER_PICK_HTML)
+        self.assertIn("function verifyBarcode()", WORKER_PICK_HTML)
 
     def test_worker_hint_endpoint_read_only_and_network_mocked(self):
         from flask import Flask
