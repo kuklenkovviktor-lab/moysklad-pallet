@@ -61,6 +61,22 @@ class WBAssemblyPlanTests(unittest.TestCase):
             self.assertEqual(assembly_plan_status()["state"],"disabled")
             get.assert_not_called()
 
+    def test_live_refresh_returns_syncing_immediately(self):
+        import wb_assembly_plan as mod
+        from unittest.mock import patch
+        from time import monotonic
+        mod._CACHE.update(at=0, result=None, running=False, started_at=None)
+        with patch.dict(os.environ, {"WB_API_TOKEN": "FAKE-KEY",
+                                     "GRIT_WB_ASSEMBLY_PLAN_LIVE": "1"}), \
+             patch("wb_assembly_plan.threading.Thread") as thread:
+            result = mod.assembly_plan_status()
+            self.assertEqual(result["state"], "syncing")
+            thread.return_value.start.assert_called_once()
+            second = mod.assembly_plan_status()
+            self.assertEqual(second["state"], "syncing")
+            thread.return_value.start.assert_called_once()
+        mod._CACHE.update(at=0, result=None, running=False, started_at=None)
+
     def test_dashboard_has_manager_route_and_source_label(self):
         from pathlib import Path
         app = Path("app.py").read_text(encoding="utf-8")
