@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import requests
 
 API = "https://marketplace-api.wildberries.ru"
-_CACHE = {"at": 0.0, "result": None}
+_CACHE = {"at": 0.0, "result": None, "running": False, "started_at": None}
 _LOCK = threading.Lock()
 
 
@@ -51,8 +51,10 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
                            timeout=15, allow_redirects=False)
             response.raise_for_status()
             payload = response.json()
+        except requests.HTTPError as exc:
+            raise WBPlanError("WB /orders: HTTP " + str(exc.response.status_code if exc.response is not None else "?")) from exc
         except requests.RequestException as exc:
-            raise WBPlanError("Не удалось получить список заказов WB") from exc
+            raise WBPlanError("WB /orders: сетевая ошибка или тайм-аут") from exc
         except ValueError as exc:
             raise WBPlanError("WB вернул некорректные данные") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("orders"), list):
@@ -84,8 +86,12 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
                             json={"orders": chunk}, timeout=15, allow_redirects=False)
             response.raise_for_status()
             states = _parse_statuses(response.json())
-        except (requests.RequestException, ValueError) as exc:
-            raise WBPlanError("Не удалось проверить статусы WB") from exc
+        except requests.HTTPError as exc:
+            raise WBPlanError("WB /orders/status: HTTP " + str(exc.response.status_code if exc.response is not None else "?")) from exc
+        except requests.RequestException as exc:
+            raise WBPlanError("WB /orders/status: сетевая ошибка или тайм-аут") from exc
+        except ValueError as exc:
+            raise WBPlanError("WB /orders/status: некорректный ответ") from exc
         if len(states) != len(chunk) or not all(x in states for x in chunk):
             raise WBPlanError("WB вернул не все статусы: план не обновлён")
         all_statuses.update(states)
@@ -100,26 +106,48 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
             "source": "WB FBS supplierStatus=confirm"}
 
 
+def _refresh_assembly_plan(token):
+    """Slow WB round-trip runs outside a manager HTTP request."""
+    try:
+        result = {"state": "connected", "read_only": True,
+                  **count_assembly_orders(token)}
+    except WBPlanError as exc:
+        result = {"state": "error", "read_only": True,
+                  "details": str(exc)}
+    except Exception:
+        result = {"state": "error", "read_only": True,
+                  "details": "Неожиданная ошибка синхронизации WB"}
+    with _LOCK:
+        _CACHE.update(at=time.monotonic(), result=result, running=False,
+                      started_at=None)
+
+
 def assembly_plan_status():
-    """No automatic live requests without separate opt-in flag."""
+    """Schedule a slow upstream refresh without blocking the dashboard."""
     if os.getenv("GRIT_WB_ASSEMBLY_PLAN_LIVE", "0") != "1":
         return {"state": "disabled", "read_only": True,
-                "details": "Автоматический план WB выключен: нужен разрешённый тестовый контур."}
+                "details": "Автоподсчёт WB выключен в конфигурации"}
     token = os.getenv("WB_API_TOKEN", "").strip()
     if not token:
         return {"state": "unconfigured", "read_only": True}
-    now = time.monotonic()
-    if _CACHE["result"] is not None and now - _CACHE["at"] < 180:
-        return dict(_CACHE["result"])
     with _LOCK:
         now = time.monotonic()
-        if _CACHE["result"] is not None and now - _CACHE["at"] < 180:
-            return dict(_CACHE["result"])
-        try:
-            result = {"state": "connected", "read_only": True,
-                      **count_assembly_orders(token)}
-        except WBPlanError:
-            result = {"state": "error", "read_only": True,
-                      "details": "Не удалось сверить все статусы WB. Предыдущий план не перезаписан."}
-        _CACHE.update(at=now, result=result)
-        return dict(result)
+        cached = _CACHE["result"]
+        if cached is not None and now - _CACHE["at"] < 180:
+            return dict(cached)
+        if _CACHE["running"]:
+            # Stale worker protection after a hung upstream call.
+            if _CACHE.get("started_at") and now - _CACHE["started_at"] < 300:
+                if cached and cached.get("state") == "connected":
+                    return {**cached, "refreshing": True}
+                return {"state": "syncing", "read_only": True,
+                        "details": "Получаем статусы заказов WB"}
+            _CACHE["running"] = False
+        _CACHE["running"] = True
+        _CACHE["started_at"] = now
+        threading.Thread(target=_refresh_assembly_plan, args=(token,),
+                         name="grit-wb-plan-refresh", daemon=True).start()
+        if cached and cached.get("state") == "connected":
+            return {**cached, "refreshing": True}
+        return {"state": "syncing", "read_only": True,
+                "details": "Получаем статусы заказов WB"}
