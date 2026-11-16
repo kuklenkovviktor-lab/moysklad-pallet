@@ -114,6 +114,14 @@ def _refresh_assembly_plan(token):
     try:
         result = {"state": "connected", "read_only": True,
                   **count_assembly_orders(token)}
+        statuses = result.pop("order_statuses", {})
+        from wb_fbs_history import record_observed_statuses
+        try:
+            record_observed_statuses(statuses)
+            result["history_recorded"] = True
+        except Exception:
+            result["history_recorded"] = False
+            result["history_warning"] = "Не удалось сохранить историю статусов WB"
     except WBPlanError as exc:
         result = {"state": "error", "read_only": True,
                   "details": str(exc)}
