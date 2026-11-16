@@ -59,6 +59,8 @@ def record_observed_statuses(statuses, observed_at=None):
                     started += 1
                     continue
                 previous, delivered_at = existing[order_id]
+                if previous == status:
+                    continue  # avoid rewriting thousands of unchanged rows on each dashboard poll
                 new_delivered = instant if previous != "deliver" and status == "deliver" and not delivered_at else delivered_at
                 if new_delivered != delivered_at:
                     delivered += 1
