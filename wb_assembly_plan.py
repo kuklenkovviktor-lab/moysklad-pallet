@@ -71,6 +71,7 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
             raise WBPlanError("Ошибка пагинации WB")
         cursors.add(str(nxt))
         cursor = nxt
+        time.sleep(0.24)  # WB minimum interval between assembly API requests
     else:
         raise WBPlanError("Слишком много заказов: полный подсчёт не завершён")
 
@@ -79,6 +80,8 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
     all_statuses = {}
     ordered_ids = sorted(ids)
     for start in range(0, len(ordered_ids), 1000):
+        if start:
+            time.sleep(0.24)
         chunk = ordered_ids[start:start + 1000]
         try:
             response = post(API + "/api/v3/orders/status",
