@@ -193,7 +193,19 @@ def wb_assembly_plan_api():
         return jsonify(error="Доступ только руководителю"), 403
     from wb_assembly_plan import assembly_plan_status
     result = dict(assembly_plan_status())
+    all_statuses = result.pop("order_statuses", None)
     active_ids = result.pop("active_order_ids", None)
+    if result.get("state") == "connected" and all_statuses is not None:
+        # Persist observed transitions only after the full upstream snapshot succeeded.
+        # No existing WB order or warehouse stock is modified.
+        from wb_fbs_history import record_observed_statuses
+        try:
+            record_observed_statuses(all_statuses)
+            result["history_recorded"] = True
+        except Exception:
+            result["history_recorded"] = False
+            result["history_warning"] = "История WB не сохранена; требуется проверка."
+
     if result.get("state") == "connected" and active_ids is not None:
         from wms import query_all
         matched = set()
@@ -219,6 +231,72 @@ def wb_assembly_plan_api():
         result["total_units"] = len(confirmed_ids)
         result["unit_kind"] = "WB FBS · 1 заказ = 1 товарная единица"
     return jsonify(result)
+
+
+@integrations_bp.get("/api/manager/integrations/wildberries/history")
+def wb_history_api():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    from wb_fbs_history import daily_history, recent_history
+    date = request.args.get("date")
+    try:
+        if date:
+            return jsonify(daily_history(date))
+        return jsonify(days=recent_history(7))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@integrations_bp.get("/manager/integrations/wildberries/history")
+def wb_history_page():
+    if not manager_access():
+        return redirect("/manager-login")
+    return Response("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09121e"><title>GRIT WMS · История WB FBS</title>
+<style>:root{color-scheme:dark}*{box-sizing:border-box}
+body{background:#09121e;color:#edf6ff;font:15px system-ui,Arial;margin:0}
+main{max-width:1050px;margin:auto;padding:18px}a{color:#89caff}
+h1{font-size:24px}.card{background:#142337;border:1px solid #30465c;
+border-radius:12px;margin:13px 0;padding:17px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.metric{background:#1a3249;padding:12px;border-radius:10px}
+.metric span{font-size:12px;color:#aac5d9}.metric b{display:block;font-size:27px}
+table{border-collapse:collapse;width:100%}td,th{padding:11px 7px;border-bottom:1px solid #30465c;text-align:left}
+small{color:#a8c0d3;line-height:1.5}
+@media(max-width:550px){.metrics{grid-template-columns:1fr 1fr}.metric b{font-size:23px}}
+</style></head><body><main>
+<a href="/manager">← Управление складом</a>
+<h1>WB FBS · История сборки и отгрузки</h1>
+<p><small>Фиксируются только переходы статусов, замеченные GRIT после включения наблюдения. 
+Передача в доставку WB не означает физическую приёмку. Даты по Москве.</small></p>
+<div class="card"><h2>Сегодня</h2><div id="today" class="metrics">Загрузка…</div></div>
+<div class="card"><h2>Последние 7 дней</h2><div style="overflow-x:auto"><table>
+<thead><tr><th>Дата</th><th>Поступило на сборку</th><th>Собрано GRIT</th><th>Передано в доставку WB</th></tr></thead>
+<tbody id="rows"></tbody></table></div></div>
+<div class="card"><h2>Сборщики · сегодня</h2><div id="workers">Загрузка…</div></div>
+<script>
+const el=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function load(){
+ try{
+ const r=await fetch('/api/manager/integrations/wildberries/history',{cache:'no-store'});
+ if(!r.ok)throw Error('История недоступна');
+ const data=await r.json(),days=data.days||[],t=days[0]||{};
+ const m=[['Поступило на сборку',t.new_on_assembly_observed],
+          ['Собрано в GRIT',t.picked_in_grit],
+          ['Передано в доставку',t.moved_to_delivery_observed]];
+ el('today').innerHTML=m.map(([label,num])=>'<div class="metric"><span>'+
+    esc(label)+'</span><b>'+Number(num||0)+'</b></div>').join('');
+ el('rows').innerHTML=days.map(d=>'<tr><td>'+esc(d.date)+'</td><td>'+
+   Number(d.new_on_assembly_observed||0)+'</td><td>'+Number(d.picked_in_grit||0)+
+   '</td><td>'+Number(d.moved_to_delivery_observed||0)+'</td></tr>').join('');
+ el('workers').innerHTML=(t.workers||[]).map(w=>'<div style="padding:7px 0">'+
+   esc(w.name)+' · '+Number(w.picked)+' шт.</div>').join('')||'Сборок ещё нет';
+ }catch(e){el('today').textContent=e.message;el('rows').textContent='Нет данных';}
+}
+load();setInterval(()=>{if(!document.hidden)load()},60000);
+</script></main></body></html>""",content_type="text/html; charset=utf-8")
 
 
 @integrations_bp.get("/manager/integrations")
