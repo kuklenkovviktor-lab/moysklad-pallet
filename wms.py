@@ -2277,7 +2277,9 @@ async function loadWbAssemblyPlan(){
    currentPlan=Number(document.getElementById('planInput').value||0);
    renderProgress(Number(document.getElementById('todayOrders').textContent||0));
    info.textContent='WB · На сборке: '+(result.state==='disabled'?'автоподсчёт выключен':
-     result.state==='unconfigured'?'ключ не настроен':'данные недоступны');
+     result.state==='unconfigured'?'ключ не настроен':
+     result.state==='syncing'?'синхронизация WB, проверяем заказы…':
+     result.state==='error'?'ошибка WB: '+String(result.details||'неизвестная ошибка'):'данные недоступны');
   }
  }catch(e){
   wbAssemblyCount=null;
@@ -2388,7 +2390,7 @@ async function loadWbDailyHistory(){
     ' · передано в доставку '+today.moved_to_delivery_observed;
  }catch(e){document.getElementById('wbDailyFlow').textContent='История WB временно недоступна';}
 }
-async function wbAssemblyLoop(){if(!document.hidden){await loadWbAssemblyPlan();await loadWbDailyHistory()}setTimeout(wbAssemblyLoop,60000)}
+async function wbAssemblyLoop(){if(!document.hidden){await loadWbAssemblyPlan();await loadWbDailyHistory()}setTimeout(wbAssemblyLoop,15000)}
 wbAssemblyLoop();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}

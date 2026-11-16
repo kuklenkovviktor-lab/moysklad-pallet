@@ -193,19 +193,7 @@ def wb_assembly_plan_api():
         return jsonify(error="Доступ только руководителю"), 403
     from wb_assembly_plan import assembly_plan_status
     result = dict(assembly_plan_status())
-    all_statuses = result.pop("order_statuses", None)
     active_ids = result.pop("active_order_ids", None)
-    if result.get("state") == "connected" and all_statuses is not None:
-        # Persist observed transitions only after the full upstream snapshot succeeded.
-        # No existing WB order or warehouse stock is modified.
-        from wb_fbs_history import record_observed_statuses
-        try:
-            record_observed_statuses(all_statuses)
-            result["history_recorded"] = True
-        except Exception:
-            result["history_recorded"] = False
-            result["history_warning"] = "История WB не сохранена; требуется проверка."
-
     if result.get("state") == "connected" and active_ids is not None:
         from wms import query_all
         matched = set()
