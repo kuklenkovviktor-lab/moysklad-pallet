@@ -66,7 +66,31 @@ def lookup_article(article):
         if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
             time.sleep(0.5 * (attempt + 1))
             continue
-        if not response.ok:
+        if response.status_code == 400:
+            # Some MoySklad product filters reject particular article syntax.
+            # Fall back to catalog search, then match article exactly below.
+            # Never accept a fuzzy match or silently replace any barcode.
+            try:
+                response = requests.get(
+                    API_BASE + "/entity/product",
+                    headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                    params={"search": article, "limit": 100},
+                    timeout=12,
+                )
+            except requests.Timeout as exc:
+                raise CatalogUnavailable(
+                    "МойСклад: тайм-аут резервного поиска артикула " + article[:80] + "."
+                ) from exc
+            except requests.RequestException as exc:
+                raise CatalogUnavailable(
+                    "МойСклад: ошибка сети резервного поиска артикула " + article[:80] + "."
+                ) from exc
+            if not response.ok:
+                raise CatalogUnavailable(
+                    "МойСклад: фильтр HTTP 400, резервный поиск HTTP " +
+                    str(response.status_code) + " для артикула " + article[:80] + "."
+                )
+        elif not response.ok:
             raise CatalogUnavailable(
                 "МойСклад HTTP " + str(response.status_code) +
                 " при проверке артикула " + article[:80] + "."
