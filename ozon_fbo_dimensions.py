@@ -163,7 +163,6 @@ def join_virtual_basket(catalog, basket, assignments):
         located.append({
             "article": record["article"], "name": record["article"],
             "location": location, "dimensions_cm": record["dimensions_cm"],
-            "weight_kg": record["weight_kg"],
-            "barcodes": catalog["barcodes"].get(key, []), "qty": qty,
+            "qty": qty,
         })
     return located, issues
