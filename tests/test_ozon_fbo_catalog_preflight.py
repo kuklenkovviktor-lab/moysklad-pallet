@@ -100,6 +100,8 @@ class CatalogValidationTests(unittest.TestCase):
 
     def test_mocked_moysklad_exact_article_and_barcodes(self):
         class Response:
+            status_code = 200
+            ok = True
             def raise_for_status(self):
                 pass
             def json(self):
