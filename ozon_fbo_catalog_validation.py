@@ -6,11 +6,30 @@ import hashlib
 import json
 import os
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
+
+# All Ozon FBO preflight requests share one pacing gate per Gunicorn worker.
+# Current user-token quota may be lower than the account-level documented cap.
+_RATE_LOCK = threading.Lock()
+_NEXT_REQUEST_AT = 0.0
+_MIN_REQUEST_SPACING = 0.35
+
+
+def _wait_for_catalog_slot():
+    global _NEXT_REQUEST_AT
+    with _RATE_LOCK:
+        now = time.monotonic()
+        wait = max(0.0, _NEXT_REQUEST_AT - now)
+        _NEXT_REQUEST_AT = max(_NEXT_REQUEST_AT, now) + _MIN_REQUEST_SPACING
+    if wait:
+        time.sleep(wait)
+
+
 
 
 class CatalogUnavailable(ValueError):
@@ -46,6 +65,7 @@ def lookup_article(article):
     article = str(article).strip()
     for attempt in range(3):
         try:
+            _wait_for_catalog_slot()
             response = requests.get(
                 API_BASE + "/entity/product",
                 headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
@@ -63,7 +83,10 @@ def lookup_article(article):
             raise CatalogUnavailable(
                 "МойСклад: ошибка сети при проверке артикула " + article[:80] + "."
             ) from exc
-        if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+        # The same exact filter succeeds standalone but sporadically fails
+        # in bulk. Retry a 400 at most twice with pause; a persistent 400
+        # still fails closed and is never treated as a valid product.
+        if response.status_code in (400, 429, 500, 502, 503, 504) and attempt < 2:
             time.sleep(0.5 * (attempt + 1))
             continue
         if response.status_code == 400:
@@ -71,6 +94,7 @@ def lookup_article(article):
             # Fall back to catalog search, then match article exactly below.
             # Never accept a fuzzy match or silently replace any barcode.
             try:
+                _wait_for_catalog_slot()
                 response = requests.get(
                     API_BASE + "/entity/product",
                     headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
@@ -128,9 +152,10 @@ def check_catalog(plan, lookup=lookup_article):
     articles = sorted({article for article, _ in pairs})
     if len(articles) > 500:
         raise CatalogUnavailable("Слишком много уникальных артикулов для одной проверки (максимум 500).")
-    # Four workers minimize latency without flooding MoySklad with requests.
+    # Limit both concurrency and request rate. Four simultaneous requests
+    # passed a one-off test but bulk imports hit intermittent HTTP 400.
     try:
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=2) as pool:
             matches = dict(zip(articles, pool.map(lookup, articles)))
     except CatalogUnavailable:
         raise
