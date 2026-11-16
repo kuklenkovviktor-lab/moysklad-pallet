@@ -73,6 +73,7 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
         raise WBPlanError("Слишком много заказов: полный подсчёт не завершён")
 
     confirmed = 0
+    active_ids = []
     ordered_ids = sorted(ids)
     for start in range(0, len(ordered_ids), 1000):
         chunk = ordered_ids[start:start + 1000]
@@ -86,8 +87,11 @@ def count_assembly_orders(token, get=requests.get, post=requests.post, now=None,
             raise WBPlanError("Не удалось проверить статусы WB") from exc
         if len(states) != len(chunk) or not all(x in states for x in chunk):
             raise WBPlanError("WB вернул не все статусы: план не обновлён")
-        confirmed += sum(states[ident] == "confirm" for ident in chunk)
-    return {"assembly_orders": confirmed, "checked_orders": len(ids),
+        on_assembly = [ident for ident in chunk if states[ident] == "confirm"]
+        confirmed += len(on_assembly)
+        active_ids.extend(on_assembly)
+    return {"assembly_orders": confirmed, "active_order_ids": active_ids,
+            "checked_orders": len(ids),
             "window_days": 30,
             "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "source": "WB FBS supplierStatus=confirm"}
