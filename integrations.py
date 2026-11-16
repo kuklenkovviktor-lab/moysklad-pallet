@@ -186,6 +186,15 @@ def wb_connection_check():
     return jsonify(_wb_api_health())
 
 
+@integrations_bp.get("/api/manager/integrations/wildberries/assembly-plan")
+def wb_assembly_plan_api():
+    """Show assembly order count; independent of mutable local scan progress."""
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    from wb_assembly_plan import assembly_plan_status
+    return jsonify(assembly_plan_status())
+
+
 @integrations_bp.get("/manager/integrations")
 def integrations_page():
     if not manager_access():
