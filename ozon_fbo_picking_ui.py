@@ -50,6 +50,11 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{ou
 #items tr.position-pending{background:#142337;color:#f1f6ff}
 .position-state{display:inline-block;width:22px;color:#ff9230;font-size:18px;font-weight:800}
 .position-done .position-state{color:#81e9b9}
+.pick-location{display:inline-block;font-weight:850;font-size:16px;color:#ffb66f;padding-top:3px}
+.pick-location.unavailable{font-size:12px;font-weight:600;color:#9eb5ca}
+.pick-sort{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:7px 0}
+.pick-sort select{padding:9px;border-radius:8px;background:#102337;color:#ecf5ff;border:1px solid #42607a}
+
 @media(max-width:620px){#items td{padding:10px 6px;font-variant-numeric:tabular-nums}}
 </style></head><body><main>
 <a href="/ozon-fbo">← Все грузоместа Ozon FBO</a><h1>📦 Сборка Ozon FBO</h1>
@@ -93,6 +98,10 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{ou
 </section>
 <div id="message" role="status" aria-live="polite">Готовлю сборку…</div>
 <section class="card"><h2>Позиции этого грузоместа</h2>
+<div class="pick-sort"><label for="pickOrder">Порядок в листе</label><select id="pickOrder">
+<option value="size">От большего к меньшему</option><option value="free">Произвольный</option>
+</select></div>
+<p class="small" id="guideState">Загружаю адреса и габариты… Сканировать можно любой товар из списка.</p>
 <div class="scroll"><table><thead><tr><th>Артикул / ШК</th><th>План</th><th>Собрано</th><th>Осталось</th></tr></thead>
 <tbody id="items"></tbody></table></div></section>
 <script>
@@ -101,6 +110,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const code=s=>{s=String(s||'').trim();return /^\\][A-Za-z]\\d/.test(s)?s.slice(3):s};
 const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
+let pickGuide={},recommendedIds=[],pickGuideReady=false;
 const pendingKey='onix_fbo_pending_scan_v1';
 const pendingUndoKey='onix_fbo_pending_undo_v1';
 const pendingShortageKey='grit_fbo_pending_shortage_v1';
@@ -151,8 +161,27 @@ async function draw(c){
  E('finishCard').classList.toggle('hidden',c.status!=='started'||!own||!c.ready_for_qr);
  E('finishHint').textContent=c.approved_shortage?'Руководитель согласовал недостачу '+c.approved_shortage+' шт. Подтверди ШК грузоместа.':'Все позиции собраны. Подтверди ШК грузоместа.';
  E('shortageCard').classList.toggle('hidden',c.status!=='started'||!own);
- E('items').innerHTML=[...c.items].sort((a,b)=>Number(a.remaining===0)-Number(b.remaining===0)).map(i=>
-   '<tr class="'+(i.remaining===0?'position-done':'position-pending')+'"><td><span class="position-state" aria-label="'+(i.remaining===0?'Собрано':'Осталось собрать')+'">'+(i.remaining===0?'✓':'○')+'</span><b>'+esc(i.article)+'</b><div class="small">'+esc(i.barcode)+'</div><div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div></td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>').join('');
+ const sortMode=E('pickOrder').value;
+ const rank=new Map(recommendedIds.map((id,idx)=>[id,idx]));
+ const display=[...c.items].sort((a,b)=>{
+  const done=Number(a.remaining===0)-Number(b.remaining===0);
+  if(done)return done;
+  return sortMode==='size'&&pickGuideReady
+   ?(rank.get(a.id)??99999)-(rank.get(b.id)??99999):0;
+ });
+ E('items').innerHTML=display.map(i=>{
+   const hint=pickGuide[i.id]||{};
+   const loc=hint.location?esc(hint.location):
+     (hint.location_state==='multiple'?'Несколько ячеек':'Ячейка не указана');
+   const dim=hint.dimensions_cm?esc(hint.dimensions_cm.join(' × '))+' см':
+     (hint.dimensions_state==='conflict'?'Габариты спорные':'Габариты неизвестны');
+   return '<tr class="'+(i.remaining===0?'position-done':'position-pending')+'"><td>'+
+     '<span class="position-state" aria-label="'+(i.remaining===0?'Собрано':'Осталось собрать')+'">'+(i.remaining===0?'✓':'○')+'</span>'+
+     '<b>'+esc(i.article)+'</b><div class="pick-location'+(hint.location?'':' unavailable')+'">'+loc+'</div>'+
+     '<div class="small">'+dim+' · '+esc(i.barcode)+'</div>'+
+     '<div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div>'+
+     '</td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>';
+ }).join('');
  const canReport=c.items.filter(i=>i.remaining>0&&(!i.shortage||i.shortage.status==='rejected'));
  const oldItem=E('shortageItem').value;
  E('shortageItem').innerHTML=canReport.map(i=>'<option value="'+esc(i.id)+'">'+esc(i.article)+' · недостаёт '+i.remaining+' шт.</option>').join('');
@@ -170,6 +199,21 @@ async function draw(c){
 async function refresh(){
  const d=await req('/cargo/'+encodeURIComponent(cargoId));await draw(d.cargo);
 }
+async function loadPickGuide(){
+ try{
+  const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/guide');
+  pickGuide=d.guide||{};recommendedIds=d.recommended_ids||[];
+  pickGuideReady=true;
+  E('guideState').textContent=d.dimensions_available?
+    'Рекомендация: крупные сначала. Адреса из карты GRIT. Можно сканировать в любом порядке.':
+    'Google Sheets временно недоступна: порядок по габаритам не рассчитан. Сборка доступна.';
+ }catch(e){
+  E('guideState').textContent='Подсказки недоступны, сканирование работает как обычно.';
+ }
+ if(cargo)await draw(cargo);
+}
+E('pickOrder').addEventListener('change',()=>{if(cargo)draw(cargo)});
+
 function verifyBarcode(){
  if(!cargo||!employee)return;
  const barcode=code(E('barcode').value),item=cargo.items.find(i=>i.barcode===barcode);
@@ -309,6 +353,8 @@ async function startup(){
   location.replace('/ozon-fbo');return;
  }
  await refresh();
+ // Optional read-only hints load in parallel and never delay scan recovery.
+ void loadPickGuide();
  await recoverPending();
  await recoverUndo();
  await recoverShortage();
