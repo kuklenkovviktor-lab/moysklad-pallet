@@ -56,61 +56,80 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{ou
 .pick-sort select{padding:9px;border-radius:8px;background:#102337;color:#ecf5ff;border:1px solid #42607a}
 
 @media(max-width:620px){#items td{padding:10px 6px;font-variant-numeric:tabular-nums}}
+/* GRIT focused one-position terminal: single work view on narrow phones. */
+.compact-head{padding:11px 12px;margin:7px 0}.compact-head h2{font-size:17px;margin:0 0 4px}
+.compact-head .metrics{margin:8px 0}.compact-head .metric{padding:7px}.compact-head .metric b{font-size:19px}
+.compact-head .progress{height:6px;margin-top:7px}.compact-head #owner{margin:6px 0 0!important}
+.active-card{margin:8px 0;padding:15px 13px;border-color:#47769f;background:linear-gradient(140deg,#193651,#10283e)}
+.active-header{display:flex;justify-content:space-between;gap:8px;color:#a3c1da;font-size:12px}
+.active-location{font-size:30px;font-weight:850;letter-spacing:.4px;color:#ffb66f;margin:8px 0}
+.active-article{font-size:21px;overflow-wrap:anywhere;margin:3px 0 8px}
+.active-quantity{font-size:17px;font-weight:700}
+.scan-card{padding:12px;margin:8px 0}.scan-card .scan-fields{grid-template-columns:minmax(0,1fr) 110px;gap:8px}
+.scan-card input{min-width:0;width:100%}.scan-card #quantity{width:100%}
+.primary-action{min-height:48px}.other-positions,.extra-panel{padding:12px;margin:8px 0}
+.other-positions summary,.extra-panel summary{cursor:pointer;font-weight:750;font-size:14px}
+.position-list{display:grid;gap:6px}.position-choice{width:100%;text-align:left;background:#14283b;border:1px solid #34536d;padding:11px}
+.position-choice.current{border-color:#ffb66f;background:#20384d}
+.position-choice.done{border-color:#367a68;background:#173b35;color:#9fe0c6}
+.position-choice b{display:block;font-size:14px}.position-choice span{color:#ffba78;font-size:13px}
+.extra-panel #shortageCard{margin:14px 0 0}.extra-panel select{padding:10px;border-radius:8px;margin:5px 0 12px}
+#message{padding:8px 11px;min-height:0;font-size:13px}
+@media(max-width:420px){main{padding:8px}.scan-card label{font-size:12px}.active-location{font-size:28px}.active-article{font-size:20px}}
 </style></head><body><main>
 <a href="/ozon-fbo">← Все грузоместа Ozon FBO</a><h1>📦 Сборка Ozon FBO</h1>
 <p class="small" id="identity">Определяю сотрудника…</p>
-<section class="card"><h2 id="cargoName">Загружаю грузоместо…</h2>
-<div class="small" id="cargoMeta"></div>
-<div class="metrics" style="margin-top:13px"><div class="metric"><span>План</span><b id="planned">—</b></div>
-<div class="metric"><span>Собрано</span><b id="picked">—</b></div>
-<div class="metric"><span>Осталось</span><b id="remaining">—</b></div></div>
+<section class="card compact-head">
+<h2 id="cargoName">Загружаю грузоместо…</h2><div class="small" id="cargoMeta"></div>
+<div class="metrics"><div class="metric"><span>План</span><b id="planned">—</b></div><div class="metric"><span>Собрано</span><b id="picked">—</b></div><div class="metric"><span>Осталось</span><b id="remaining">—</b></div></div>
 <div class="progress"><div id="bar" style="width:0"></div></div>
-<div id="owner" class="small" style="margin:12px 0"></div>
-<button id="claimBtn" class="hidden">Начать сборку грузоместа</button></section>
-<section class="card hidden" id="workCard">
-<h2>1. Сканируй товар</h2>
-<div class="grid">
- <div><label for="barcode">Штрихкод товара (Zebra/HID)</label><input id="barcode" class="full" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Сканируй товар"></div>
- <div><label for="quantity">Сколько взято, шт.</label><input id="quantity" type="number" step="1" min="1" value="1"></div>
-</div>
-<div id="selected" class="small" style="padding:12px 0">Сначала сканируй товар.</div>
-<div class="actions"><button id="addBtn">Подтвердить количество</button>
-<button id="undoBtn" class="secondary">Отменить последний скан</button>
-<button id="cameraProduct" class="secondary">📷 Камера товара</button></div>
+<div id="owner" class="small"></div>
+<button id="claimBtn" class="hidden full">Начать сборку грузоместа</button></section>
+<section class="card active-card" id="activeCard">
+<div class="active-header"><span>Следующий товар · крупные сначала</span><span id="positionStep">—</span></div>
+<div id="activeLocation" class="active-location">Определяю ячейку…</div>
+<h2 id="activeArticle" class="active-article">Загружаю позицию…</h2>
+<div id="activeQuantity" class="active-quantity">—</div>
+<p class="small" id="guideState">Подсказки загружаются. Сканирование не блокируется.</p>
+</section>
+<section class="card hidden scan-card" id="workCard">
+<div class="grid scan-fields">
+<div><label for="barcode">Штрихкод товара</label><input id="barcode" class="full" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Сканируй товар"></div>
+<div><label for="quantity">Количество, шт.</label><input id="quantity" type="number" step="1" min="1" value="1"></div></div>
+<div id="selected" class="small" style="padding:7px 0">Сканируй товар.</div>
+<button id="addBtn" class="full primary-action">Подтвердить количество</button>
+<div class="actions" style="margin-top:7px"><button id="cameraProduct" class="secondary">📷 Камера товара</button></div>
 <div id="reader" class="hidden"></div>
-<p class="small">Скан товара без подтверждения количества не изменяет план. При сбое сети незавершённое подтверждение будет повторено безопасно.</p>
 </section>
-<section class="card hidden" id="shortageCard">
-<h2>2. Отсутствует товар</h2>
-<p class="small">Проверил ячейку, но товара не хватает? Отправь недостачу руководителю. План Ozon автоматически не меняется.</p>
-<label for="shortageItem">Позиция</label><select id="shortageItem" style="width:100%;padding:11px;margin-bottom:10px"></select>
-<label for="shortageReason">Причина</label><select id="shortageReason" style="width:100%;padding:11px;margin-bottom:10px">
+<div id="message" role="status" aria-live="polite">Загрузка задания…</div>
+<details class="card other-positions" id="otherPositions"><summary>Другие позиции · выбор вручную <span id="positionsCount"></span></summary>
+<div class="small" style="margin:9px 0">Нажми на товар, чтобы посмотреть его адрес. Сканировать можно любой ШК задания независимо от выбора.</div>
+<div class="scroll"><div id="items" class="position-list"></div></div>
+</details>
+<details class="card extra-panel" id="extraActions"><summary>Дополнительные действия</summary>
+<div class="actions" style="margin-top:12px"><button id="undoBtn" class="secondary">Отменить последний скан</button></div>
+<section id="shortageCard" class="hidden">
+<h2>Не найден товар</h2>
+<p class="small">Недостача требует подтверждения руководителя и не меняет план автоматически.</p>
+<label for="shortageItem">Позиция</label><select id="shortageItem" class="full"></select>
+<label for="shortageReason">Причина</label><select id="shortageReason" class="full">
 <option>Товар не найден в ячейке</option><option>Фактический остаток меньше плана</option><option>Товар повреждён, требуется проверка</option>
-</select><button id="shortageBtn">Отправить недостачу на согласование</button>
+</select><button id="shortageBtn" class="full">Отправить недостачу</button>
 <div id="shortageStatus" class="small" style="margin-top:10px"></div>
-</section>
+</section></details>
 <section class="card hidden complete" id="finishCard">
-<h2>3. Подтверди грузоместо по ШК</h2>
-<p class="small" id="finishHint">Все позиции собраны или недостача согласована руководителем. Отсканируй существующий ШК грузоместа.</p>
-<div class="grid"><input id="cargoCode" class="full" autocomplete="off" autocapitalize="none" placeholder="ШК грузоместа">
-<button id="finishBtn">Завершить грузоместо</button></div>
-<p><button class="secondary" id="cameraCargo">📷 Камера ШК грузоместа</button></p>
+<h2>Грузоместо собрано</h2><p class="small" id="finishHint">Отсканируй ШК грузоместа для завершения.</p>
+<input id="cargoCode" class="full" autocomplete="off" autocapitalize="none" placeholder="ШК грузоместа">
+<button id="finishBtn" class="full primary-action">Завершить грузоместо</button>
+<button class="secondary" id="cameraCargo">📷 Камера ШК грузоместа</button>
 </section>
-<div id="message" role="status" aria-live="polite">Готовлю сборку…</div>
-<section class="card"><h2>Позиции этого грузоместа</h2>
-<div class="pick-sort"><label for="pickOrder">Порядок в листе</label><select id="pickOrder">
-<option value="size">От большего к меньшему</option><option value="free">Произвольный</option>
-</select></div>
-<p class="small" id="guideState">Загружаю адреса и габариты… Сканировать можно любой товар из списка.</p>
-<div class="scroll"><table><thead><tr><th>Артикул / ШК</th><th>План</th><th>Собрано</th><th>Осталось</th></tr></thead>
-<tbody id="items"></tbody></table></div></section>
 <script>
 const E=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const code=s=>{s=String(s||'').trim();return /^\\][A-Za-z]\\d/.test(s)?s.slice(3):s};
 const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
-let pickGuide={},recommendedIds=[],pickGuideReady=false;
+let pickGuide={},recommendedIds=[],pickGuideReady=false,activeItemId=null,activeManuallySelected=false;
 const pendingKey='onix_fbo_pending_scan_v1';
 const pendingUndoKey='onix_fbo_pending_undo_v1';
 const pendingShortageKey='grit_fbo_pending_shortage_v1';
@@ -161,27 +180,28 @@ async function draw(c){
  E('finishCard').classList.toggle('hidden',c.status!=='started'||!own||!c.ready_for_qr);
  E('finishHint').textContent=c.approved_shortage?'Руководитель согласовал недостачу '+c.approved_shortage+' шт. Подтверди ШК грузоместа.':'Все позиции собраны. Подтверди ШК грузоместа.';
  E('shortageCard').classList.toggle('hidden',c.status!=='started'||!own);
- const sortMode=E('pickOrder').value;
  const rank=new Map(recommendedIds.map((id,idx)=>[id,idx]));
  const display=[...c.items].sort((a,b)=>{
   const done=Number(a.remaining===0)-Number(b.remaining===0);
   if(done)return done;
-  return sortMode==='size'&&pickGuideReady
-   ?(rank.get(a.id)??99999)-(rank.get(b.id)??99999):0;
+  return pickGuideReady?(rank.get(a.id)??99999)-(rank.get(b.id)??99999):0;
  });
+ // Keep partially picked item active. Completed positions advance automatically.
+ const active=c.items.find(i=>i.id===activeItemId&&i.remaining>0);
+ if(!active){
+  activeItemId=display.find(i=>i.remaining>0&&(!i.shortage||!['pending','approved'].includes(i.shortage.status)))?.id||
+    display.find(i=>i.remaining>0)?.id||null;
+  activeManuallySelected=false;
+ }
+ E('positionsCount').textContent=c.items.filter(i=>i.remaining>0).length+' осталось';
  E('items').innerHTML=display.map(i=>{
-   const hint=pickGuide[i.id]||{};
-   const loc=hint.location?esc(hint.location):
-     (hint.location_state==='multiple'?'Несколько ячеек':'Ячейка не указана');
-   const dim=hint.dimensions_cm?esc(hint.dimensions_cm.join(' × '))+' см':
-     (hint.dimensions_state==='conflict'?'Габариты спорные':'Габариты неизвестны');
-   return '<tr class="'+(i.remaining===0?'position-done':'position-pending')+'"><td>'+
-     '<span class="position-state" aria-label="'+(i.remaining===0?'Собрано':'Осталось собрать')+'">'+(i.remaining===0?'✓':'○')+'</span>'+
-     '<b>'+esc(i.article)+'</b><div class="pick-location'+(hint.location?'':' unavailable')+'">'+loc+'</div>'+
-     '<div class="small">'+dim+' · '+esc(i.barcode)+'</div>'+
-     '<div class="small">'+(i.shortage?esc(({pending:'Ожидает руководителя',approved:'Недостача согласована',rejected:'Недостача отклонена'}[i.shortage.status]||i.shortage.status)+' · '+i.shortage.quantity+' шт.'):'')+'</div>'+
-     '</td><td>'+esc(i.qty)+'</td><td>'+esc(i.picked)+'</td><td>'+esc(i.remaining)+'</td></tr>';
+  const hint=pickGuide[i.id]||{};
+  const loc=hint.location|| (hint.location_state==='multiple'?'Несколько ячеек':'Ячейка не указана');
+  return '<button type="button" class="position-choice'+(i.remaining===0?' done':'')+
+   (i.id===activeItemId?' current':'')+'" data-item-id="'+esc(i.id)+'"><b>'+
+   esc(i.article)+' — <span>'+esc(loc)+'</span></b><small>Осталось '+i.remaining+' из '+i.qty+' шт.</small></button>';
  }).join('');
+ updateActive(c);
  const canReport=c.items.filter(i=>i.remaining>0&&(!i.shortage||i.shortage.status==='rejected'));
  const oldItem=E('shortageItem').value;
  E('shortageItem').innerHTML=canReport.map(i=>'<option value="'+esc(i.id)+'">'+esc(i.article)+' · недостаёт '+i.remaining+' шт.</option>').join('');
@@ -190,12 +210,39 @@ async function draw(c){
  E('shortageStatus').textContent=c.pending_shortages?'Ожидают согласования: '+c.pending_shortages+' поз.':c.approved_shortage?'Согласовано: '+c.approved_shortage+' шт.':'';
  E('undoBtn').disabled=!c.picked||!own||c.status!=='started';
  if(c.status==='done')status('Грузоместо собрано и подтверждено. Можно переходить к следующему.',false);
+ else if(E('message').textContent==='Загрузка задания…'||E('message').textContent==='Готовлю сборку…')
+  status('Задание загружено. Сканируй товар из списка.');
  if(verifiedItem){
   const match=c.items.find(i=>i.barcode===verifiedItem.barcode);
   if(!match||!match.remaining){verifiedItem=null;E('selected').textContent='Сканируй следующий товар.';E('barcode').value='';}
   else{verifiedItem=match;E('selected').textContent=match.article+' · осталось '+match.remaining+' шт.';E('quantity').max=match.remaining}
  }
 }
+function updateActive(c){
+ const item=c.items.find(i=>i.id===activeItemId);
+ if(!item){
+  E('activeLocation').textContent='Все позиции обработаны';
+  E('activeArticle').textContent=c.ready_for_qr?'Отсканируй ШК грузоместа':'Ожидается решение по недостачам';
+  E('activeQuantity').textContent='';
+  E('positionStep').textContent='';
+  return;
+ }
+ const hint=pickGuide[item.id]||{};
+ E('activeLocation').textContent=hint.location||
+  (hint.location_state==='multiple'?'Несколько ячеек':'Ячейка не указана');
+ E('activeArticle').textContent=item.article+' — '+(hint.location||'адрес не указан');
+ E('activeQuantity').textContent='Осталось '+item.remaining+' из '+item.qty+' шт.';
+ E('positionStep').textContent='Одна позиция';
+}
+E('items').addEventListener('click',e=>{
+ const button=e.target.closest('[data-item-id]');
+ if(!button||!cargo)return;
+ const item=cargo.items.find(i=>i.id===button.dataset.itemId);
+ if(!item||!item.remaining)return;
+ activeItemId=item.id;activeManuallySelected=true;
+ draw(cargo);
+ E('otherPositions').open=false;
+});
 async function refresh(){
  const d=await req('/cargo/'+encodeURIComponent(cargoId));await draw(d.cargo);
 }
@@ -204,15 +251,16 @@ async function loadPickGuide(){
   const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/guide');
   pickGuide=d.guide||{};recommendedIds=d.recommended_ids||[];
   pickGuideReady=true;
+  if(!verifiedItem&&!activeManuallySelected)activeItemId=null;
   E('guideState').textContent=d.dimensions_available?
-    'Рекомендация: крупные сначала. Адреса из карты GRIT. Можно сканировать в любом порядке.':
-    'Google Sheets временно недоступна: порядок по габаритам не рассчитан. Сборка доступна.';
+    'Рекомендуемый порядок по объёму. Можно сканировать любой товар.':
+    'Размеры временно недоступны. Можно сканировать любой товар.';
  }catch(e){
   E('guideState').textContent='Подсказки недоступны, сканирование работает как обычно.';
  }
  if(cargo)await draw(cargo);
 }
-E('pickOrder').addEventListener('change',()=>{if(cargo)draw(cargo)});
+
 
 function verifyBarcode(){
  if(!cargo||!employee)return;
@@ -222,7 +270,8 @@ function verifyBarcode(){
  if(item.shortage&&['pending','approved'].includes(item.shortage.status)){verifiedItem=null;status('По позиции есть недостача. Требуется решение руководителя.',true);E('barcode').value='';return}
  // A new SKU always starts at 1. Do not carry over quantity from a previous SKU.
  if(!verifiedItem||verifiedItem.barcode!==item.barcode)E('quantity').value=1;
- verifiedItem=item;E('selected').textContent=item.article+' · необходимо ещё '+item.remaining+' шт.';
+ activeItemId=item.id;activeManuallySelected=true;updateActive(cargo);
+  verifiedItem=item;E('selected').textContent=item.article+' · необходимо ещё '+item.remaining+' шт.';
  E('quantity').max=item.remaining;
  status('Товар верный. Укажи фактическое количество и подтверди.');vibrate(true);E('quantity').focus();
 }
