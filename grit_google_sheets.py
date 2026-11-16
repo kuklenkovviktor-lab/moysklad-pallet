@@ -26,10 +26,12 @@ class GoogleSheetsSyncError(Exception):
 
 def sync_configuration():
     account = os.getenv("GRIT_GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    key_file = os.getenv("GRIT_GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    account_available = bool(account or (key_file and os.path.isfile(key_file)))
     spreadsheet_id = os.getenv("GRIT_GOOGLE_SPREADSHEET_ID", "").strip()
-    return {"configured": bool(account and spreadsheet_id),
+    return {"configured": bool(account_available and spreadsheet_id),
             "spreadsheet_id": spreadsheet_id,
-            "service_account_present": bool(account)}
+            "service_account_present": account_available}
 
 
 def _safe_settings():
@@ -40,12 +42,17 @@ def _safe_settings():
     if not sid or len(sid) > 160 or not all(ch.isalnum() or ch in "-_" for ch in sid):
         raise GoogleSheetsSyncError("Неверный идентификатор таблицы")
     try:
-        info = json.loads(os.environ["GRIT_GOOGLE_SERVICE_ACCOUNT_JSON"])
+        key_file = os.getenv("GRIT_GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+        if key_file:
+            with open(key_file, "r", encoding="utf-8") as stream:
+                info = json.load(stream)
+        else:
+            info = json.loads(os.environ["GRIT_GOOGLE_SERVICE_ACCOUNT_JSON"])
         if not isinstance(info, dict) or info.get("type") != "service_account":
             raise ValueError("service account expected")
         if not info.get("client_email") or not info.get("private_key"):
             raise ValueError("credentials incomplete")
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, OSError):
         raise GoogleSheetsSyncError("Учётные данные Google Sheets настроены неверно")
     return info, sid
 
