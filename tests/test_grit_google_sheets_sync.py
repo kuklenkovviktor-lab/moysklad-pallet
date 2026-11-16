@@ -36,6 +36,24 @@ class GoogleSyncTests(unittest.TestCase):
             with self.assertRaises(GoogleSheetsSyncError):
                 get_google_catalog()
 
+    def test_private_key_file_configuration_and_loading(self):
+        import json
+        from unittest.mock import mock_open
+        from grit_google_sheets import _safe_settings
+        fake_info = {"type": "service_account",
+                     "client_email": "synthetic@test.invalid",
+                     "private_key": "FAKE, NOT A KEY"}
+        with patch.dict(os.environ, {
+            "GRIT_GOOGLE_SERVICE_ACCOUNT_JSON": "",
+            "GRIT_GOOGLE_SERVICE_ACCOUNT_FILE": "/run/grit-secrets/google-sa.json",
+            "GRIT_GOOGLE_SPREADSHEET_ID": "FAKE_SPREADSHEET_123"
+        }), patch("grit_google_sheets.os.path.isfile", return_value=True), \
+             patch("builtins.open", mock_open(read_data=json.dumps(fake_info))):
+            self.assertTrue(sync_configuration()["configured"])
+            loaded, sheet = _safe_settings()
+            self.assertEqual(loaded["client_email"], "synthetic@test.invalid")
+            self.assertEqual(sheet, "FAKE_SPREADSHEET_123")
+
     def test_refresh_and_cache_use_mocked_google_only(self):
         with patch.dict(os.environ,{"GRIT_GOOGLE_SPREADSHEET_ID":"FAKE_SPREADSHEET_123",
                                     "GRIT_GOOGLE_SERVICE_ACCOUNT_JSON":

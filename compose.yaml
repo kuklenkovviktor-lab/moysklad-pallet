@@ -37,6 +37,8 @@ services:
       GRIT_PRODUCTION_MODE: ${GRIT_PRODUCTION_MODE:-0}
       WMS_REQUIRE_POSTGRES: "1"
       WMS_MIGRATE_SQLITE_FROM_S3: "0"
+      GRIT_GOOGLE_SPREADSHEET_ID: ${GRIT_GOOGLE_SPREADSHEET_ID:-}
+      GRIT_GOOGLE_SERVICE_ACCOUNT_FILE: /run/grit-secrets/google-sa.json
       MOYSKLAD_TOKEN: ${MOYSKLAD_TOKEN:-}
       WB_API_TOKEN: ""
       ONIX_PRINT_AGENT_TOKEN: ""
@@ -48,6 +50,8 @@ services:
     ports:
       - "127.0.0.1:${GRIT_PORT:-8000}:8000"
     networks: [database, web]
+    volumes:
+      - ${GRIT_DATA_ROOT:-/opt/grit-data}/secrets:/run/grit-secrets:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
