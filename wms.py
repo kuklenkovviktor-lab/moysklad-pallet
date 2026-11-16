@@ -2134,6 +2134,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   </div>
   <div class="progress"><div id="progressBar"></div></div>
   <div class="small" id="progressText">Задай план на день, чтобы видеть остаток и процент выполнения.</div>
+  <div class="small" id="wbAssemblyInfo" style="margin-top:9px">WB · На сборке: источник не подключён</div>
  </div>
 
  <div class="card hourly-card">
@@ -2192,6 +2193,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 
 <script>
 let currentPlan=0,exitQrTimer=null,lastExitQrCode='';
+let wbAssemblyCount=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
 function dayBounds(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),n.getDate()),e=new Date(s);e.setDate(e.getDate()+1);return {from:s.toISOString(),to:e.toISOString()}}
@@ -2248,6 +2250,31 @@ function renderProgress(done){
  }
 }
 
+async function loadWbAssemblyPlan(){
+ try{
+  const response=await fetchWithTimeout('/api/manager/integrations/wildberries/assembly-plan',{cache:'no-store'},5000);
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const result=await response.json(),info=document.getElementById('wbAssemblyInfo');
+  if(result.state==='connected'&&Number.isInteger(result.assembly_orders)){
+   wbAssemblyCount=result.assembly_orders;
+   info.textContent='WB · На сборке: '+wbAssemblyCount+' заказов · обновлено '+new Date(result.checked_at).toLocaleTimeString('ru-RU')+
+    ' · окно заказов '+result.window_days+' дней';
+  }else{
+   wbAssemblyCount=null;
+   info.textContent='WB · На сборке: '+(result.state==='disabled'?'автоподсчёт выключен':
+    result.state==='unconfigured'?'ключ не настроен':'данные недоступны');
+  }
+  // Only read-only UI aggregation. Never write the manual daily target.
+  const manual=Number(document.getElementById('planInput').value||0);
+  currentPlan=wbAssemblyCount!==null?wbAssemblyCount:manual;
+  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
+  document.getElementById('progressPlan').title=wbAssemblyCount!==null?'Из WB · На сборке':'Ручной план';
+ }catch(e){
+  wbAssemblyCount=null;
+  document.getElementById('wbAssemblyInfo').textContent='WB · На сборке: нет связи';
+ }
+}
+
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -2267,7 +2294,7 @@ async function load(){
  if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
  const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
 
- currentPlan=Number(plan.wb_fbs_plan||0);
+ currentPlan=wbAssemblyCount!==null?wbAssemblyCount:Number(plan.wb_fbs_plan||0);
  document.getElementById('planInput').value=currentPlan||'';
  document.getElementById('todayOrders').textContent=f.orders||0;
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
@@ -2337,6 +2364,8 @@ async function runWbStatus(){
 async function dashboardLoop(){await runDashboardLoad();setTimeout(dashboardLoop,10000)}
 async function wbStatusLoop(){await runWbStatus();setTimeout(wbStatusLoop,15000)}
 dashboardLoop();wbStatusLoop();
+async function wbAssemblyLoop(){if(!document.hidden)await loadWbAssemblyPlan();setTimeout(wbAssemblyLoop,60000)}
+wbAssemblyLoop();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
 </script></body></html>"""
