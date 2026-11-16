@@ -129,7 +129,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const code=s=>{s=String(s||'').trim();return /^\\][A-Za-z]\\d/.test(s)?s.slice(3):s};
 const endpoint='/api/ozon-fbo/pick', query=new URLSearchParams(location.search);
 const cargoId=query.get('cargo_id');let cargo=null,employee=null,busy=false,verifiedItem=null;
-let pickGuide={},recommendedIds=[],pickGuideReady=false,activeItemId=null;
+let pickGuide={},recommendedIds=[],pickGuideReady=false,activeItemId=null,activeManuallySelected=false;
 const pendingKey='onix_fbo_pending_scan_v1';
 const pendingUndoKey='onix_fbo_pending_undo_v1';
 const pendingShortageKey='grit_fbo_pending_shortage_v1';
@@ -188,8 +188,11 @@ async function draw(c){
  });
  // Keep partially picked item active. Completed positions advance automatically.
  const active=c.items.find(i=>i.id===activeItemId&&i.remaining>0);
- if(!active)activeItemId=display.find(i=>i.remaining>0&&!i.shortage?.status?.includes('pending')&&i.shortage?.status!=='approved')?.id||
-   display.find(i=>i.remaining>0)?.id||null;
+ if(!active){
+  activeItemId=display.find(i=>i.remaining>0&&(!i.shortage||!['pending','approved'].includes(i.shortage.status)))?.id||
+    display.find(i=>i.remaining>0)?.id||null;
+  activeManuallySelected=false;
+ }
  E('positionsCount').textContent=c.items.filter(i=>i.remaining>0).length+' осталось';
  E('items').innerHTML=display.map(i=>{
   const hint=pickGuide[i.id]||{};
@@ -236,7 +239,7 @@ E('items').addEventListener('click',e=>{
  if(!button||!cargo)return;
  const item=cargo.items.find(i=>i.id===button.dataset.itemId);
  if(!item||!item.remaining)return;
- activeItemId=item.id;
+ activeItemId=item.id;activeManuallySelected=true;
  draw(cargo);
  E('otherPositions').open=false;
 });
@@ -248,6 +251,7 @@ async function loadPickGuide(){
   const d=await req('/cargo/'+encodeURIComponent(cargoId)+'/guide');
   pickGuide=d.guide||{};recommendedIds=d.recommended_ids||[];
   pickGuideReady=true;
+  if(!verifiedItem&&!activeManuallySelected)activeItemId=null;
   E('guideState').textContent=d.dimensions_available?
     'Рекомендуемый порядок по объёму. Можно сканировать любой товар.':
     'Размеры временно недоступны. Можно сканировать любой товар.';
@@ -266,7 +270,7 @@ function verifyBarcode(){
  if(item.shortage&&['pending','approved'].includes(item.shortage.status)){verifiedItem=null;status('По позиции есть недостача. Требуется решение руководителя.',true);E('barcode').value='';return}
  // A new SKU always starts at 1. Do not carry over quantity from a previous SKU.
  if(!verifiedItem||verifiedItem.barcode!==item.barcode)E('quantity').value=1;
- activeItemId=item.id;updateActive(cargo);
+ activeItemId=item.id;activeManuallySelected=true;updateActive(cargo);
   verifiedItem=item;E('selected').textContent=item.article+' · необходимо ещё '+item.remaining+' шт.';
  E('quantity').max=item.remaining;
  status('Товар верный. Укажи фактическое количество и подтверди.');vibrate(true);E('quantity').focus();
