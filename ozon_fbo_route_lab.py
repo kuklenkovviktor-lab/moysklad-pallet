@@ -53,7 +53,56 @@ def plan_route(items, mode="hybrid"):
     inversions = sum(a["volume_l"] < b["volume_l"] for a,b in zip(ordered, ordered[1:]))
     return {"mode": mode, "items": ordered, "line_switches": switches,
             "size_increases": inversions,
-            "notice": "Адреса заданы условно: это не расстояние в метрах. Вес и прочность упаковки неизвестны."}
+            "unique_lines": len({i["line"] for i in ordered}),
+            "notice": "Схематический маршрут по адресам: расстояния в метрах и проходы не измерены. Вес и прочность упаковки неизвестны."}
+
+
+def recommend_route(located):
+    """Select a transparent schematic compromise, not a physical shortest path.
+
+    Minimize aisle-line changes first, then increases in box volume; prefer
+    hybrid when tied. Scoring uses only synthesized basket positions and
+    schematic warehouse addresses, no travel distances or live operations.
+    """
+    candidates = {mode: plan_route(located, mode)
+                  for mode in ("hybrid", "size", "address")}
+    priority = {"hybrid": 0, "address": 1, "size": 2}
+    chosen = min(candidates, key=lambda mode: (
+        candidates[mode]["line_switches"],
+        candidates[mode]["size_increases"],
+        priority[mode]))
+    return chosen, candidates
+
+
+def make_virtual_picking_sheet(located, issues, mode):
+    """Read-only manager-only Ozon FBO pick-list; never creates a real picking job.
+
+    Source addresses are provided by the internal map lookup; dimensions only
+    from authorized Google Sheets. The printed copy is conspicuously a test.
+    """
+    recommended_mode = None
+    if mode == "auto":
+        recommended_mode, _candidates = recommend_route(located) if located else ("hybrid", {})
+        mode = recommended_mode
+    planned = plan_route(located, mode) if located else None
+    rows = []
+    for index, item in enumerate(planned["items"] if planned else (), 1):
+        rows.append({
+            "step": index, "article": item["article"],
+            "location": item["location"], "line": item["line"],
+            "qty": item["qty"], "dimensions_cm": item["dimensions_cm"],
+            "volume_l": item["volume_l"], "status": "planned",
+        })
+    return {"title": "Ozon FBO · Виртуальный сборочный лист",
+            "simulation_only": True, "printable": True,
+            "mode": mode, "recommended_mode": recommended_mode,
+            "rows": rows, "excluded": list(issues),
+            "positions": len(rows),
+            "units": sum(row["qty"] for row in rows),
+            "location_source": "grit_warehouse_map",
+            "dimension_source": "google_sheets_articles_dimensions_only",
+            "distance_optimized": False}
+
 
 
 HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -81,6 +130,22 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #ff9
 textarea,input[type=file]{background:#0d1d2c;color:#f1f6ff;border:1px solid #42607a;border-radius:9px;padding:11px;width:100%}
 textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;padding:8px 12px;background:#312c2c;margin-top:10px}
 .metric strong{display:block;font-size:22px}
+.sheet-toolbar{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:12px 0}
+.sheet-toolbar button{background:#28485f}
+.pick-sheet{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.pick-sheet th,.pick-sheet td{padding:10px 8px;border-bottom:1px solid #30465c;text-align:left}
+.pick-sheet th{color:#aac4d9;font-size:12px}
+.pick-sheet .cell-code{font-size:16px;color:#f9b869;font-weight:800}
+.pick-sheet tr:nth-child(even){background:#1b2d40}
+.pick-meta{color:#aac4d9;font-size:12px;margin-bottom:10px}
+.sheet-demo{font-weight:800;color:#ffba79}
+@media print{body{background:white!important;color:black!important}main{max-width:none;padding:0}
+main>*,section.card{display:none!important}#joinedSection{display:block!important;border:0!important;background:white!important;padding:0!important}
+#joinedSection>h2,#joinedSection>p,#joinedSection>.actions,#joinedSection form,#joinedStatus{display:none!important}
+#joinedReport>*:not(#printSheet){display:none!important}#printSheet{display:block!important}
+#printSheet *{color:black!important;background:white!important;border-color:#777!important}
+#printSheet button{display:none!important}.sheet-demo{font-size:18px!important}}
+
 @media(max-width:620px){main{padding:12px}.controls label,.controls select,.controls button{width:100%}.card{padding:13px}}
 </style></head><body><main>
 <a href="/manager/ozon-fbo">← Ozon FBO</a>
@@ -94,13 +159,13 @@ textarea{min-height:110px;font:inherit}.issues{border-left:3px solid #eaa15b;pad
 <option value="address">По адресу ячейки</option></select></label>
 <button id="run">Рассчитать маршрут</button></div>
 <div id="state" class="small" role="status">Выбери режим и запусти расчёт.</div></section>
-<section class="card"><h2>Связать справочник и карту склада · виртуальный предпросмотр</h2>
+<section class="card" id="joinedSection"><h2>Виртуальный сборочный лист Ozon FBO</h2>
 <p class="small">GRIT читает только артикул и три габарита из вкладки «Товары» нашей Google-таблицы «Новая таблица» (только чтение). Справочник автоматически обновляется при обращении, не чаще одного раза в 15 минут на процесс. Рабочие задания не меняются.</p>
 <div class="actions"><button type="button" id="syncBtn">↻ Синхронизировать Google Sheets</button><span class="small" id="syncState">Проверяю подключение…</span></div>
 <form id="joinedForm">
 <label>Синтетическая палета: артикул;количество, одна позиция в строке
 <textarea name="basket" placeholder="1022_BOROCCO;2&#10;1088_NONE;1" required></textarea></label>
-<label>Алгоритм<select name="mode"><option value="hybrid">Габаритная группа → адрес</option>
+<label>Алгоритм<select name="mode"><option value="auto">Рекомендовать по схеме склада</option><option value="hybrid">Габаритная группа → адрес</option>
 <option value="size">От крупного к мелкому</option><option value="address">По адресу</option></select></label>
 <button type="submit" id="joinedBtn">Проверить связи и рассчитать</button></form>
 <div class="small" id="joinedStatus" role="status">Проверка работает без изменения заказов и операций склада.</div>
@@ -159,7 +224,30 @@ form.addEventListener('submit',async e=>{
   const items=d.route?d.route.items.map((i,index)=>
    '<div class="item"><div class="step">'+(index+1)+'</div><div class="info"><b>'+esc(i.article)+'</b>'+
    '<div class="meta">'+esc(i.location)+' · '+esc(i.volume_l)+' л · '+esc(i.qty)+' шт.</div></div></div>').join(''):'<p class="small">Нет позиций с одновременно известными габаритами и адресом. Маршрут не рассчитан.</p>';
-  report.innerHTML=issues+'<h2 style="margin-top:16px">Виртуальный порядок по связанным позициям</h2>'+items;
+  const stats=Object.entries(d.route_alternatives||{}).map(([mode,v])=>
+    '<div class="metric">'+esc(({hybrid:'Габариты → адрес',size:'Крупные сначала',address:'Адреса по порядку'}[mode]||mode))+
+    '<strong>'+v.line_switches+' линий / '+v.size_increases+' увеличений</strong></div>').join('');
+  const sheet=d.picking_sheet;
+  const rows=sheet.rows.map(i=>'<tr><td>'+i.step+'</td><td class="cell-code">'+esc(i.location)+
+    '</td><td><b>'+esc(i.article)+'</b></td><td>'+i.qty+'</td><td>'+esc(i.dimensions_cm.join(' × '))+
+    '</td><td>'+i.volume_l+'</td><td>□</td></tr>').join('');
+  const omitted=sheet.excluded.length?
+    '<div class="issues"><b>Не включены, требуется уточнение</b>'+
+    sheet.excluded.map(i=>'<div>'+esc(i.article)+' · '+esc(i.reason)+'</div>').join('')+'</div>':'';
+  const printed=sheet.rows.length?
+    '<div id="printSheet"><div class="sheet-toolbar"><div><b class="sheet-demo">ТЕСТ · НЕ ДЛЯ РЕАЛЬНОЙ СБОРКИ</b>'+
+    '<h2>Ozon FBO · Виртуальный сборочный лист</h2></div>'+
+    '<button type="button" onclick="window.print()">Печать пробного листа</button></div>'+
+    '<div class="pick-meta">Режим: '+esc(({hybrid:'Габаритная группа → адрес',size:'Крупные сначала',address:'Ячейки по порядку'}[sheet.mode]||sheet.mode))+
+    (sheet.recommended_mode?' (выбран автоматически)':'')+' · Позиций: '+sheet.positions+' · Штук: '+sheet.units+
+    ' · Адреса: карта GRIT · Размеры: Google Sheets · Дистанция не рассчитана</div>'+
+    '<div style="overflow-x:auto"><table class="pick-sheet"><thead><tr><th>№</th><th>Ячейка</th>'+
+    '<th>Артикул</th><th>Шт.</th><th>Габариты, см</th><th>Объём, л</th><th>✓</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div>'+omitted+'</div>':
+    '<p class="small">Не удалось сформировать маршрут: для товаров нужны габариты и однозначные адреса из карты.</p>';
+  report.innerHTML='<h2>Сравнение вариантов порядка</h2><div class="metrics">'+stats+'</div>'+
+   '<p class="small">Это сравнение по числу переходов между линиями и увеличений объёма. Не физически кратчайший путь.</p>'+
+   issues+'<h2 style="margin-top:16px">Предложенный маршрут · выбранный режим</h2>'+items+printed;
  }catch(err){state.textContent=err.message}
  finally{b.disabled=false}
 });
@@ -212,16 +300,24 @@ def route_lab_joined_preview():
             catalog, _synced_at, _cached = get_google_catalog()
         basket = parse_synthetic_basket(request.form.get("basket", ""))
         mode = request.form.get("mode", "hybrid")
-        if mode not in ("hybrid", "size", "address"):
+        if mode not in ("auto", "hybrid", "size", "address"):
             raise ValueError("Некорректный алгоритм")
         located, issues = join_virtual_basket(catalog, basket, _map_assignments_for_preview())
-        route = plan_route(located, mode) if located else None
+        sheet = make_virtual_picking_sheet(located, issues, mode)
+        selected_mode = sheet["mode"]
+        route = plan_route(located, selected_mode) if located else None
+        alternatives = {
+            candidate: {"line_switches": result["line_switches"],
+                        "size_increases": result["size_increases"]}
+            for candidate, result in recommend_route(located)[1].items()
+        } if located else {}
         return jsonify({
             "synthetic_basket": True, "read_only": True, "saved": False,
             "requested": len(basket), "matched": len(located),
             "catalog_complete": len(catalog["items"]),
             "catalog_incomplete": len(catalog["incomplete"]),
-            "issues": issues, "route": route,
+            "issues": issues, "route": route, "picking_sheet": sheet,
+            "route_alternatives": alternatives,
         })
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
