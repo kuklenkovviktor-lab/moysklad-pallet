@@ -69,8 +69,9 @@ class WBHistoryTests(unittest.TestCase):
         wms=Path("wms.py").read_text()
         self.assertIn('"/api/manager/integrations/wildberries/history"',app)
         self.assertIn('"/manager/integrations/wildberries/history"',app)
-        self.assertIn('all_statuses = result.pop("order_statuses", None)',integrations)
-        self.assertIn('record_observed_statuses(all_statuses)',integrations)
+        plan=Path("wb_assembly_plan.py").read_text()
+        self.assertIn('statuses = result.pop("order_statuses", {})',plan)
+        self.assertIn('record_observed_statuses(statuses)',plan)
         self.assertIn('История WB FBS · сборка и отгрузка',wms)
 
 
