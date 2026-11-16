@@ -13,6 +13,13 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         self.pacing.start()
         self.addCleanup(self.pacing.stop)
 
+    def test_catalog_uses_bounded_concurrency_and_request_spacing(self):
+        from pathlib import Path
+        source=Path("ozon_fbo_catalog_validation.py").read_text(encoding="utf-8")
+        self.assertIn("ThreadPoolExecutor(max_workers=2)",source)
+        self.assertIn("_wait_for_catalog_slot()",source)
+        self.assertIn("_MIN_REQUEST_SPACING = 0.35",source)
+
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_intermittent_400_recovers_on_next_attempt(self):
         rejected=Mock(status_code=400,ok=False)
