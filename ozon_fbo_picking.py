@@ -276,6 +276,44 @@ def cargo_details(cargo_id):
     return jsonify(cargo=item, own=bool(item["employee_id"] == employee["id"]))
 
 
+@fbo_picking_bp.get("/api/ozon-fbo/pick/cargo/<cargo_id>/guide")
+def cargo_picking_guide(cargo_id):
+    """Optional display-only hint. Google outage must not block scanner picking."""
+    if not _worker():
+        return jsonify(error="Войди по бейджу"), 401
+    _ensure_picking_db()
+    cargo = _serialize(cargo_id)
+    if not cargo:
+        return jsonify(error="Грузоместо не найдено"), 404
+
+    from ozon_fbo_pick_guide import create_picking_guide, order_picking_items
+    from grit_google_sheets import get_google_catalog, GoogleSheetsSyncError
+
+    try:
+        assignments = query_all("""
+            SELECT a.article, l.label FROM cell_sku_assignments a
+            JOIN replenishment_locations l ON l.id=a.location_id
+            WHERE l.active=1
+        """)
+    except Exception:
+        assignments = []
+    try:
+        catalog, _, _ = get_google_catalog()
+        dimensions_available = True
+    except (GoogleSheetsSyncError, OSError, ValueError):
+        catalog = {"items": {}, "conflicts": {}}
+        dimensions_available = False
+
+    guide = create_picking_guide(cargo["items"], catalog, assignments)
+    ordered = order_picking_items(cargo["items"], guide)
+    return jsonify(
+        read_only=True, non_blocking=True, can_scan_any_order=True,
+        default_sort="size_desc",
+        dimensions_available=dimensions_available,
+        guide=guide, recommended_ids=[it["id"] for it in ordered],
+    )
+
+
 @fbo_picking_bp.post("/api/ozon-fbo/pick/cargo/<cargo_id>/claim")
 def claim_cargo(cargo_id):
     employee = _worker()
