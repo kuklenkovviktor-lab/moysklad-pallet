@@ -63,6 +63,19 @@ class RoutePlanningTests(unittest.TestCase):
         self.assertEqual(sheet["excluded"], issues)
         self.assertEqual(located[0]["article"], "DEMO-BIG")
 
+    def test_auto_route_recommendation_is_deterministic(self):
+        from ozon_fbo_route_lab import make_virtual_picking_sheet, recommend_route
+        mode, candidates = recommend_route(SYNTHETIC_ITEMS)
+        self.assertIn(mode, ("hybrid", "size", "address"))
+        self.assertEqual(set(candidates), {"hybrid", "size", "address"})
+        winner = candidates[mode]
+        for alternative in candidates.values():
+            self.assertLessEqual(winner["line_switches"], alternative["line_switches"])
+        sheet = make_virtual_picking_sheet(SYNTHETIC_ITEMS, [], "auto")
+        self.assertEqual(sheet["mode"], mode)
+        self.assertEqual(sheet["recommended_mode"], mode)
+        self.assertEqual(len(sheet["rows"]), len(SYNTHETIC_ITEMS))
+
     def test_virtual_picking_sheet_rejects_invalid_route_mode(self):
         from ozon_fbo_route_lab import make_virtual_picking_sheet
         with self.assertRaises(ValueError):
