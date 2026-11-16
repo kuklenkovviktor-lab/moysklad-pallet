@@ -37,6 +37,40 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["status"],"missing")
 
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_article_filter_400_falls_back_to_exact_search(self):
+        rejected=Mock(status_code=400,ok=False)
+        found=Mock(status_code=200,ok=True)
+        found.json.return_value={"rows":[
+            {"article":"1022_BOROCCO_EXTRA","barcodes":[{"ean13":"0000000000001"}]},
+            {"article":"1022_BOROCCO","barcodes":[{"ean13":"1234567890123"}]},
+        ]}
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,found]) as get:
+            result=lookup_article("1022_BOROCCO")
+        self.assertEqual(result,{"status":"found","barcodes":["1234567890123"]})
+        self.assertEqual(get.call_args_list[0].kwargs["params"]["filter"],"article=1022_BOROCCO")
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["search"],"1022_BOROCCO")
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_fallback_fuzzy_only_does_not_pass_catalog_validation(self):
+        rejected=Mock(status_code=400,ok=False)
+        fuzzy=Mock(status_code=200,ok=True)
+        fuzzy.json.return_value={"rows":[{"article":"1022_BOROCCO_EXTRA",
+                                          "barcodes":[{"ean13":"1234567890123"}]}]}
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,fuzzy]):
+            result=lookup_article("1022_BOROCCO")
+        self.assertEqual(result,{"status":"missing","barcodes":[]})
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_fallback_error_exposes_only_codes_not_credentials(self):
+        rejected=Mock(status_code=400,ok=False)
+        fallback=Mock(status_code=403,ok=False)
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,fallback]):
+            with self.assertRaises(CatalogUnavailable) as raised:
+                lookup_article("1022_BOROCCO")
+        self.assertIn("резервный поиск HTTP 403",str(raised.exception))
+        self.assertNotIn("SYNTHETIC-TOKEN",str(raised.exception))
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_timeout_error_after_bounded_retries(self):
         with patch("ozon_fbo_catalog_validation.requests.get",side_effect=requests.Timeout), patch("ozon_fbo_catalog_validation.time.sleep"):
             with self.assertRaisesRegex(CatalogUnavailable,"тайм-аут") as raised:
