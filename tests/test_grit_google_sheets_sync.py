@@ -8,25 +8,25 @@ from ozon_fbo_route_lab import route_lab_bp
 from grit_google_sheets import GoogleSheetsSyncError, sync_configuration, _CACHE, get_google_catalog
 
 
-DIM=[["Артикул","Длина ","Ширина ","Высота","Вес"],["TEST-XL","50","40","35","4,2"],
-     ["TEST-S","8","8","22","0,5"],["TEST-NO", "", "", "", "12"]]
-SUMMARY=[["TEST-XL","2000000000001"],["TEST-S","2000000000002"]]
+DIM=[["Артикул","Габарит 1 см","Габарит 2 см","Габарит 3 см"],
+     ["TEST-XL","50","40","35"],["TEST-S","8","8","22"],
+     ["TEST-NO","","",""],["TEST-L","17","13","10","99"]]
 
 
 class GoogleSyncTests(unittest.TestCase):
     def setUp(self):
         _CACHE.update(catalog=None,until=0,synced_at=None,spreadsheet_id=None)
 
-    def test_google_values_parse_dimensions_and_barcodes(self):
-        c=read_dimensions_values(DIM,SUMMARY)
-        self.assertEqual(len(c["items"]),2)
-        self.assertEqual(c["items"]["test-xl"]["weight_kg"],4.2)
-        self.assertEqual(c["barcodes"]["test-s"],["2000000000002"])
+    def test_google_values_only_article_and_dimensions(self):
+        c=read_dimensions_values(DIM)
+        self.assertEqual(len(c["items"]),3)
+        self.assertEqual(c["items"]["test-xl"]["dimensions_cm"],[50.0,40.0,35.0])
+        self.assertNotIn("weight_kg",c["items"]["test-xl"])\n        self.assertEqual(c["barcodes"],{})
         self.assertEqual(len(c["incomplete"]),1)
 
     def test_incorrect_header_rejected(self):
         with self.assertRaises(ValueError):
-            read_dimensions_values([["SKU","L","W","H","K"]],[])
+            read_dimensions_values([["SKU","L","W","H"]])
 
     def test_no_server_credentials_is_fail_closed(self):
         with patch.dict(os.environ,{"GRIT_GOOGLE_SERVICE_ACCOUNT_JSON":"",
@@ -39,7 +39,7 @@ class GoogleSyncTests(unittest.TestCase):
         with patch.dict(os.environ,{"GRIT_GOOGLE_SPREADSHEET_ID":"FAKE_SPREADSHEET_123",
                                     "GRIT_GOOGLE_SERVICE_ACCOUNT_JSON":
                                     '{"type":"service_account","client_email":"synthetic@test.invalid","private_key":"synthetic"}'}), \
-             patch("grit_google_sheets._google_values",return_value=(DIM,SUMMARY)) as fetch:
+             patch("grit_google_sheets._google_values",return_value=DIM) as fetch:
             first, t, hit=get_google_catalog()
             self.assertFalse(hit)
             second, _, hit=get_google_catalog()
@@ -56,14 +56,14 @@ class GoogleSyncTests(unittest.TestCase):
         self.assertEqual(client.get("/api/manager/ozon-fbo/route-lab/google-sync").status_code,403)
         with client.session_transaction() as session:
             session["manager_web"]=True
-        fake_catalog=read_dimensions_values(DIM,SUMMARY)
+        fake_catalog=read_dimensions_values(DIM)
         with patch("ozon_fbo_route_lab.get_google_catalog",
                    return_value=(fake_catalog,"2026-11-14T10:00:00+00:00",True)), \
              patch("ozon_fbo_route_lab._map_assignments_for_preview",
                    return_value=[("TEST-XL","А-04"),("TEST-S","Ж-12")]) as read_map:
             status=client.get("/api/manager/ozon-fbo/route-lab/google-sync")
             self.assertEqual(status.status_code,200)
-            self.assertEqual(status.json["catalog_complete"],2)
+            self.assertEqual(status.json["catalog_complete"],3)
             route=client.post("/api/manager/ozon-fbo/route-lab/preview",
                               data={"basket":"TEST-XL;2\nTEST-S;1","mode":"hybrid"})
         self.assertEqual(route.status_code,200,route.json)
