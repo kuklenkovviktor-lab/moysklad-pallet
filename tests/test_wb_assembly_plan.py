@@ -81,7 +81,7 @@ class WBAssemblyPlanTests(unittest.TestCase):
                  "checked_at":"2026-11-16T13:00:00Z"}
         with client.session_transaction() as session:
             session["manager_web"]=True
-        with patch("wb_assembly_plan.assembly_plan_status",return_value=current), \\
+        with patch("wb_assembly_plan.assembly_plan_status",return_value=current), \
              patch("wms.query_all",return_value=[("11",)]) as query:
             result=client.get("/api/manager/integrations/wildberries/assembly-plan")
         self.assertEqual(result.status_code,200,result.json)
