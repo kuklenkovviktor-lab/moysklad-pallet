@@ -62,8 +62,9 @@ class CatalogValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues, {issues[0]["key"]: "fake"}, [])
         result, audit = resolved_manifest(plan, issues,
-             {issues[0]["key"]: "2057054984679"}, [])
+             {issues[0]["key"]: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}}, [])
         self.assertEqual(result[0]["items"][0]["barcode"], "2057054984679")
+        self.assertEqual(result[0]["items"][0]["article"], "6794 НАБОР 6 GOLD")
         self.assertEqual(plan["cargo"][0]["items"][0]["barcode"], "20570549844679")
         self.assertEqual(audit[0]["old"], "20570549844679")
         self.assertEqual(audit[0]["new"], "2057054984679")
@@ -86,7 +87,7 @@ class CatalogValidationTests(unittest.TestCase):
         self.assertTrue(all(not x["barcodes"] for x in issues))
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues,
-                {issues[0]["key"]: "2057054984679"}, [])
+                {issues[0]["key"]: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}}, [])
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues, {}, [])
 
@@ -150,7 +151,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(self._request({self.issues[0]["key"]: "not-in-catalog"}).status_code, 409)
 
     def test_import_records_correction_without_mutating_source(self):
-        response = self._request({self.issues[0]["key"]: "2057054984679"})
+        response = self._request({self.issues[0]["key"]: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}})
         self.assertEqual(response.status_code, 201, response.json)
         self.assertEqual(response.json["corrections"], 1)
         sid = response.json["id"]
