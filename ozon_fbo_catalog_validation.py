@@ -4,10 +4,10 @@ Only reads product cards. Never alters MoySklad products, stock or orders.
 """
 import hashlib
 import json
+import logging
 import os
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -54,93 +54,115 @@ def _barcodes(product):
     return sorted(x for x in result if x)
 
 
-def lookup_article(article):
-    """Read and validate one article with bounded transient-error retries.
+class _FilterRejected(CatalogUnavailable):
+    pass
 
-    Diagnostic never includes token, response body or upstream URL.
-    """
+
+def _error_code(response):
+    try:
+        code = response.json()["errors"][0]["code"]
+    except (ValueError, TypeError, KeyError, IndexError):
+        return ""
+    return f" (код {code})" if type(code) is int else ""
+
+
+def _read_rows(params, context):
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     if not token:
         raise CatalogUnavailable("API МойСклад не настроен. Импорт заблокирован.")
-    article = str(article).strip()
+    headers = {"Authorization": "Bearer " + token,
+               "Accept": "application/json;charset=utf-8", "Accept-Encoding": "gzip"}
     for attempt in range(3):
+        _wait_for_catalog_slot()
         try:
-            _wait_for_catalog_slot()
-            response = requests.get(
-                API_BASE + "/entity/product",
-                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-                params={"filter": "article=" + article, "limit": 100},
-                timeout=12,
-            )
+            response = requests.get(API_BASE + "/entity/product", headers=headers,
+                                    params={**params, "limit": 100}, timeout=12,
+                                    allow_redirects=False)
         except requests.Timeout as exc:
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            raise CatalogUnavailable(
-                "МойСклад: тайм-аут проверки артикула " + article[:80] + " (3 попытки)."
-            ) from exc
-        except requests.RequestException as exc:
-            raise CatalogUnavailable(
-                "МойСклад: ошибка сети при проверке артикула " + article[:80] + "."
-            ) from exc
-        # The same exact filter succeeds standalone but sporadically fails
-        # in bulk. Retry a 400 at most twice with pause; a persistent 400
-        # still fails closed and is never treated as a valid product.
-        if response.status_code in (400, 429, 500, 502, 503, 504) and attempt < 2:
+            if attempt == 2:
+                raise CatalogUnavailable(f"МойСклад: тайм-аут ({context}).") from exc
             time.sleep(0.5 * (attempt + 1))
             continue
-        if response.status_code == 400:
-            # Some MoySklad product filters reject particular article syntax.
-            # Fall back to catalog search, then match article exactly below.
-            # Never accept a fuzzy match or silently replace any barcode.
-            try:
-                _wait_for_catalog_slot()
-                response = requests.get(
-                    API_BASE + "/entity/product",
-                    headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-                    params={"search": article, "limit": 100},
-                    timeout=12,
-                )
-            except requests.Timeout as exc:
-                raise CatalogUnavailable(
-                    "МойСклад: тайм-аут резервного поиска артикула " + article[:80] + "."
-                ) from exc
-            except requests.RequestException as exc:
-                raise CatalogUnavailable(
-                    "МойСклад: ошибка сети резервного поиска артикула " + article[:80] + "."
-                ) from exc
-            if not response.ok:
-                raise CatalogUnavailable(
-                    "МойСклад: фильтр HTTP 400, резервный поиск HTTP " +
-                    str(response.status_code) + " для артикула " + article[:80] + "."
-                )
-        elif not response.ok:
-            raise CatalogUnavailable(
-                "МойСклад HTTP " + str(response.status_code) +
-                " при проверке артикула " + article[:80] + "."
-            )
+        except requests.RequestException as exc:
+            raise CatalogUnavailable(f"МойСклад: ошибка сети ({context}).") from exc
+        status = response.status_code
+        if status == 200:
+            break
+        error = f"МойСклад HTTP {status}{_error_code(response)} ({context})."
+        if status == 400:
+            logging.getLogger(__name__).warning("Ozon FBO %s", error)
+        if status in (400, 429, 500, 502, 503, 504) and attempt < 2:
+            delay = 0.5 * (attempt + 1)
+            if status == 429:
+                for name, scale in (("X-Lognex-Retry-After", 1000), ("Retry-After", 1)):
+                    value = response.headers.get(name)
+                    if isinstance(value, str) and value.isascii() and value.isdecimal():
+                        delay = max(delay, float(value) / scale)
+                if delay > 12:
+                    raise CatalogUnavailable(error)
+            time.sleep(delay)
+            continue
+        if status == 400 and "filter" in params:
+            raise _FilterRejected(error)
+        raise CatalogUnavailable(error)
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise CatalogUnavailable(f"МойСклад: некорректный JSON ({context}).") from exc
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise CatalogUnavailable(f"МойСклад: неожиданный формат каталога ({context}).")
+    meta = payload.get("meta", {})
+    if (not isinstance(meta, dict) or meta.get("nextHref") or
+            meta.get("size", len(rows)) != len(rows) or
+            (len(rows) >= 100 and "size" not in meta)):
+        raise CatalogUnavailable(f"МойСклад: неполная выборка каталога ({context}).")
+    return rows
+
+
+def _match(article, rows):
+    candidates = [row for row in rows if str(row.get("article") or "").strip().casefold()
+                  == article.casefold()]
+    if len(candidates) != 1:
+        return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
+    codes = _barcodes(candidates[0])
+    return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
+
+
+def _filter(articles):
+    return {"filter": ";".join("article=" + article.replace(";", r"\;") for article in articles)}
+
+
+def lookup_article(article):
+    article = str(article).strip()
+    try:
+        rows = _read_rows(_filter([article]), article)
+    except _FilterRejected as rejected:
         try:
-            payload = response.json()
-        except ValueError as exc:
-            raise CatalogUnavailable(
-                "МойСклад: некорректный JSON для артикула " + article[:80] + "."
-            ) from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
-            raise CatalogUnavailable(
-                "МойСклад: неожиданный формат каталога для артикула " + article[:80] + "."
-            )
-        candidates = [row for row in payload["rows"]
-                      if isinstance(row, dict) and
-                      str(row.get("article") or "").strip().casefold() == article.casefold()]
-        if len(candidates) != 1:
-            return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
-        codes = _barcodes(candidates[0])
-        return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
-    raise CatalogUnavailable("МойСклад: проверка артикула не завершена.")
+            rows = _read_rows({"search": article}, article)
+        except CatalogUnavailable as exc:
+            raise CatalogUnavailable(f"{rejected} резервный поиск {str(exc).removeprefix('МойСклад ')}") from exc
+    return _match(article, rows)
 
 
+def _bulk_matches(articles):
+    matches = {}
+    for i in range(0, len(articles), 20):
+        group = articles[i:i + 20]
+        if len(group) == 1:
+            matches[group[0]] = lookup_article(group[0])
+            continue
+        try:
+            rows = _read_rows(_filter(group), group[0] + " … " + group[-1])
+        except _FilterRejected:
+            # Preserve the single-article exact-search fallback for rejected batches.
+            matches.update((article, lookup_article(article)) for article in group)
+        else:
+            matches.update((article, _match(article, rows)) for article in group)
+    return matches
 
-def check_catalog(plan, lookup=lookup_article):
+
+def check_catalog(plan, lookup=None):
     """Return only mismatches, one per distinct article+barcode pair."""
     pairs = {}
     for cargo in plan["cargo"]:
@@ -152,11 +174,9 @@ def check_catalog(plan, lookup=lookup_article):
     articles = sorted({article for article, _ in pairs})
     if len(articles) > 500:
         raise CatalogUnavailable("Слишком много уникальных артикулов для одной проверки (максимум 500).")
-    # Limit both concurrency and request rate. Four simultaneous requests
-    # passed a one-off test but bulk imports hit intermittent HTTP 400.
     try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            matches = dict(zip(articles, pool.map(lookup, articles)))
+        matches = (_bulk_matches(articles) if lookup is None else
+                   {article: lookup(article) for article in articles})
     except CatalogUnavailable:
         raise
     except Exception as exc:

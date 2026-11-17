@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 import requests
 
-from ozon_fbo_catalog_validation import lookup_article, CatalogUnavailable
+from ozon_fbo_catalog_validation import check_catalog, lookup_article, CatalogUnavailable
 
 
 class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
@@ -13,12 +13,49 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         self.pacing.start()
         self.addCleanup(self.pacing.stop)
 
-    def test_catalog_uses_bounded_concurrency_and_request_spacing(self):
-        from pathlib import Path
-        source=Path("ozon_fbo_catalog_validation.py").read_text(encoding="utf-8")
-        self.assertIn("ThreadPoolExecutor(max_workers=2)",source)
-        self.assertIn("_wait_for_catalog_slot()",source)
-        self.assertIn("_MIN_REQUEST_SPACING = 0.35",source)
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"})
+    def test_107_articles_with_400_429_and_barcode_mismatch(self):
+        items = [{"article": f"SKU-{i:03}", "barcode": f"00{i}", "source": "Excel"}
+                 for i in range(107)]
+        plan = {"cargo": [{"barcode": "cargo", "items": items}]}
+        codes = {item["article"]: item["barcode"] for item in items}
+        codes["SKU-106"] = "catalog-code"
+        attempts = []
+
+        def respond(url, *, headers, params, **kwargs):
+            self.assertEqual(headers["Accept"], "application/json;charset=utf-8")
+            attempts.append(params["filter"])
+            if len(attempts) in (1, 2):
+                status = 400 if len(attempts) == 1 else 429
+                return Mock(status_code=status, headers={"X-Lognex-Retry-After": "2500"},
+                            json=lambda: {"errors": [{"code": 1234}]})
+            articles = [value.removeprefix("article=") for value in params["filter"].split(";")]
+            rows = [{"article": article, "barcodes": [{"code128": codes[article]}]}
+                    for article in reversed(articles)]
+            return Mock(status_code=200, json=lambda: {"rows": rows, "meta": {"size": len(rows)}})
+
+        with patch("ozon_fbo_catalog_validation.requests.get", side_effect=respond), \
+             patch("ozon_fbo_catalog_validation.time.sleep") as sleep:
+            issues = check_catalog(plan)
+        self.assertEqual(len(attempts), 8)
+        self.assertEqual(attempts[:3], [attempts[0]] * 3)
+        sleep.assert_any_call(2.5)
+        self.assertEqual([(i["article"], i["reason"], i["barcodes"]) for i in issues],
+                         [("SKU-106", "mismatch", ["catalog-code"])])
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"})
+    def test_bulk_unavailable_or_incomplete_blocks_import(self):
+        items = [{"article": a, "barcode": "001", "source": "Excel"} for a in ("A", "B")]
+        plan = {"cargo": [{"barcode": "cargo", "items": items}]}
+        for response, attempts in ((Mock(status_code=503), 3),
+                                   (Mock(status_code=200, json=lambda: {
+                                       "rows": [], "meta": {"size": 101}}), 1)):
+            with self.subTest(attempts=attempts), \
+                 patch("ozon_fbo_catalog_validation.requests.get", return_value=response) as get, \
+                 patch("ozon_fbo_catalog_validation.time.sleep"):
+                with self.assertRaises(CatalogUnavailable):
+                    check_catalog(plan)
+                self.assertEqual(get.call_count, attempts)
 
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_intermittent_400_recovers_on_next_attempt(self):
