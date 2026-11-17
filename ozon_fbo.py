@@ -85,7 +85,7 @@ function cargoPreview(p){
  (affected?'<label class="exclude-cargo"><input type="checkbox" data-exclude="'+esc(p.barcode)+'" '+(excludedCargo.has(p.barcode)?'checked':'')+'> Исключить всё грузоместо из импорта</label>':'')+
  itemsTable(p.items)+'</details>';
 }
-function unresolved(issue){return issue.cargo_barcodes.some(x=>!excludedCargo.has(x))&&!issue.barcodes.includes(catalogChoices[issue.key])}
+function unresolved(issue){const c=catalogChoices[issue.key];return issue.cargo_barcodes.some(x=>!excludedCargo.has(x))&&!(c&&c.article&&c.barcode)}
 function renderCatalog(){
  const el=document.getElementById('catalogIssues');
  if(!current)return el.innerHTML='';
@@ -94,11 +94,27 @@ function renderCatalog(){
  '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Подтверди правильный ШК либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
  issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':'У товара нет ШК')+'</span>'+
  '<div class="small">Excel: '+esc(i.excel_barcode)+' · Строки: '+esc(i.sources.join(', '))+' · Грузоместа: '+esc(i.cargo_barcodes.join(', '))+'</div>'+
- (i.barcodes.length?'<label>ШК из МойСклад<select data-choice="'+esc(i.key)+'"><option value="">Выбери правильный ШК</option>'+
- i.barcodes.map(b=>'<option value="'+esc(b)+'" '+(catalogChoices[i.key]===b?'selected':'')+'>'+esc(b)+'</option>').join('')+'</select></label>':
- '<div class="small">Нет безопасного варианта замены. Исправь карточку МойСклад и проверь файл заново либо исключи все затронутые грузоместа.</div>')+
+ '<label>Найти карточку в МойСклад (артикул, название или ШК)<div class="controls"><input data-search="'+esc(i.key)+'" placeholder="Введи артикул, название или ШК"><button type="button" data-search-btn="'+esc(i.key)+'">Найти в каталоге</button></div></label>'+
+ '<div data-results="'+esc(i.key)+'" class="small"></div>'+
+ (catalogChoices[i.key]?'<p class="ok">Выбрано: '+esc(catalogChoices[i.key].article)+' · '+esc(catalogChoices[i.key].barcode)+'</p>':'')+
  (unresolved(i)?'<p class="danger">Требует решения</p>':'<p class="ok">Разрешено</p>')+'</div>').join('');
 }
+document.getElementById('catalogIssues').addEventListener('click',async e=>{
+ const b=e.target.closest('button[data-search-btn]');if(!b)return;
+ const key=b.dataset.searchBtn, input=document.querySelector('input[data-search="'+key+'"]'), out=document.querySelector('[data-results="'+key+'"]');
+ b.disabled=true;out.textContent='Ищу в МойСклад…';
+ try{
+  const r=await fetch('/api/manager/ozon-fbo/catalog-search?q='+encodeURIComponent(input.value),{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw Error(d.error||'Ошибка поиска');
+  out.innerHTML=d.products.length?d.products.map((p,n)=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Артикул: '+esc(p.article||'не указан')+' · ШК: '+esc(p.barcodes.join(', ')||'не указан')+'</div>'+
+   (p.barcodes.length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет штрихкода</span>')+'</div>').join(''):'Ничего не найдено.';
+ }catch(err){out.textContent=err.message}finally{b.disabled=false}
+});
+document.getElementById('catalogIssues').addEventListener('click',e=>{
+ const b=e.target.closest('button[data-select-product]');if(!b)return;
+ catalogChoices[b.dataset.selectProduct]={article:b.dataset.article,barcode:b.dataset.barcode};
+ renderCatalog();checkButton();
+});
 document.getElementById('catalogIssues').addEventListener('change',e=>{
  if(e.target.matches('select[data-choice]'))catalogChoices[e.target.dataset.choice]=e.target.value;
  renderCatalog();checkButton();
