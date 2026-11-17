@@ -71,6 +71,52 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC-TOKEN",str(raised.exception))
 
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_fallback_finds_exact_article_on_second_page(self):
+        rejected = Mock(status_code=400, ok=False)
+        first = Mock(status_code=200, ok=True)
+        first.json.return_value = {"rows": [
+            {"article": "SKU-" + str(i), "barcodes": []} for i in range(100)
+        ], "meta": {"size": 101}}
+        second = Mock(status_code=200, ok=True)
+        second.json.return_value = {"rows": [
+            {"article": "TARGET", "barcodes": [{"ean13": "1234567890123"}]}
+        ], "meta": {"size": 101}}
+        with patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=[rejected, first, second]) as get:
+            result = lookup_article("TARGET")
+        self.assertEqual(result, {"status": "found", "barcodes": ["1234567890123"]})
+        self.assertEqual(get.call_args_list[2].kwargs["params"]["offset"], 100)
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_incomplete_search_never_reports_missing(self):
+        rejected = Mock(status_code=400, ok=False)
+        full = Mock(status_code=200, ok=True)
+        full.json.return_value = {"rows": [
+            {"article": "OTHER-" + str(i), "barcodes": []} for i in range(100)
+        ], "meta": {"size": 1500}}
+        with patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=[rejected] + [full] * 10) as get:
+            with self.assertRaisesRegex(CatalogUnavailable, "слишком много результатов"):
+                lookup_article("TARGET")
+        self.assertEqual(get.call_count, 11)
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
+    def test_paginated_duplicate_exact_articles_are_ambiguous(self):
+        first = Mock(status_code=200, ok=True)
+        first.json.return_value = {"rows": [
+            {"article": "TARGET", "barcodes": [{"ean13": "1234567890123"}]}
+        ] + [{"article": "OTHER-" + str(i)} for i in range(99)],
+            "meta": {"size": 101}}
+        second = Mock(status_code=200, ok=True)
+        second.json.return_value = {"rows": [
+            {"article": "TARGET", "barcodes": [{"ean13": "9999999999999"}]}
+        ], "meta": {"size": 101}}
+        with patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=[first, second]):
+            self.assertEqual(lookup_article("TARGET"),
+                             {"status": "ambiguous", "barcodes": []})
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_timeout_error_after_bounded_retries(self):
         with patch("ozon_fbo_catalog_validation.requests.get",side_effect=requests.Timeout), patch("ozon_fbo_catalog_validation.time.sleep"):
             with self.assertRaisesRegex(CatalogUnavailable,"тайм-аут") as raised:
