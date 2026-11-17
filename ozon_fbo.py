@@ -11,7 +11,7 @@ import uuid
 from flask import Blueprint, jsonify, redirect, request
 from ozon_fbo_parser import parse_ozon_xlsx
 from ozon_fbo_catalog_validation import (CatalogUnavailable, check_catalog,
-    resolved_manifest, resolved_plan_hash)
+    resolved_manifest, resolved_plan_hash, search_catalog_products)
 from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 ozon_fbo_bp = Blueprint("ozon_fbo", __name__)
@@ -422,6 +422,19 @@ def worker_page():
         return redirect("/login")
     _db()
     return WORKER_HTML
+
+
+@ozon_fbo_bp.get("/api/manager/ozon-fbo/catalog-search")
+def catalog_search():
+    if not manager_access():
+        return jsonify(error="Требуется вход руководителя"), 403
+    query = str(request.args.get("q") or "").strip()
+    try:
+        return jsonify(products=search_catalog_products(query))
+    except CatalogUnavailable as exc:
+        return jsonify(error=str(exc)), 503
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
 
 
 @ozon_fbo_bp.post("/api/manager/ozon-fbo/preview")
