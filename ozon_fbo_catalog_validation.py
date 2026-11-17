@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import threading
 
@@ -44,13 +45,20 @@ def decision_key(article, barcode):
 def _barcodes(product):
     """Only product unit barcodes, not pallet/packaging codes."""
     result = set()
-    for value in product.get("barcodes") or []:
+    values = product.get("barcodes", [])
+    if not isinstance(values, list):
+        raise CatalogUnavailable("МойСклад вернул некорректный список ШК.")
+    for value in values:
         if isinstance(value, str):
             result.add(value.strip())
         elif isinstance(value, dict):
             for key in ("ean13", "ean8", "code128", "gtin", "upc", "barcode"):
-                if value.get(key):
-                    result.add(str(value[key]).strip())
+                if key in value:
+                    if not isinstance(value[key], str):
+                        raise CatalogUnavailable("МойСклад вернул некорректный ШК.")
+                    result.add(value[key].strip())
+        else:
+            raise CatalogUnavailable("МойСклад вернул некорректный формат ШК.")
     return sorted(x for x in result if x)
 
 
@@ -162,6 +170,26 @@ def _bulk_matches(articles):
     return matches
 
 
+def cards_by_barcode(barcode):
+    if not isinstance(barcode, str) or not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", barcode):
+        raise ValueError("Некорректный штрихкод товара.")
+    rows = _read_rows({"filter": "barcode=" + barcode}, barcode)
+    cards = []
+    for row in rows:
+        if barcode not in _barcodes(row):
+            continue
+        if not isinstance(row.get("id"), str) or not row["id"]:
+            raise CatalogUnavailable("МойСклад вернул карточку без идентификатора.")
+        article = row.get("article") or ""
+        if not isinstance(article, str):
+            raise CatalogUnavailable("МойСклад вернул некорректный артикул.")
+        article = article.strip()
+        if article:
+            cards.append({"id": row["id"], "article": article, "barcode": barcode,
+                          "name": str(row.get("name") or "")})
+    return cards
+
+
 def check_catalog(plan, lookup=None):
     """Return only mismatches, one per distinct article+barcode pair."""
     pairs = {}
@@ -212,6 +240,8 @@ def resolved_manifest(plan, issues, decisions, excluded):
         raise ValueError("Решения не соответствуют текущей проверке. Проверь файл снова.")
     resolved, audit = [], []
     barcode_article = {}
+    verified = {}
+    cards = {}
     for cargo in plan["cargo"]:
         if cargo["barcode"] in excluded_set:
             continue
@@ -220,19 +250,39 @@ def resolved_manifest(plan, issues, decisions, excluded):
             old = item["barcode"]
             mismatch = issue_by_pair.get((item["article"], old))
             barcode = old
+            article = item["article"]
             if mismatch:
-                barcode = decisions.get(mismatch["key"])
-                if barcode not in mismatch["barcodes"]:
-                    raise ValueError("Не все расхождения устранены. Исправь ШК либо исключи всё грузоместо.")
+                key = mismatch["key"]
+                if key not in verified:
+                    choice = decisions.get(key)
+                    if not isinstance(choice, dict) or choice.get("confirmed") is not True:
+                        raise ValueError("Подтверди исправление каждой пары артикул / ШК.")
+                    values = [choice.get(field, "") for field in ("article", "barcode", "id")]
+                    if not all(isinstance(value, str) for value in values):
+                        raise ValueError("Некорректное исправление.")
+                    target, code, card_id = (value.strip() for value in values)
+                    target, code = target or article, code or old
+                    if code not in cards:
+                        cards[code] = cards_by_barcode(code)
+                    matches = [card for card in cards[code]
+                               if card["article"].casefold() == target.casefold()
+                               and (not card_id or card_id == card["id"])]
+                    if len(matches) != 1:
+                        raise ValueError("Пара артикул / ШК не найдена или неоднозначна. Выбери карточку МойСклад.")
+                    verified[key] = matches[0]
+                card = verified[key]
+                article, barcode = card["article"], card["barcode"]
                 audit.append({
                     "cargo": cargo["barcode"], "article": item["article"],
+                    "new_article": article, "product_id": card["id"],
                     "source": item["source"], "old": old, "new": barcode
                 })
             previous = barcode_article.get(barcode)
-            if previous and previous.casefold() != item["article"].casefold():
+            if previous and previous.casefold() != article.casefold():
                 raise ValueError("Один ШК назначен разным артикулам. Проверь исправления.")
-            barcode_article[barcode] = item["article"]
+            barcode_article[barcode] = article
             copy = dict(item)
+            copy["article"] = article
             copy["barcode"] = barcode
             items.append(copy)
         # Consolidate identical article + corrected barcode, but do not silently double count.
