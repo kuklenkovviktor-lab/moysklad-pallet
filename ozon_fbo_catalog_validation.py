@@ -166,7 +166,7 @@ def check_catalog(plan, lookup=lookup_article):
 
 
 def resolved_manifest(plan, issues, decisions, excluded):
-    """Apply manager choices to a parsed copy, preserving whole cargo integrity."""
+    """Apply a manager-selected MoySklad product article and barcode to a parsed copy."""
     if not isinstance(decisions, dict) or not isinstance(excluded, list):
         raise ValueError("Некорректные решения по расхождениям.")
     cargo_ids = {c["barcode"] for c in plan["cargo"]}
@@ -177,32 +177,33 @@ def resolved_manifest(plan, issues, decisions, excluded):
     valid_keys = {x["key"] for x in issues}
     if set(decisions) - valid_keys:
         raise ValueError("Решения не соответствуют текущей проверке. Проверь файл снова.")
-    resolved, audit = [], []
-    barcode_article = {}
+    resolved, audit, barcode_article = [], [], {}
     for cargo in plan["cargo"]:
         if cargo["barcode"] in excluded_set:
             continue
         items = []
         for item in cargo["items"]:
-            old = item["barcode"]
-            mismatch = issue_by_pair.get((item["article"], old))
-            barcode = old
+            old_article, old_barcode = item["article"], item["barcode"]
+            mismatch = issue_by_pair.get((old_article, old_barcode))
+            new_article, new_barcode = old_article, old_barcode
             if mismatch:
-                barcode = decisions.get(mismatch["key"])
-                if barcode not in mismatch["barcodes"]:
-                    raise ValueError("Не все расхождения устранены. Исправь ШК либо исключи всё грузоместо.")
-                audit.append({
-                    "cargo": cargo["barcode"], "article": item["article"],
-                    "source": item["source"], "old": old, "new": barcode
-                })
-            previous = barcode_article.get(barcode)
-            if previous and previous.casefold() != item["article"].casefold():
+                choice = decisions.get(mismatch["key"])
+                if not isinstance(choice, dict):
+                    raise ValueError("Выбери карточку МойСклад для каждого расхождения.")
+                new_article = str(choice.get("article") or "").strip()
+                new_barcode = str(choice.get("barcode") or "").strip()
+                if not new_article or not new_barcode or len(new_article) > 160 or len(new_barcode) > 64:
+                    raise ValueError("Некорректная карточка МойСклад.")
+                audit.append({"cargo": cargo["barcode"], "article": old_article,
+                    "new_article": new_article, "source": item["source"],
+                    "old": old_barcode, "new": new_barcode})
+            previous = barcode_article.get(new_barcode)
+            if previous and previous.casefold() != new_article.casefold():
                 raise ValueError("Один ШК назначен разным артикулам. Проверь исправления.")
-            barcode_article[barcode] = item["article"]
+            barcode_article[new_barcode] = new_article
             copy = dict(item)
-            copy["barcode"] = barcode
+            copy["article"], copy["barcode"] = new_article, new_barcode
             items.append(copy)
-        # Consolidate identical article + corrected barcode, but do not silently double count.
         seen = set()
         for item in items:
             key = (item["article"].casefold(), item["barcode"])
