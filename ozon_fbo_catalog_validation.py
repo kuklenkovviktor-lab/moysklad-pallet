@@ -36,61 +36,61 @@ def _barcodes(product):
 
 
 def lookup_article(article):
-    """Read and validate one article with bounded transient-error retries.
+    """Read all bounded catalog pages, then validate one exact article match.
 
-    Diagnostic never includes token, response body or upstream URL.
+    A partial search must never be reported as "missing": that would hide
+    products which occur after the first MoySklad results page.
     """
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     if not token:
         raise CatalogUnavailable("API МойСклад не настроен. Импорт заблокирован.")
     article = str(article).strip()
-    for attempt in range(3):
-        try:
-            response = requests.get(
-                API_BASE + "/entity/product",
-                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-                params={"filter": "article=" + article, "limit": 100},
-                timeout=12,
-            )
-        except requests.Timeout as exc:
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            raise CatalogUnavailable(
-                "МойСклад: тайм-аут проверки артикула " + article[:80] + " (3 попытки)."
-            ) from exc
-        except requests.RequestException as exc:
-            raise CatalogUnavailable(
-                "МойСклад: ошибка сети при проверке артикула " + article[:80] + "."
-            ) from exc
-        if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-            time.sleep(0.5 * (attempt + 1))
-            continue
-        if response.status_code == 400:
-            # Some MoySklad product filters reject particular article syntax.
-            # Fall back to catalog search, then match article exactly below.
-            # Never accept a fuzzy match or silently replace any barcode.
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    endpoint = API_BASE + "/entity/product"
+    page_size = 100
+    max_pages = 10
+
+    def request_page(params, *, fallback=False):
+        for attempt in range(3):
             try:
-                response = requests.get(
-                    API_BASE + "/entity/product",
-                    headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-                    params={"search": article, "limit": 100},
-                    timeout=12,
-                )
+                response = requests.get(endpoint, headers=headers, params=params, timeout=12)
             except requests.Timeout as exc:
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                stage = "резервного поиска артикула " if fallback else "проверки артикула "
                 raise CatalogUnavailable(
-                    "МойСклад: тайм-аут резервного поиска артикула " + article[:80] + "."
+                    "МойСклад: тайм-аут " + stage + article[:80] + " (3 попытки)."
                 ) from exc
             except requests.RequestException as exc:
+                stage = "резервного поиска артикула " if fallback else "проверки артикула "
                 raise CatalogUnavailable(
-                    "МойСклад: ошибка сети резервного поиска артикула " + article[:80] + "."
+                    "МойСклад: ошибка сети " + stage + article[:80] + "."
                 ) from exc
-            if not response.ok:
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            return response
+        raise CatalogUnavailable("МойСклад: проверка артикула не завершена.")
+
+    # Only switch to search if MoySklad rejects the article filter.
+    search_mode = False
+    candidates = []
+    for page in range(max_pages):
+        params = ({"search": article} if search_mode else {"filter": "article=" + article})
+        params.update({"limit": page_size, "offset": page * page_size})
+        response = request_page(params, fallback=search_mode)
+        if response.status_code == 400 and not search_mode:
+            search_mode = True
+            candidates.clear()
+            params = {"search": article, "limit": page_size, "offset": 0}
+            response = request_page(params, fallback=True)
+        if not response.ok:
+            if search_mode:
                 raise CatalogUnavailable(
-                    "МойСклад: фильтр HTTP 400, резервный поиск HTTP " +
-                    str(response.status_code) + " для артикула " + article[:80] + "."
+                    "МойСклад: резервный поиск HTTP " + str(response.status_code) +
+                    " для артикула " + article[:80] + "."
                 )
-        elif not response.ok:
             raise CatalogUnavailable(
                 "МойСклад HTTP " + str(response.status_code) +
                 " при проверке артикула " + article[:80] + "."
@@ -105,15 +105,27 @@ def lookup_article(article):
             raise CatalogUnavailable(
                 "МойСклад: неожиданный формат каталога для артикула " + article[:80] + "."
             )
-        candidates = [row for row in payload["rows"]
-                      if isinstance(row, dict) and
-                      str(row.get("article") or "").strip().casefold() == article.casefold()]
-        if len(candidates) != 1:
-            return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
-        codes = _barcodes(candidates[0])
-        return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
-    raise CatalogUnavailable("МойСклад: проверка артикула не завершена.")
-
+        rows = payload["rows"]
+        candidates.extend(
+            row for row in rows
+            if isinstance(row, dict) and
+            str(row.get("article") or "").strip().casefold() == article.casefold()
+        )
+        # Respect server-side collection size when present; otherwise the
+        # first short page proves the result set is complete.
+        meta = payload.get("meta")
+        size = meta.get("size") if isinstance(meta, dict) else None
+        completed = (isinstance(size, int) and (page + 1) * page_size >= size) or len(rows) < page_size
+        if completed:
+            if len(candidates) != 1:
+                return {"status": "missing" if not candidates else "ambiguous", "barcodes": []}
+            codes = _barcodes(candidates[0])
+            return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
+    # Do not convert an incomplete 1000+ item response into a false absence.
+    raise CatalogUnavailable(
+        "МойСклад: слишком много результатов поиска артикула " + article[:80] +
+        " (проверено 1000). Уточни артикул или каталог."
+    )
 
 
 def check_catalog(plan, lookup=lookup_article):
