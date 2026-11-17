@@ -226,3 +226,42 @@ def resolved_plan_hash(cargo):
     return hashlib.sha256(
         json.dumps(sorted(signature), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def search_catalog_products(query, limit=30):
+    """Search MoySklad products for manager-side discrepancy selection."""
+    token = os.getenv("MOYSKLAD_TOKEN", "").strip()
+    query = str(query or "").strip()
+    if not token:
+        raise CatalogUnavailable("API МойСклад не настроен.")
+    if len(query) < 2:
+        raise ValueError("Введи минимум 2 символа для поиска.")
+    if len(query) > 120:
+        raise ValueError("Слишком длинный поисковый запрос.")
+    try:
+        response = requests.get(
+            API_BASE + "/entity/product",
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+            params={"search": query, "limit": min(max(int(limit), 1), 30)},
+            timeout=12,
+        )
+    except requests.RequestException as exc:
+        raise CatalogUnavailable("Не удалось связаться с каталогом МойСклад.") from exc
+    if not response.ok:
+        raise CatalogUnavailable("МойСклад вернул HTTP " + str(response.status_code) + " при поиске товара.")
+    try:
+        rows = response.json().get("rows", [])
+    except (ValueError, AttributeError):
+        raise CatalogUnavailable("МойСклад вернул некорректный ответ каталога.")
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        codes = _barcodes(row)
+        result.append({
+            "id": str(row.get("id") or ""),
+            "name": str(row.get("name") or ""),
+            "article": str(row.get("article") or ""),
+            "barcodes": codes,
+        })
+    return result
