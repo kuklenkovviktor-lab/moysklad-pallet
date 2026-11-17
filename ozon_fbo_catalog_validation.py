@@ -74,7 +74,10 @@ def _error_code(response):
     return f" (код {code})" if type(code) is int else ""
 
 
-def _read_rows(params, context):
+ENTITY_TYPES = ("product", "bundle")
+
+
+def _read_rows(params, context, entity):
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     if not token:
         raise CatalogUnavailable("API МойСклад не настроен. Импорт заблокирован.")
@@ -83,7 +86,7 @@ def _read_rows(params, context):
     for attempt in range(3):
         _wait_for_catalog_slot()
         try:
-            response = requests.get(API_BASE + "/entity/product", headers=headers,
+            response = requests.get(API_BASE + "/entity/" + entity, headers=headers,
                                     params={**params, "limit": 100}, timeout=12,
                                     allow_redirects=False)
         except requests.Timeout as exc:
@@ -125,6 +128,10 @@ def _read_rows(params, context):
             meta.get("size", len(rows)) != len(rows) or
             (len(rows) >= 100 and "size" not in meta)):
         raise CatalogUnavailable(f"МойСклад: неполная выборка каталога ({context}).")
+    for row in rows:
+        row_meta = row.get("meta", {})
+        if not isinstance(row_meta, dict) or row_meta.get("type", entity) != entity:
+            raise CatalogUnavailable("МойСклад вернул карточку другого типа.")
     return rows
 
 
@@ -141,53 +148,72 @@ def _filter(articles):
     return {"filter": ";".join("article=" + article.replace(";", r"\;") for article in articles)}
 
 
-def lookup_article(article):
-    article = str(article).strip()
+def _article_rows(articles, entity):
     try:
-        rows = _read_rows(_filter([article]), article)
+        return _read_rows(_filter(articles), articles[0], entity)
     except _FilterRejected as rejected:
+        if len(articles) > 1:
+            return [row for article in articles for row in _article_rows([article], entity)
+                    if str(row.get("article") or "").strip().casefold() == article.casefold()]
         try:
-            rows = _read_rows({"search": article}, article)
+            return _read_rows({"search": articles[0]}, articles[0], entity)
         except CatalogUnavailable as exc:
             raise CatalogUnavailable(f"{rejected} резервный поиск {str(exc).removeprefix('МойСклад ')}") from exc
-    return _match(article, rows)
+
+
+def lookup_article(article):
+    article = str(article).strip()
+    return _bulk_matches([article])[article]
 
 
 def _bulk_matches(articles):
     matches = {}
     for i in range(0, len(articles), 20):
         group = articles[i:i + 20]
-        if len(group) == 1:
-            matches[group[0]] = lookup_article(group[0])
-            continue
-        try:
-            rows = _read_rows(_filter(group), group[0] + " … " + group[-1])
-        except _FilterRejected:
-            # Preserve the single-article exact-search fallback for rejected batches.
-            matches.update((article, lookup_article(article)) for article in group)
-        else:
-            matches.update((article, _match(article, rows)) for article in group)
+        rows = [row for entity in ENTITY_TYPES for row in _article_rows(group, entity)]
+        matches.update((article, _match(article, rows)) for article in group)
     return matches
 
 
-def cards_by_barcode(barcode):
-    if not isinstance(barcode, str) or not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", barcode):
-        raise ValueError("Некорректный штрихкод товара.")
-    rows = _read_rows({"filter": "barcode=" + barcode}, barcode)
-    cards = []
-    for row in rows:
-        if barcode not in _barcodes(row):
-            continue
-        if not isinstance(row.get("id"), str) or not row["id"]:
-            raise CatalogUnavailable("МойСклад вернул карточку без идентификатора.")
-        article = row.get("article") or ""
-        if not isinstance(article, str):
-            raise CatalogUnavailable("МойСклад вернул некорректный артикул.")
-        article = article.strip()
-        if article:
-            cards.append({"id": row["id"], "article": article, "barcode": barcode,
-                          "name": str(row.get("name") or "")})
-    return cards
+def catalog_options(value, by_article=False):
+    """Return typed card/identifier options; code never becomes a unit barcode."""
+    if not isinstance(value, str) or not value or len(value) > 160:
+        raise ValueError("Некорректный запрос каталога.")
+    if not by_article and not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", value):
+        raise ValueError("Некорректный идентификатор для ШК GRIT.")
+    options = []
+    for entity in ENTITY_TYPES:
+        fields = ("article",) if by_article else ("barcode", "code")
+        for field in fields:
+            if by_article:
+                rows = _article_rows([value], entity)
+            else:
+                try:
+                    rows = _read_rows({"filter": field + "=" + value}, value, entity)
+                except _FilterRejected:
+                    rows = _read_rows({"search": value}, value, entity)
+            for row in rows:
+                article = row.get("article") or ""
+                if not isinstance(article, str):
+                    raise CatalogUnavailable("МойСклад вернул некорректный артикул.")
+                article = article.strip()
+                if not article or (by_article and article.casefold() != value.casefold()):
+                    continue
+                identifiers = [("barcode", code) for code in _barcodes(row)]
+                if row.get("code"):
+                    identifiers.append(("code", row["code"]))
+                for kind, code in identifiers:
+                    if not isinstance(code, str):
+                        raise CatalogUnavailable("МойСклад вернул некорректный идентификатор.")
+                    if not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", code):
+                        continue
+                    if not by_article and (field != kind or code != value):
+                        continue
+                    if not isinstance(row.get("id"), str) or not row["id"]:
+                        raise CatalogUnavailable("МойСклад вернул карточку без идентификатора.")
+                    options.append({"id": row["id"], "entity_type": entity, "identifier_type": kind,
+                                    "article": article, "value": code, "name": row.get("name") or ""})
+    return options
 
 
 def check_catalog(plan, lookup=None):
@@ -262,19 +288,26 @@ def resolved_manifest(plan, issues, decisions, excluded):
                         raise ValueError("Некорректное исправление.")
                     target, code, card_id = (value.strip() for value in values)
                     target, code = target or article, code or old
+                    entity, kind = choice.get("entity_type"), choice.get("identifier_type")
+                    if not card_id or entity not in ENTITY_TYPES or kind not in ("code", "barcode"):
+                        raise ValueError("Выбери карточку и тип идентификатора МойСклад.")
                     if code not in cards:
-                        cards[code] = cards_by_barcode(code)
+                        cards[code] = catalog_options(code)
                     matches = [card for card in cards[code]
-                               if card["article"].casefold() == target.casefold()
-                               and (not card_id or card_id == card["id"])]
+                               if card["article"].casefold() == target.casefold()]
+                    identities = {(card["entity_type"], card["id"]) for card in matches}
+                    if identities != {(entity, card_id)}:
+                        raise ValueError("Карточка изменилась или итоговая пара неоднозначна.")
+                    matches = [card for card in matches if card["identifier_type"] == kind]
                     if len(matches) != 1:
                         raise ValueError("Пара артикул / ШК не найдена или неоднозначна. Выбери карточку МойСклад.")
                     verified[key] = matches[0]
                 card = verified[key]
-                article, barcode = card["article"], card["barcode"]
+                article, barcode = card["article"], card["value"]
                 audit.append({
                     "cargo": cargo["barcode"], "article": item["article"],
                     "new_article": article, "product_id": card["id"],
+                    "entity_type": card["entity_type"], "identifier_type": card["identifier_type"],
                     "source": item["source"], "old": old, "new": barcode
                 })
             previous = barcode_article.get(barcode)

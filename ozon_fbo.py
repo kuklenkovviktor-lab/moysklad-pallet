@@ -5,12 +5,13 @@ Isolated from WB FBS, MoySklad stock balances and live scans.
 import hashlib
 import json
 import os
+import sqlite3
 import threading
 import uuid
 
 from flask import Blueprint, jsonify, redirect, request
 from ozon_fbo_parser import parse_ozon_xlsx
-from ozon_fbo_catalog_validation import (CatalogUnavailable, cards_by_barcode, check_catalog,
+from ozon_fbo_catalog_validation import (CatalogUnavailable, catalog_options, check_catalog,
     resolved_manifest, resolved_plan_hash)
 from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
@@ -89,6 +90,10 @@ function cargoPreview(p){
 function unresolved(i){
  return i.cargo_barcodes.some(x=>!excludedCargo.has(x)) && !catalogChoices[i.key]?.confirmed;
 }
+function optionLabel(card){
+ return (card.entity_type==='bundle'?'Комплект':'Товар')+' · '+card.article+' · '+
+  (card.identifier_type==='code'?'Код МойСклад':'Штрихкод МойСклад')+' '+card.value+' · '+card.name+' · '+card.id;
+}
 function renderCatalog(){
  const el=document.getElementById('catalogIssues');
  if(!current)return el.innerHTML='';
@@ -101,12 +106,12 @@ function renderCatalog(){
    '<p>Excel: '+esc(i.article)+' · '+esc(i.excel_barcode)+'</p><p class="small">'+esc(i.sources.join(', '))+' · ГМ '+esc(i.cargo_barcodes.join(', '))+'</p>'+
    (i.barcodes.length?'<p>ШК артикула в МойСклад: '+esc(i.barcodes.join(', '))+'</p>':'')+
    '<label>Исправить артикул<input data-field="article" maxlength="160" placeholder="'+esc(i.article)+'" value="'+esc(choice.article)+'"></label>'+
-   '<label>Исправить штрихкод<input data-field="barcode" maxlength="64" placeholder="'+esc(i.excel_barcode)+'" value="'+esc(choice.barcode)+'"></label>'+
-   '<button type="button" data-find>Найти карточки по ШК</button>'+
+   '<label>ШК GRIT (код или штрихкод)<input data-field="barcode" maxlength="64" placeholder="'+esc(i.excel_barcode)+'" value="'+esc(choice.barcode)+'"></label>'+
+   '<button type="button" data-find="article">Найти по артикулу</button> <button type="button" data-find="identifier">Найти по ШК или коду</button>'+
    (cards.length?'<label>Карточки МойСклад<select data-card><option value="">Выбери карточку</option>'+
-    cards.map((c,j)=>'<option value="'+j+'" '+(choice.id===c.id?'selected':'')+'>'+esc(c.article+' · '+c.barcode+' · '+c.name+' · '+c.id)+'</option>').join('')+'</select></label>':
-    (i.cards?'<p class="small">По этому ШК карточек не найдено.</p>':''))+
-   '<label><input type="checkbox" data-confirm '+(choice.confirmed?'checked':'')+'> Подтверждаю исправление</label></div>';
+    cards.map((c,j)=>'<option value="'+j+'" '+(choice.id===c.id&&choice.entity_type===c.entity_type&&choice.identifier_type===c.identifier_type&&choice.barcode===c.value?'selected':'')+'>'+esc(optionLabel(c))+'</option>').join('')+'</select></label>':
+    (i.cards?'<p class="small">Совпадений не найдено.</p>':''))+
+   '<label><input type="checkbox" data-confirm '+(!choice.id?'disabled ':'')+(choice.confirmed?'checked':'')+'> Подтверждаю исправление</label></div>';
  }).join('');
 }
 const issuesEl=document.getElementById('catalogIssues');
@@ -118,6 +123,7 @@ issuesEl.addEventListener('input',e=>{
  delete choice.id;
  choice.confirmed=false;
  row.querySelector('[data-confirm]').checked=false;
+ row.querySelector('[data-confirm]').disabled=true;
  const select=row.querySelector('[data-card]');
  if(select)select.value='';
  checkButton();
@@ -129,7 +135,7 @@ issuesEl.addEventListener('change',e=>{
  if(e.target.matches('[data-card]')){
   const issue=current.discrepancies.find(i=>i.key===key);
   const card=issue.cards[e.target.value];
-  catalogChoices[key]=card?{article:card.article,barcode:card.barcode,id:card.id,confirmed:false}:{};
+  catalogChoices[key]=card?{article:card.article,barcode:card.value,id:card.id,entity_type:card.entity_type,identifier_type:card.identifier_type,confirmed:false}:{};
   renderCatalog();
  }
  checkButton();
@@ -138,14 +144,18 @@ issuesEl.addEventListener('click',async e=>{
  if(!e.target.matches('[data-find]'))return;
  const key=e.target.closest('.issue').dataset.key;
  const issue=current.discrepancies.find(i=>i.key===key);
- const barcode=catalogChoices[key]?.barcode?.trim()||issue.excel_barcode;
+ const byArticle=e.target.dataset.find==='article';
+ const query=()=>byArticle?(catalogChoices[key]?.article?.trim()||issue.article):(catalogChoices[key]?.barcode?.trim()||issue.excel_barcode);
+ const value=query();
  e.target.disabled=true;
  try{
-  const r=await fetch('/api/manager/ozon-fbo/catalog-cards?barcode='+encodeURIComponent(barcode),{cache:'no-store'});
+  const r=await fetch('/api/manager/ozon-fbo/catalog-cards?'+(byArticle?'article':'barcode')+'='+encodeURIComponent(value),{cache:'no-store'});
   const data=await r.json();
   if(!r.ok)throw Error(data.error);
-  if(!current?.discrepancies.includes(issue)||(catalogChoices[key]?.barcode?.trim()||issue.excel_barcode)!==barcode)return;
+  if(!current?.discrepancies.includes(issue)||query()!==value)return;
   issue.cards=data.cards;
+  if(catalogChoices[key]){delete catalogChoices[key].id;catalogChoices[key].confirmed=false}
+  checkButton();
   renderCatalog();
  }catch(err){notice.textContent=err.message}
  finally{e.target.disabled=false}
@@ -219,7 +229,7 @@ async function loadDetail(id){
  d.cargo.map(cargoBlock).join('')+
  '<h2 style="margin-top:16px">Журнал исправленных ШК</h2>'+
  (d.corrections.length?'<div class="scroll"><table><thead><tr><th>ГМ / строка</th><th>Артикул</th><th>Было</th><th>Стало</th><th>Подтвердил</th></tr></thead><tbody>'+
- d.corrections.map(x=>'<tr><td>'+esc(x.cargo)+' / '+esc(x.source)+'</td><td>'+esc(x.article)+' → '+esc(x.new_article)+'</td><td>'+esc(x.old)+'</td><td>'+esc(x.new)+'</td><td>'+esc(x.actor)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small">Исправлений не было.</p>');
+ d.corrections.map(x=>'<tr><td>'+esc(x.cargo)+' / '+esc(x.source)+'</td><td>'+esc(x.article)+' → '+esc(x.new_article)+'</td><td>'+esc(x.old)+'</td><td>'+esc(x.new)+' · '+(x.entity_type==='bundle'?'комплект':'товар')+' · '+(x.identifier_type==='code'?'код МойСклад':'штрихкод МойСклад')+'</td><td>'+esc(x.actor)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small">Исправлений не было.</p>');
 }
 loadSupplies().catch(e=>{document.getElementById('supplies').textContent=e.message});
 </script></main></body></html>"""
@@ -375,6 +385,17 @@ def _db():
             try:
                 for statement in ddl:
                     cur.execute(statement)
+                # Historical PR145 corrections used product unit barcodes exclusively.
+                table = "ozon_fbo_correction_products"
+                sqlite = isinstance(conn, sqlite3.Connection)
+                existing = set()
+                if sqlite:
+                    cur.execute("PRAGMA table_info(ozon_fbo_correction_products)")
+                    existing = {row[1] for row in cur.fetchall()}
+                for column, default in (("entity_type", "product"), ("identifier_type", "barcode")):
+                    if column not in existing:
+                        guard = "" if sqlite else "IF NOT EXISTS "
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {guard}{column} TEXT NOT NULL DEFAULT '{default}'")
                 conn.commit()
             finally:
                 cur.close()
@@ -444,7 +465,8 @@ def _details(supply_id):
         })
     corrections = query_all("""
         SELECT cargo_barcode,article,source_cell,old_barcode,new_barcode,actor,created_at,
-               COALESCE(p.new_article, c.article)
+               COALESCE(p.new_article, c.article), COALESCE(p.entity_type, 'product'),
+               COALESCE(p.identifier_type, 'barcode'), p.product_id
         FROM ozon_fbo_import_corrections c
         LEFT JOIN ozon_fbo_correction_products p ON p.correction_id=c.id WHERE supply_id=?
         ORDER BY created_at,source_cell
@@ -452,7 +474,8 @@ def _details(supply_id):
     return {
         "corrections": [
             {"cargo": x[0], "article": x[1], "source": x[2], "old": x[3],
-             "new": x[4], "actor": x[5], "at": x[6], "new_article": x[7]} for x in corrections
+             "new": x[4], "actor": x[5], "at": x[6], "new_article": x[7],
+             "entity_type": x[8], "identifier_type": x[9], "card_id": x[10], "old_source": "Excel"} for x in corrections
         ],
         "supply": {"id": header[0], "title": header[1], "status": header[2],
                    "created_at": header[3], "created_by": header[4],
@@ -492,11 +515,10 @@ def preview():
         issues = check_catalog(data)
         candidates = {}
         for issue in issues:
-            if issue["reason"] in ("missing", "ambiguous"):
-                code = issue["excel_barcode"]
-                if code not in candidates:
-                    candidates[code] = cards_by_barcode(code)
-                issue["cards"] = candidates[code]
+            code = issue["excel_barcode"]
+            if code not in candidates:
+                candidates[code] = catalog_options(code)
+            issue["cards"] = candidates[code]
     except CatalogUnavailable as exc:
         return jsonify(error=str(exc)), 503
     return jsonify(**_response_summary(data), discrepancies=issues)
@@ -507,7 +529,9 @@ def catalog_cards():
     if not manager_access():
         return jsonify(error="Требуется вход руководителя"), 403
     try:
-        return jsonify(cards=cards_by_barcode(request.args.get("barcode", "")))
+        if "article" in request.args:
+            return jsonify(cards=catalog_options(request.args["article"], by_article=True))
+        return jsonify(cards=catalog_options(request.args.get("barcode", "")))
     except CatalogUnavailable as exc:
         return jsonify(error=str(exc)), 503
     except ValueError as exc:
@@ -590,8 +614,9 @@ def import_plan():
                 """), (correction_id,sid,change["cargo"],change["article"],
                       change["source"],change["old"],change["new"],actor,now_iso()))
                 cur.execute(sql("""INSERT INTO ozon_fbo_correction_products
-                    (correction_id,new_article,product_id) VALUES (?,?,?)"""),
-                    (correction_id, change["new_article"], change["product_id"]))
+                    (correction_id,new_article,product_id,entity_type,identifier_type) VALUES (?,?,?,?,?)"""),
+                    (correction_id, change["new_article"], change["product_id"],
+                     change["entity_type"], change["identifier_type"]))
             for warning in plan["warnings"]:
                 cur.execute(sql("""
                     INSERT INTO ozon_fbo_import_warnings (id,supply_id,warning) VALUES (?,?,?)

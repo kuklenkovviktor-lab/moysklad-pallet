@@ -7,6 +7,9 @@ import requests
 from ozon_fbo_catalog_validation import check_catalog, lookup_article, CatalogUnavailable
 
 
+EMPTY = Mock(status_code=200, json=lambda: {"rows": []})
+
+
 class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.pacing = patch("ozon_fbo_catalog_validation._wait_for_catalog_slot")
@@ -30,6 +33,8 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
                 return Mock(status_code=status, headers={"X-Lognex-Retry-After": "2500"},
                             json=lambda: {"errors": [{"code": 1234}]})
             articles = [value.removeprefix("article=") for value in params["filter"].split(";")]
+            if url.endswith("/entity/bundle"):
+                return EMPTY
             rows = [{"article": article, "barcodes": [{"code128": codes[article]}]}
                     for article in reversed(articles)]
             return Mock(status_code=200, json=lambda: {"rows": rows, "meta": {"size": len(rows)}})
@@ -37,7 +42,7 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         with patch("ozon_fbo_catalog_validation.requests.get", side_effect=respond), \
              patch("ozon_fbo_catalog_validation.time.sleep") as sleep:
             issues = check_catalog(plan)
-        self.assertEqual(len(attempts), 8)
+        self.assertEqual(len(attempts), 14)
         self.assertEqual(attempts[:3], [attempts[0]] * 3)
         sleep.assert_any_call(2.5)
         self.assertEqual([(i["article"], i["reason"], i["barcodes"]) for i in issues],
@@ -57,21 +62,32 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
                     check_catalog(plan)
                 self.assertEqual(get.call_count, attempts)
 
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"})
+    def test_bundle_unit_barcode_and_partial_catalog(self):
+        kit = Mock(status_code=200, json=lambda: {"rows": [
+            {"article": "KIT", "code": "0099", "barcodes": [{"ean13": "0011"}]}]})
+        with patch("ozon_fbo_catalog_validation.requests.get", side_effect=[EMPTY, kit]):
+            self.assertEqual(lookup_article("KIT"), {"status": "found", "barcodes": ["0011"]})
+        partial = Mock(status_code=200, json=lambda: {"rows": [], "meta": {"size": 1}})
+        with patch("ozon_fbo_catalog_validation.requests.get", side_effect=[kit, partial]):
+            with self.assertRaises(CatalogUnavailable):
+                lookup_article("KIT")
+
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_intermittent_400_recovers_on_next_attempt(self):
         rejected=Mock(status_code=400,ok=False)
         ok=Mock(status_code=200,ok=True)
         ok.json.return_value={"rows":[{"article":"1022_BOROCCO","barcodes":[{"ean13":"1234567890123"}]}]}
-        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,ok]) as get, patch("ozon_fbo_catalog_validation.time.sleep"):
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,ok,EMPTY]) as get, patch("ozon_fbo_catalog_validation.time.sleep"):
             result=lookup_article("1022_BOROCCO")
         self.assertEqual(result["status"],"found")
-        self.assertEqual(get.call_count,2)
+        self.assertEqual(get.call_count,3)
 
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
     def test_valid_product(self):
         response = Mock(status_code=200, ok=True)
         response.json.return_value = {"rows":[{"article":"TEST-1","barcodes":[{"ean13":"1234567890123"}]}]}
-        with patch("ozon_fbo_catalog_validation.requests.get", return_value=response):
+        with patch("ozon_fbo_catalog_validation.requests.get", side_effect=[response,EMPTY]):
             result = lookup_article("TEST-1")
         self.assertEqual(result, {"status":"found","barcodes":["1234567890123"]})
 
@@ -90,9 +106,9 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         blocked=Mock(status_code=429,ok=False)
         success=Mock(status_code=200,ok=True)
         success.json.return_value={"rows":[]}
-        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[blocked,success]) as get, patch("ozon_fbo_catalog_validation.time.sleep"):
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[blocked,success,EMPTY]) as get, patch("ozon_fbo_catalog_validation.time.sleep"):
             result=lookup_article("SKU")
-        self.assertEqual(get.call_count,2)
+        self.assertEqual(get.call_count,3)
         self.assertEqual(result["status"],"missing")
 
     @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "SYNTHETIC-TOKEN"})
@@ -103,7 +119,7 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
             {"article":"1022_BOROCCO_EXTRA","barcodes":[{"ean13":"0000000000001"}]},
             {"article":"1022_BOROCCO","barcodes":[{"ean13":"1234567890123"}]},
         ]}
-        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,rejected,rejected,found]) as get:
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,rejected,rejected,found,EMPTY]) as get:
             result=lookup_article("1022_BOROCCO")
         self.assertEqual(result,{"status":"found","barcodes":["1234567890123"]})
         self.assertEqual(get.call_args_list[0].kwargs["params"]["filter"],"article=1022_BOROCCO")
@@ -115,7 +131,7 @@ class OzonFboMoySkladDiagnosticsTests(unittest.TestCase):
         fuzzy=Mock(status_code=200,ok=True)
         fuzzy.json.return_value={"rows":[{"article":"1022_BOROCCO_EXTRA",
                                           "barcodes":[{"ean13":"1234567890123"}]}]}
-        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,rejected,rejected,fuzzy]):
+        with patch("ozon_fbo_catalog_validation.requests.get",side_effect=[rejected,rejected,rejected,fuzzy,EMPTY]):
             result=lookup_article("1022_BOROCCO")
         self.assertEqual(result,{"status":"missing","barcodes":[]})
 
