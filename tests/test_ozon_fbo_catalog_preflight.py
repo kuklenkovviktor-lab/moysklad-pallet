@@ -42,6 +42,16 @@ def plan_with_mismatch():
     }
 
 
+def selection(card_id, **fields):
+    return {"entity_type": "product", "identifier_type": "barcode", "id": card_id,
+            "confirmed": True, **fields}
+
+
+def option(card_id, article, value):
+    return {"entity_type": "product", "identifier_type": "barcode", "id": card_id,
+            "article": article, "value": value}
+
+
 def fake_lookup(article):
     return {"status": "found", "barcodes": {
         "6794 НАБОР 6 GOLD": ["2057054984679"],
@@ -63,10 +73,10 @@ class CatalogValidationTests(unittest.TestCase):
             resolved_manifest(plan, issues, {issues[0]["key"]: "fake"}, [])
         article = issues[0]["article"]
         code = "2057054984679"
-        with patch("ozon_fbo_catalog_validation.cards_by_barcode",
-                   return_value=[{"id": "product", "article": article, "barcode": code}]):
+        with patch("ozon_fbo_catalog_validation.catalog_options",
+                   return_value=[option("product", article, code)]):
             result, audit = resolved_manifest(plan, issues,
-                 {issues[0]["key"]: {"barcode": code, "confirmed": True}}, [])
+                 {issues[0]["key"]: selection("product", barcode=code)}, [])
         self.assertEqual(result[0]["items"][0]["barcode"], "2057054984679")
         self.assertEqual(plan["cargo"][0]["items"][0]["barcode"], "20570549844679")
         self.assertEqual(audit[0]["old"], "20570549844679")
@@ -113,7 +123,7 @@ class CatalogValidationTests(unittest.TestCase):
                                  {"article": "6794 НАБОР 6 GOLD",
                                   "barcodes": [{"ean13": "2057054984679"}]}]}
         with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}):
-            with patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()) as get:
+            with patch("ozon_fbo_catalog_validation.requests.get", side_effect=[Response(), Mock(status_code=200, json=lambda: {"rows": []})]) as get:
                 result = lookup_article("6794 НАБОР 6 GOLD")
         self.assertEqual(result, {"status": "found", "barcodes": ["2057054984679"]})
         self.assertIn("article=6794 НАБОР 6 GOLD", get.call_args.kwargs["params"]["filter"])
@@ -155,9 +165,9 @@ class ImportEndpointTests(unittest.TestCase):
 
     def test_import_records_correction_without_mutating_source(self):
         code = "2057054984679"
-        with patch("ozon_fbo_catalog_validation.cards_by_barcode", return_value=[
-                {"id": "product", "article": self.issues[0]["article"], "barcode": code}]):
-            response = self._request({self.issues[0]["key"]: {"barcode": code, "confirmed": True}})
+        with patch("ozon_fbo_catalog_validation.catalog_options", return_value=[
+                option("product", self.issues[0]["article"], code)]):
+            response = self._request({self.issues[0]["key"]: selection("product", barcode=code)})
         self.assertEqual(response.status_code, 201, response.json)
         self.assertEqual(response.json["corrections"], 1)
         sid = response.json["id"]
@@ -206,6 +216,8 @@ class ImportEndpointTests(unittest.TestCase):
         calls = []
 
         def read(url, *, params, **kwargs):
+            if url.endswith("/entity/bundle"):
+                return Mock(status_code=200, json=lambda: {"rows": []})
             self.assertTrue(url.endswith("/entity/product"))
             calls.append(params["filter"])
             # Include unrelated rows to exercise exact client-side filtering.
@@ -220,9 +232,9 @@ class ImportEndpointTests(unittest.TestCase):
             self.assertEqual(preview.status_code, 200, preview.json)
             issues = {i["article"]: i for i in preview.json["discrepancies"]}
             self.assertEqual([c["id"] for c in issues["A-old"]["cards"]], ["A", "A2"])
-            choices = {issues["A-old"]["key"]: {"article": "A", "id": "A", "confirmed": True},
-                       issues["B"]["key"]: {"barcode": "002", "confirmed": True},
-                       issues["C-old"]["key"]: {"article": "C", "barcode": "003", "confirmed": True}}
+            choices = {issues["A-old"]["key"]: selection("A", article="A"),
+                       issues["B"]["key"]: selection("B", barcode="002"),
+                       issues["C-old"]["key"]: selection("C", article="C", barcode="003")}
             fields["catalog_decisions"] = json.dumps(choices)
             removed = products.pop(2)
             self.assertEqual(self.client.post(endpoint, data=fields).status_code, 409)
@@ -254,13 +266,14 @@ class ImportEndpointTests(unittest.TestCase):
 
     def test_corrections_require_confirmation_exact_pair_and_unambiguous_card(self):
         key = self.issues[0]["key"]
-        cards = [{"id": i, "article": "NEW", "barcode": "001"} for i in ("a", "b")]
-        with patch("ozon_fbo_catalog_validation.cards_by_barcode", return_value=cards):
-            choice = {"article": "NEW", "barcode": "001", "confirmed": True}
+        cards = [option(i, "NEW", "001") for i in ("a", "b")]
+        with patch("ozon_fbo_catalog_validation.catalog_options", return_value=cards):
+            choice = selection("a", article="NEW", barcode="001")
             for override in ({"id": "absent"}, {"confirmed": False}, {"confirmed": "true"},
                              {"article": "OTHER"}, {}):
                 self.assertEqual(self._request({key: {**choice, **override}}).status_code, 409)
-            self.assertEqual(self._request({key: {**choice, "id": "a"}}).status_code, 201)
+            cards.pop()
+            self.assertEqual(self._request({key: choice}).status_code, 201)
 
     def test_duplicate_and_cross_article_barcode_after_correction_block_import(self):
         cargo = self.plan["cargo"]
@@ -269,14 +282,14 @@ class ImportEndpointTests(unittest.TestCase):
             with self.subTest(article=article):
                 if article == valid["article"]:
                     cargo[0]["items"].append(valid.copy())
-                card = {"article": article, "barcode": valid["barcode"], "id": "chosen"}
-                with patch("ozon_fbo_catalog_validation.cards_by_barcode", return_value=[card]):
-                    choice = {**card, "confirmed": True}
+                card = option("chosen", article, valid["barcode"])
+                with patch("ozon_fbo_catalog_validation.catalog_options", return_value=[card]):
+                    choice = selection("chosen", article=article, barcode=valid["barcode"])
                     self.assertEqual(self._request({self.issues[0]["key"]: choice}).status_code, 409)
 
     def test_corrected_pair_api_failure_and_stale_plan_block_import(self):
-        choice = {self.issues[0]["key"]: {"article": "NEW", "confirmed": True}}
-        with patch("ozon_fbo_catalog_validation.cards_by_barcode", side_effect=CatalogUnavailable("offline")):
+        choice = {self.issues[0]["key"]: selection("product", article="NEW")}
+        with patch("ozon_fbo_catalog_validation.catalog_options", side_effect=CatalogUnavailable("offline")):
             self.assertEqual(self._request(choice).status_code, 503)
         with patch("ozon_fbo._manifest_from_request", return_value=self.plan):
             response = self.client.post("/api/manager/ozon-fbo/import", data={
@@ -300,6 +313,56 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/manager/ozon-fbo/preview").status_code, 403)
         self.assertEqual(self.client.post("/api/manager/ozon-fbo/import").status_code, 403)
         self.assertEqual(self.client.get("/api/manager/ozon-fbo/catalog-cards?barcode=001").status_code, 403)
+
+
+    @patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"})
+    @patch("ozon_fbo_catalog_validation._wait_for_catalog_slot")
+    def test_bundle_code_requires_explicit_selection_and_fresh_typed_card(self, pacing):
+        import json
+        article, code = "БАНКА_240_ОВАЛ_4шт", "2038693831791"
+        bundle = {"id": "kit", "article": article, "code": code, "barcodes": []}
+        products = [{"id": "other", "article": "OTHER", "code": code + "0"}]
+        self.plan["cargo"] = [
+            {"barcode": f"GM-{i}", "destination": "Тест", "label": str(i), "qty": qty,
+             "items": [{"article": article, "barcode": code, "qty": qty, "source": f"Тест!E{i+1}"}]}
+            for i, qty in enumerate([737] + [350] * 11)]
+        self.plan.update(places=12, qty=4587, unique_rows=12, source_rows=12)
+        fields = dict(title="Комплекты", source_hash=self.plan["source_hash"], plan_hash=self.plan["plan_hash"])
+        endpoint = "/api/manager/ozon-fbo/import"
+
+        def read(url, **kwargs):
+            rows = [bundle] if url.endswith("/bundle") else products
+            return Mock(status_code=200, json=lambda: {"rows": rows})
+
+        with patch("ozon_fbo._manifest_from_request", return_value=self.plan), \
+             patch("ozon_fbo_catalog_validation.requests.get", side_effect=read):
+            issue, = self.client.post("/api/manager/ozon-fbo/preview").json["discrepancies"]
+            self.assertEqual(issue["barcodes"], [])
+            card, = issue["cards"]
+            self.assertEqual((card["id"], card["entity_type"], card["identifier_type"], card["value"]),
+                             ("kit", "bundle", "code", code))
+            search = self.client.get("/api/manager/ozon-fbo/catalog-cards", query_string={"article": article})
+            self.assertEqual(search.json["cards"], [card])
+            choice = selection("kit", article=article, barcode=code, entity_type="bundle", identifier_type="code")
+            for changes in ({"id": ""}, {"entity_type": "product"}, {"identifier_type": "barcode"},
+                            {"confirmed": False}):
+                fields["catalog_decisions"] = json.dumps({issue["key"]: {**choice, **changes}})
+                self.assertEqual(self.client.post(endpoint, data=fields).status_code, 409)
+            fields["catalog_decisions"] = json.dumps({issue["key"]: choice})
+            products.append({"id": "collision", "article": article, "barcodes": [{"ean13": code}]})
+            self.assertEqual(self.client.post(endpoint, data=fields).status_code, 409)
+            products.pop()
+            bundle["code"] = "changed"
+            self.assertEqual(self.client.post(endpoint, data=fields).status_code, 409)
+            bundle["code"] = code
+            response = self.client.post(endpoint, data=fields)
+            self.assertEqual(response.status_code, 201, response.json)
+            self.assertEqual((response.json["places"], response.json["qty"]), (12, 4587))
+            audit = _details(response.json["id"])["corrections"]
+            self.assertEqual(len(audit), 12)
+            self.assertTrue(all((r["old_source"], r["old"], r["new"], r["entity_type"],
+                                 r["identifier_type"], r["card_id"]) ==
+                                ("Excel", code, code, "bundle", "code", "kit") for r in audit))
 
 
 if __name__ == "__main__":
