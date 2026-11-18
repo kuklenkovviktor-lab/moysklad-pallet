@@ -4,6 +4,7 @@ gunicorn==23.0.0
 psycopg[binary,pool]==3.3.6
 boto3==1.40.61
 qrcode[pil]==8.2
+python-barcode==0.16.1
 
 openpyxl==3.1.5
 PyMuPDF==1.26.5
