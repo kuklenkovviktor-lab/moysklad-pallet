@@ -116,3 +116,75 @@ def fbs_catalog_status():
         }
     except Exception:
         return {"persisted_barcodes": 0, "last_successful_sync": None}
+
+
+def ozon_catalog_snapshot(max_age_hours=48):
+    """Read a complete-enough, recent FBS barcode snapshot for Ozon preflight.
+
+    Returns None when absent/stale. No network calls and no writes.
+    The FBS barcode index has precedence for packaging barcodes: never
+    silently interpret a packaging code as a unit-product barcode.
+    """
+    from datetime import datetime, timezone
+    from wms import query_all
+
+    try:
+        stamp_row = query_one(sql(
+            "SELECT value FROM fbs_catalog_meta WHERE name = ?"
+        ), ("last_successful_sync",))
+        if not stamp_row:
+            return None
+        stamp = datetime.fromisoformat(str(stamp_row[0]).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            return None
+        age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        if age < -300 or age > max_age_hours * 3600:
+            return None
+
+        rows = query_all(
+            "SELECT barcode, product_id, article, name, is_pack "
+            "FROM fbs_catalog_barcodes"
+        )
+        if not rows:
+            return None
+
+        products = {}
+        for code, product_id, article, name, is_pack in rows:
+            article = str(article or "").strip()
+            product_id = str(product_id or "").strip()
+            if not article or not product_id:
+                continue
+            by_id = products.setdefault(article.casefold(), {})
+            record = by_id.setdefault(product_id, {
+                "article": article, "name": str(name or ""), "barcodes": set()
+            })
+            if not bool(is_pack):
+                record["barcodes"].add(str(code).strip())
+        return products or None
+    except (ValueError, TypeError, OverflowError):
+        return None
+    except Exception:
+        # Missing table or unavailable DB must never be interpreted as a match.
+        return None
+
+
+def search_ozon_catalog_snapshot(query, limit=30):
+    """Search only fresh local unit products; no fallback API reads."""
+    snapshot = ozon_catalog_snapshot()
+    if snapshot is None:
+        return None
+    needle = str(query or "").strip().casefold()
+    found = []
+    for entries in snapshot.values():
+        for product_id, product in entries.items():
+            barcodes = sorted(product["barcodes"])
+            if not barcodes:
+                continue
+            if needle in " ".join((product["article"], product["name"], " ".join(barcodes))).casefold():
+                found.append({
+                    "id": product_id, "name": product["name"],
+                    "article": product["article"], "barcodes": barcodes,
+                })
+                if len(found) >= limit:
+                    return found
+    return found
