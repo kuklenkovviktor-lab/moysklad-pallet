@@ -137,7 +137,7 @@ class BundleCatalogTests(unittest.TestCase):
             def json(self): return {"rows": self.rows}
         with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
              patch("ozon_fbo_catalog_validation.requests.get",
-                   side_effect=[Response(first), Response([self._bundle()])]) as get:
+                   side_effect=[Response(first), Response([dict(self._bundle(), id="bundle-100")])]) as get:
             count = refresh_bundle_catalog()
         self.assertEqual(count, 101)
         self.assertEqual(get.call_count, 2)
