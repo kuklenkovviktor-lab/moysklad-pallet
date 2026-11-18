@@ -150,6 +150,23 @@ class BundleCatalogTests(unittest.TestCase):
                 "application/json;charset=utf-8",
             )
 
+    def test_three_bundle_api_rows_persist_with_success_timestamp(self):
+        rows = [dict(self._bundle(), id="bundle-" + str(i),
+                     article="БАНКА_240_ОВАЛ_" + str(i + 2) + "шт")
+                for i in range(3)]
+        class Response:
+            ok = True
+            status_code = 200
+            headers = {}
+            def json(self): return {"rows": rows, "meta": {"size": 3}}
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   return_value=Response()):
+            self.assertEqual(refresh_bundle_catalog(), 3)
+        self.assertEqual(len(recent_bundles()), 3)
+        self.assertIn("БАНКА_240_ОВАЛ_4шт",
+                      {item["article"] for item in recent_bundles()})
+
     def test_paginated_bundle_refresh(self):
         first = [dict(self._bundle(), id="bundle-" + str(i)) for i in range(100)]
         class Response:
