@@ -30,6 +30,7 @@ from partner_pallets import partner_bp, resolve_receiving_pallet, claim_receivin
 from replenishment import replenishment_bp
 from replenishment_checks import replenishment_checks_bp
 from warehouse_map import warehouse_map_bp
+from warehouse_map_labels import map_labels_bp
 from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
@@ -106,6 +107,7 @@ app.register_blueprint(partner_bp)
 app.register_blueprint(replenishment_bp)
 app.register_blueprint(replenishment_checks_bp)
 app.register_blueprint(warehouse_map_bp)
+app.register_blueprint(map_labels_bp)
 app.register_blueprint(cell_audit_bp)
 app.register_blueprint(diag_bp)
 app.register_blueprint(shift_history_bp)
@@ -482,6 +484,7 @@ def require_employee_login():
         "/api/manager/shifts/force-close",
         "/manager/replenishment",
         "/manager/warehouse-map",
+        "/manager/warehouse-map/labels",
         "/manager/cell-audit",
         "/api/manager/cell-audit/locate",
         "/api/manager/cell-audit/preview",
