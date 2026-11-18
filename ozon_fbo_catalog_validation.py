@@ -58,7 +58,7 @@ def _catalog_get(url, *, headers, params=None, timeout=12):
                 response = requests.get(url, headers=headers, params=params, timeout=timeout)
             except requests.Timeout as exc:
                 if attempt == _API_MAX_RETRIES:
-                    raise CatalogUnavailable("МойСклад: истекло время ожидания ответа.") from exc
+                    raise CatalogUnavailable("МойСклад: тайм-аут при чтении каталога после повторных попыток.") from exc
                 retry = _retry_delay(None, attempt)
             except requests.RequestException as exc:
                 raise CatalogUnavailable("МойСклад: ошибка сети при чтении каталога.") from exc
