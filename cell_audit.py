@@ -487,8 +487,8 @@ async function moveAssignment(){
    body:JSON.stringify({source:source.id,target,
      expected_product_id:locationData.assigned.product_id})
   });
-  msg('✓ Перенесено: '+result.article+' · '+result.source.label+' → '+result.target.label,'good');
   el('location').value=result.target.label;await locate();
+  msg('✓ Перенесено: '+result.article+' · '+result.source.label+' → '+result.target.label,'good');
  }catch(e){msg(e.message,'bad')}
  finally{b.disabled=false}
 }
