@@ -87,7 +87,7 @@ def refresh_bundle_catalog():
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     if not token:
         raise CatalogUnavailable("Не настроен токен МойСклад для комплектов.")
-    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8"}
     entries, size = [], 100
     for page in range(100):
         response = _catalog_get(

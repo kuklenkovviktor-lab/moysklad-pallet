@@ -127,6 +127,29 @@ class BundleCatalogTests(unittest.TestCase):
                 refresh_bundle_catalog()
         self.assertEqual(recent_bundles()[0]["article"], "БАНКА_240_ОВАЛ_4шт")
 
+    def test_moysklad_accept_charset_for_bundle_refresh_and_search(self):
+        from ozon_fbo_catalog_validation import search_catalog_products
+
+        class Response:
+            status_code = 200
+            ok = True
+            headers = {}
+            def json(self):
+                return {"rows": [self_entry]}
+
+        self_entry = self._bundle()
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   return_value=Response()) as mocked:
+            self.assertEqual(search_catalog_products(self_entry["article"])[0]["entity_type"], "bundle")
+            self.assertEqual(refresh_bundle_catalog(), 1)
+        self.assertGreaterEqual(mocked.call_count, 2)
+        for call in mocked.call_args_list:
+            self.assertEqual(
+                call.kwargs["headers"]["Accept"],
+                "application/json;charset=utf-8",
+            )
+
     def test_paginated_bundle_refresh(self):
         first = [dict(self._bundle(), id="bundle-" + str(i)) for i in range(100)]
         class Response:
