@@ -155,6 +155,17 @@ class WarehouseMapLabelTests(unittest.TestCase):
         self.assertIn("ШТРИХКОД ТОВАРА НЕ ПОДТВЕРЖДЁН", page)
         self.assertIn("SALAT_3V1", page)
 
+    def test_code128_encodes_verified_barcode_not_article(self):
+        from unittest.mock import patch
+        import warehouse_map_labels
+        loc_id = self.ids[0][0]
+        with patch.object(warehouse_map_labels, "_code128", wraps=warehouse_map_labels._code128) as generate:
+            response = self.client.get("/manager/warehouse-map/labels?id=" + loc_id)
+        self.assertEqual(response.status_code, 200)
+        generate.assert_called_once_with(self.product_barcode)
+        self.assertNotEqual(self.product_barcode, "SALAT_3V1")
+        self.assertIn('class="code-text">SALAT_3V1', response.get_data(as_text=True))
+
     def test_old_replenishment_labels_remain_58x40(self):
         r = self.client.get("/manager/replenishment/label?id=" + self.ids[0][0])
         self.assertEqual(r.status_code, 200)
