@@ -355,10 +355,10 @@ class ImportEndpointTests(unittest.TestCase):
         page = self.client.get("/manager/ozon-fbo")
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
-        self.assertIn("value=\\\"'+esc(i.article)+'\\\"", html)
-        self.assertIn("role=\\\"status\\\" aria-live=\\\"polite\\\"", html)
+        self.assertIn("value=\"'+esc(i.article)+'\"", html)
+        self.assertIn("role=\"status\" aria-live=\"polite\"", html)
         self.assertIn("out.textContent='Ищу «'+query+'»", html)
-        self.assertIn("data-article=\\\"'+esc(p.article)+'\\\"", html)
+        self.assertIn("data-article=\"'+esc(p.article)+'\"", html)
         self.assertIn("Поиск не выполнен:", html)
 
     def test_unauthorized_cannot_query_or_import(self):
