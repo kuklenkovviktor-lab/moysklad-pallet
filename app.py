@@ -486,6 +486,7 @@ def require_employee_login():
         "/api/manager/cell-audit/locate",
         "/api/manager/cell-audit/preview",
         "/api/manager/cell-audit/assign",
+        "/api/manager/cell-audit/move",
         "/api/manager/cell-audit/assignments",
         "/api/manager/warehouse-map",
         "/api/manager/warehouse-map/locations",
