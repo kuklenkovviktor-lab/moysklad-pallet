@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, redirect, request
 from ozon_fbo_parser import parse_ozon_xlsx
 from ozon_fbo_catalog_validation import (CatalogUnavailable, check_catalog,
     resolved_manifest, resolved_plan_hash, search_catalog_products, resolve_catalog_choices)
-from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
+from wms import DATABASE_URL, db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 ozon_fbo_bp = Blueprint("ozon_fbo", __name__)
 _init_lock = threading.Lock()
