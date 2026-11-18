@@ -143,7 +143,7 @@ class ImportEndpointTests(unittest.TestCase):
             "excluded_cargo": json.dumps(excluded or []),
         }
         with patch("ozon_fbo._manifest_from_request", return_value=plan), \
-             patch("ozon_fbo.check_catalog", return_value=self.issues):
+             patch("ozon_fbo.check_catalog", return_value=self.issues), \
              patch("ozon_fbo.resolve_catalog_choices", side_effect=lambda decisions, issues: {k: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"} for k, v in decisions.items() if isinstance(v, dict) and v.get("id") == "product-test-id"}):
             return self.client.post("/api/manager/ozon-fbo/import", data=fields)
 
