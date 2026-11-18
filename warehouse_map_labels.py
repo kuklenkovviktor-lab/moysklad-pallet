@@ -18,7 +18,7 @@ from wms import ensure_db, manager_access, query_all
 map_labels_bp = Blueprint("warehouse_map_labels", __name__)
 
 # K-01-2 and analogous numbered upper tiers point UP; K-01 points DOWN.
-_UPPER_TIER = re.compile(r"^[^/]+-\d+-[2-9]\d*$")
+_UPPER_TIER = re.compile(r"^[А-ЯЁA-Z]+-?\d+-[2-9]\d*$", re.IGNORECASE)
 
 
 def direction_for_location(address):
