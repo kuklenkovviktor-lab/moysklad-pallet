@@ -23,4 +23,4 @@ Prefer extending existing design primitives over creating competing inline palet
 
 ## Safety and delivery
 
-Use synthetic isolated test data. Do not execute trial operations against the employer's warehouse or real marketplace supplies. Production HOSTKEY deployment is controlled by GitHub Actions; tests first, then verified release. Respect backups and existing production data. Do not overwrite DB, secret keys or employee history to implement a visual change.
+Use synthetic isolated test data. Do not execute trial operations against the employer's warehouse or real marketplace supplies. GitHub stores code, branches and pull requests only. Never use GitHub Actions for tests, builds or production deployment. Run isolated synthetic tests and controlled app-only releases on HOSTKEY directly, after verification; preserve production PostgreSQL and all Compose overlays. Respect backups and existing production data. Do not overwrite DB, secret keys or employee history to implement a visual change.

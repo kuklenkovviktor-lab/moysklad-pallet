@@ -166,7 +166,7 @@ def check_catalog(plan, lookup=lookup_article):
 
 
 def resolved_manifest(plan, issues, decisions, excluded):
-    """Apply manager choices to a parsed copy, preserving whole cargo integrity."""
+    """Apply a manager-selected MoySklad product article and barcode to a parsed copy."""
     if not isinstance(decisions, dict) or not isinstance(excluded, list):
         raise ValueError("Некорректные решения по расхождениям.")
     cargo_ids = {c["barcode"] for c in plan["cargo"]}
@@ -177,32 +177,33 @@ def resolved_manifest(plan, issues, decisions, excluded):
     valid_keys = {x["key"] for x in issues}
     if set(decisions) - valid_keys:
         raise ValueError("Решения не соответствуют текущей проверке. Проверь файл снова.")
-    resolved, audit = [], []
-    barcode_article = {}
+    resolved, audit, barcode_article = [], [], {}
     for cargo in plan["cargo"]:
         if cargo["barcode"] in excluded_set:
             continue
         items = []
         for item in cargo["items"]:
-            old = item["barcode"]
-            mismatch = issue_by_pair.get((item["article"], old))
-            barcode = old
+            old_article, old_barcode = item["article"], item["barcode"]
+            mismatch = issue_by_pair.get((old_article, old_barcode))
+            new_article, new_barcode = old_article, old_barcode
             if mismatch:
-                barcode = decisions.get(mismatch["key"])
-                if barcode not in mismatch["barcodes"]:
-                    raise ValueError("Не все расхождения устранены. Исправь ШК либо исключи всё грузоместо.")
-                audit.append({
-                    "cargo": cargo["barcode"], "article": item["article"],
-                    "source": item["source"], "old": old, "new": barcode
-                })
-            previous = barcode_article.get(barcode)
-            if previous and previous.casefold() != item["article"].casefold():
+                choice = decisions.get(mismatch["key"])
+                if not isinstance(choice, dict):
+                    raise ValueError("Выбери карточку МойСклад для каждого расхождения.")
+                new_article = str(choice.get("article") or "").strip()
+                new_barcode = str(choice.get("barcode") or "").strip()
+                if not new_article or not new_barcode or len(new_article) > 160 or len(new_barcode) > 64:
+                    raise ValueError("Некорректная карточка МойСклад.")
+                audit.append({"cargo": cargo["barcode"], "article": old_article,
+                    "new_article": new_article, "source": item["source"],
+                    "old": old_barcode, "new": new_barcode})
+            previous = barcode_article.get(new_barcode)
+            if previous and previous.casefold() != new_article.casefold():
                 raise ValueError("Один ШК назначен разным артикулам. Проверь исправления.")
-            barcode_article[barcode] = item["article"]
+            barcode_article[new_barcode] = new_article
             copy = dict(item)
-            copy["barcode"] = barcode
+            copy["article"], copy["barcode"] = new_article, new_barcode
             items.append(copy)
-        # Consolidate identical article + corrected barcode, but do not silently double count.
         seen = set()
         for item in items:
             key = (item["article"].casefold(), item["barcode"])
@@ -225,3 +226,81 @@ def resolved_plan_hash(cargo):
     return hashlib.sha256(
         json.dumps(sorted(signature), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def search_catalog_products(query, limit=30):
+    """Search MoySklad products for manager-side discrepancy selection."""
+    token = os.getenv("MOYSKLAD_TOKEN", "").strip()
+    query = str(query or "").strip()
+    if not token:
+        raise CatalogUnavailable("API МойСклад не настроен.")
+    if len(query) < 2:
+        raise ValueError("Введи минимум 2 символа для поиска.")
+    if len(query) > 120:
+        raise ValueError("Слишком длинный поисковый запрос.")
+    try:
+        response = requests.get(
+            API_BASE + "/entity/product",
+            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+            params={"search": query, "limit": min(max(int(limit), 1), 30)},
+            timeout=12,
+        )
+    except requests.RequestException as exc:
+        raise CatalogUnavailable("Не удалось связаться с каталогом МойСклад.") from exc
+    if not response.ok:
+        raise CatalogUnavailable("МойСклад вернул HTTP " + str(response.status_code) + " при поиске товара.")
+    try:
+        rows = response.json().get("rows", [])
+    except (ValueError, AttributeError):
+        raise CatalogUnavailable("МойСклад вернул некорректный ответ каталога.")
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        codes = _barcodes(row)
+        result.append({
+            "id": str(row.get("id") or ""),
+            "name": str(row.get("name") or ""),
+            "article": str(row.get("article") or ""),
+            "barcodes": codes,
+        })
+    return result
+
+
+def resolve_catalog_choices(decisions, issues):
+    """Re-read selected products from MoySklad: browser fields are never authoritative."""
+    if not isinstance(decisions, dict):
+        raise ValueError("Некорректный выбор товаров.")
+    keys = {issue["key"] for issue in issues}
+    if set(decisions) - keys:
+        raise ValueError("Выбор не соответствует проверке файла.")
+    token = os.getenv("MOYSKLAD_TOKEN", "").strip()
+    if decisions and not token:
+        raise CatalogUnavailable("API МойСклад не настроен.")
+    verified = {}
+    for key, choice in decisions.items():
+        if not isinstance(choice, dict):
+            raise ValueError("Выбери карточку товара МойСклад.")
+        product_id = str(choice.get("id") or "").strip()
+        barcode = str(choice.get("barcode") or "").strip()
+        if not product_id or not barcode or len(product_id) > 64:
+            raise ValueError("Выбери карточку из результатов поиска МойСклад.")
+        try:
+            response = requests.get(
+                API_BASE + "/entity/product/" + product_id,
+                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                timeout=12,
+            )
+        except requests.RequestException as exc:
+            raise CatalogUnavailable("Не удалось проверить выбранную карточку МойСклад.") from exc
+        if not response.ok:
+            raise CatalogUnavailable("Не удалось проверить карточку МойСклад (HTTP " + str(response.status_code) + ").")
+        try:
+            product = response.json()
+        except ValueError as exc:
+            raise CatalogUnavailable("МойСклад вернул некорректную карточку.") from exc
+        article = str(product.get("article") or "").strip()
+        if str(product.get("id") or "") != product_id or not article or barcode not in _barcodes(product):
+            raise ValueError("Выбранная карточка или ШК не подтверждены каталогом МойСклад.")
+        verified[key] = {"article": article, "barcode": barcode}
+    return verified

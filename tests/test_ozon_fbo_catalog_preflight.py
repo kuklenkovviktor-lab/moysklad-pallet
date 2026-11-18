@@ -62,8 +62,9 @@ class CatalogValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues, {issues[0]["key"]: "fake"}, [])
         result, audit = resolved_manifest(plan, issues,
-             {issues[0]["key"]: "2057054984679"}, [])
+             {issues[0]["key"]: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}}, [])
         self.assertEqual(result[0]["items"][0]["barcode"], "2057054984679")
+        self.assertEqual(result[0]["items"][0]["article"], "6794 НАБОР 6 GOLD")
         self.assertEqual(plan["cargo"][0]["items"][0]["barcode"], "20570549844679")
         self.assertEqual(audit[0]["old"], "20570549844679")
         self.assertEqual(audit[0]["new"], "2057054984679")
@@ -86,7 +87,7 @@ class CatalogValidationTests(unittest.TestCase):
         self.assertTrue(all(not x["barcodes"] for x in issues))
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues,
-                {issues[0]["key"]: "2057054984679"}, [])
+                {issues[0]["key"]: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}}, [])
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues, {}, [])
 
@@ -113,6 +114,44 @@ class CatalogValidationTests(unittest.TestCase):
                 result = lookup_article("6794 НАБОР 6 GOLD")
         self.assertEqual(result, {"status": "found", "barcodes": ["2057054984679"]})
         self.assertIn("article=6794 НАБОР 6 GOLD", get.call_args.kwargs["params"]["filter"])
+
+
+class SelectedProductVerificationTests(unittest.TestCase):
+    def test_selected_card_is_verified_by_id_and_barcode(self):
+        from ozon_fbo_catalog_validation import resolve_catalog_choices
+
+        class Response:
+            ok = True
+            status_code = 200
+            def json(self):
+                return {"id": "product-uuid", "article": "ACTUAL-SKU",
+                        "barcodes": [{"ean13": "4601234567890"}]}
+
+        issues = [{"key": "issue-key"}]
+        supplied = {"issue-key": {"id": "product-uuid", "article": "FORGED-SKU",
+                                    "barcode": "4601234567890"}}
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()) as get:
+            choices = resolve_catalog_choices(supplied, issues)
+        self.assertEqual(choices, {"issue-key": {
+            "article": "ACTUAL-SKU", "barcode": "4601234567890"}})
+        self.assertIn("/entity/product/product-uuid", get.call_args.args[0])
+
+    def test_unverified_barcode_is_rejected(self):
+        from ozon_fbo_catalog_validation import resolve_catalog_choices
+
+        class Response:
+            ok = True
+            status_code = 200
+            def json(self):
+                return {"id": "product-uuid", "article": "ACTUAL-SKU",
+                        "barcodes": [{"ean13": "4601234567890"}]}
+
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()):
+            with self.assertRaises(ValueError):
+                resolve_catalog_choices({"key": {"id": "product-uuid",
+                    "barcode": "999999"}}, [{"key": "key"}])
 
 
 class ImportEndpointTests(unittest.TestCase):
@@ -142,7 +181,8 @@ class ImportEndpointTests(unittest.TestCase):
             "excluded_cargo": json.dumps(excluded or []),
         }
         with patch("ozon_fbo._manifest_from_request", return_value=plan), \
-             patch("ozon_fbo.check_catalog", return_value=self.issues):
+             patch("ozon_fbo.check_catalog", return_value=self.issues), \
+             patch("ozon_fbo.resolve_catalog_choices", side_effect=lambda decisions, issues: {k: {"article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"} for k, v in decisions.items() if isinstance(v, dict) and v.get("id") == "product-test-id"}):
             return self.client.post("/api/manager/ozon-fbo/import", data=fields)
 
     def test_import_rejects_unresolved_and_wrong_barcode(self):
@@ -150,7 +190,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(self._request({self.issues[0]["key"]: "not-in-catalog"}).status_code, 409)
 
     def test_import_records_correction_without_mutating_source(self):
-        response = self._request({self.issues[0]["key"]: "2057054984679"})
+        response = self._request({self.issues[0]["key"]: {"id": "product-test-id", "article": "6794 НАБОР 6 GOLD", "barcode": "2057054984679"}})
         self.assertEqual(response.status_code, 201, response.json)
         self.assertEqual(response.json["corrections"], 1)
         sid = response.json["id"]

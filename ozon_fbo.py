@@ -11,8 +11,8 @@ import uuid
 from flask import Blueprint, jsonify, redirect, request
 from ozon_fbo_parser import parse_ozon_xlsx
 from ozon_fbo_catalog_validation import (CatalogUnavailable, check_catalog,
-    resolved_manifest, resolved_plan_hash)
-from wms import db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
+    resolved_manifest, resolved_plan_hash, search_catalog_products, resolve_catalog_choices)
+from wms import DATABASE_URL, db_connect, ensure_db, get_session_employee, manager_access, now_iso, query_all, query_one, sql
 
 ozon_fbo_bp = Blueprint("ozon_fbo", __name__)
 _init_lock = threading.Lock()
@@ -85,20 +85,36 @@ function cargoPreview(p){
  (affected?'<label class="exclude-cargo"><input type="checkbox" data-exclude="'+esc(p.barcode)+'" '+(excludedCargo.has(p.barcode)?'checked':'')+'> Исключить всё грузоместо из импорта</label>':'')+
  itemsTable(p.items)+'</details>';
 }
-function unresolved(issue){return issue.cargo_barcodes.some(x=>!excludedCargo.has(x))&&!issue.barcodes.includes(catalogChoices[issue.key])}
+function unresolved(issue){const c=catalogChoices[issue.key];return issue.cargo_barcodes.some(x=>!excludedCargo.has(x))&&!(c&&c.article&&c.barcode)}
 function renderCatalog(){
  const el=document.getElementById('catalogIssues');
  if(!current)return el.innerHTML='';
  const issues=current.discrepancies||[];
  el.innerHTML=!issues.length?'<p class="ok">✓ Все артикулы и штрихкоды сверены с МойСклад.</p>':
- '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Подтверди правильный ШК либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
+ '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Выбери карточку МойСклад либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
  issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':'У товара нет ШК')+'</span>'+
  '<div class="small">Excel: '+esc(i.excel_barcode)+' · Строки: '+esc(i.sources.join(', '))+' · Грузоместа: '+esc(i.cargo_barcodes.join(', '))+'</div>'+
- (i.barcodes.length?'<label>ШК из МойСклад<select data-choice="'+esc(i.key)+'"><option value="">Выбери правильный ШК</option>'+
- i.barcodes.map(b=>'<option value="'+esc(b)+'" '+(catalogChoices[i.key]===b?'selected':'')+'>'+esc(b)+'</option>').join('')+'</select></label>':
- '<div class="small">Нет безопасного варианта замены. Исправь карточку МойСклад и проверь файл заново либо исключи все затронутые грузоместа.</div>')+
+ '<label>Найти карточку в МойСклад (артикул, название или ШК)<div class="controls"><input data-search="'+esc(i.key)+'" placeholder="Введи артикул, название или ШК"><button type="button" data-search-btn="'+esc(i.key)+'">Найти в каталоге</button></div></label>'+
+ '<div data-results="'+esc(i.key)+'" class="small"></div>'+
+ (catalogChoices[i.key]?'<p class="ok">Выбрано: '+esc(catalogChoices[i.key].article)+' · '+esc(catalogChoices[i.key].barcode)+'</p>':'')+
  (unresolved(i)?'<p class="danger">Требует решения</p>':'<p class="ok">Разрешено</p>')+'</div>').join('');
 }
+document.getElementById('catalogIssues').addEventListener('click',async e=>{
+ const b=e.target.closest('button[data-search-btn]');if(!b)return;
+ const key=b.dataset.searchBtn, input=document.querySelector('input[data-search="'+key+'"]'), out=document.querySelector('[data-results="'+key+'"]');
+ b.disabled=true;out.textContent='Ищу в МойСклад…';
+ try{
+  const r=await fetch('/api/manager/ozon-fbo/catalog-search?q='+encodeURIComponent(input.value),{cache:'no-store'}),d=await r.json();
+  if(!r.ok)throw Error(d.error||'Ошибка поиска');
+  out.innerHTML=d.products.length?d.products.map((p,n)=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Артикул: '+esc(p.article||'не указан')+' · ШК: '+esc(p.barcodes.join(', ')||'не указан')+'</div>'+
+   (p.barcodes.length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет штрихкода</span>')+'</div>').join(''):'Ничего не найдено.';
+ }catch(err){out.textContent=err.message}finally{b.disabled=false}
+});
+document.getElementById('catalogIssues').addEventListener('click',e=>{
+ const b=e.target.closest('button[data-select-product]');if(!b)return;
+ catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,article:b.closest('.issue').querySelector('.small').textContent.split(' · ')[0].replace('Артикул: ','').trim(),barcode:b.dataset.barcode};
+ renderCatalog();checkButton();
+});
 document.getElementById('catalogIssues').addEventListener('change',e=>{
  if(e.target.matches('select[data-choice]'))catalogChoices[e.target.dataset.choice]=e.target.value;
  renderCatalog();checkButton();
@@ -137,7 +153,7 @@ document.getElementById('previewBtn').addEventListener('click',async function(){
   warningsEl.innerHTML=d.warnings.length?'<p class="warn"><b>Найдены точные повторы: '+d.warnings.length+'</b></p><ol>'+d.warnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ol>':'<p class="ok">Точных повторов нет.</p>';
   if(d.errors.length){warningsEl.innerHTML+='<p class="danger"><b>Ошибки, импорт заблокирован:</b></p><ol>'+d.errors.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol>'}
   document.getElementById('warningConfirm').style.display=d.warnings.length?'block':'none';
-  notice.textContent=d.errors.length?'Исправь Excel и проверь снова.':(d.discrepancies||[]).length?'Обнаружены расхождения. Исправь ШК или исключи грузоместа.':'Проверка МойСклад пройдена. Можно создавать задания.';
+  notice.textContent=d.errors.length?'Исправь Excel и проверь снова.':(d.discrepancies||[]).length?'Обнаружены расхождения. Выбери карточки МойСклад или исключи грузоместа.':'Проверка МойСклад пройдена. Можно создавать задания.';
  }catch(e){notice.className='danger';notice.textContent=e.message}
  finally{busy=false;this.disabled=false;checkButton()}
 });
@@ -170,9 +186,9 @@ async function loadDetail(id){
  if(!r.ok)throw Error(d.error||'Ошибка');
  document.getElementById('detail').innerHTML='<h2>'+esc(d.supply.title)+'</h2><p class="small">Статус: план создан. ШК грузоместа сохранены без изменения цифр.</p>'+
  d.cargo.map(cargoBlock).join('')+
- '<h2 style="margin-top:16px">Журнал исправленных ШК</h2>'+
+ '<h2 style="margin-top:16px">Журнал подтверждённых исправлений</h2>'+
  (d.corrections.length?'<div class="scroll"><table><thead><tr><th>ГМ / строка</th><th>Артикул</th><th>Было</th><th>Стало</th><th>Подтвердил</th></tr></thead><tbody>'+
- d.corrections.map(x=>'<tr><td>'+esc(x.cargo)+' / '+esc(x.source)+'</td><td>'+esc(x.article)+'</td><td>'+esc(x.old)+'</td><td>'+esc(x.new)+'</td><td>'+esc(x.actor)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small">Исправлений не было.</p>');
+ d.corrections.map(x=>'<tr><td>'+esc(x.cargo)+' / '+esc(x.source)+'</td><td>'+esc(x.article)+' → '+esc(x.new_article||x.article)+'</td><td>'+esc(x.old)+'</td><td>'+esc(x.new)+'</td><td>'+esc(x.actor)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small">Исправлений не было.</p>');
 }
 loadSupplies().catch(e=>{document.getElementById('supplies').textContent=e.message});
 </script></main></body></html>"""
@@ -306,7 +322,7 @@ def _db():
                 id TEXT PRIMARY KEY, supply_id TEXT NOT NULL,
                 cargo_barcode TEXT NOT NULL, article TEXT NOT NULL,
                 source_cell TEXT NOT NULL, old_barcode TEXT NOT NULL,
-                new_barcode TEXT NOT NULL, actor TEXT NOT NULL,
+                new_barcode TEXT NOT NULL, new_article TEXT, actor TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (supply_id) REFERENCES ozon_fbo_supplies(id)
             )""",
@@ -324,6 +340,14 @@ def _db():
             try:
                 for statement in ddl:
                     cur.execute(statement)
+                if DATABASE_URL:
+                    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", ("ozon_fbo_import_corrections",))
+                    correction_columns = {r[0] for r in cur.fetchall()}
+                else:
+                    cur.execute("PRAGMA table_info(ozon_fbo_import_corrections)")
+                    correction_columns = {r[1] for r in cur.fetchall()}
+                if "new_article" not in correction_columns:
+                    cur.execute("ALTER TABLE ozon_fbo_import_corrections ADD COLUMN new_article TEXT")
                 conn.commit()
             finally:
                 cur.close()
@@ -392,14 +416,14 @@ def _details(supply_id):
                       for it in items],
         })
     corrections = query_all("""
-        SELECT cargo_barcode,article,source_cell,old_barcode,new_barcode,actor,created_at
+        SELECT cargo_barcode,article,source_cell,old_barcode,new_barcode,actor,created_at,new_article
         FROM ozon_fbo_import_corrections WHERE supply_id=?
         ORDER BY created_at,source_cell
     """, (supply_id,))
     return {
         "corrections": [
             {"cargo": x[0], "article": x[1], "source": x[2], "old": x[3],
-             "new": x[4], "actor": x[5], "at": x[6]} for x in corrections
+             "new": x[4], "actor": x[5], "at": x[6], "new_article": x[7]} for x in corrections
         ],
         "supply": {"id": header[0], "title": header[1], "status": header[2],
                    "created_at": header[3], "created_by": header[4],
@@ -422,6 +446,19 @@ def worker_page():
         return redirect("/login")
     _db()
     return WORKER_HTML
+
+
+@ozon_fbo_bp.get("/api/manager/ozon-fbo/catalog-search")
+def catalog_search():
+    if not manager_access():
+        return jsonify(error="Требуется вход руководителя"), 403
+    query = str(request.args.get("q") or "").strip()
+    try:
+        return jsonify(products=search_catalog_products(query))
+    except CatalogUnavailable as exc:
+        return jsonify(error=str(exc)), 503
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
 
 
 @ozon_fbo_bp.post("/api/manager/ozon-fbo/preview")
@@ -465,7 +502,8 @@ def import_plan():
         decisions = json.loads(request.form.get("catalog_decisions") or "{}")
         excluded = json.loads(request.form.get("excluded_cargo") or "[]")
         issues = check_catalog(plan)
-        safe_cargo, corrections = resolved_manifest(plan, issues, decisions, excluded)
+        verified_decisions = resolve_catalog_choices(decisions, issues)
+        safe_cargo, corrections = resolved_manifest(plan, issues, verified_decisions, excluded)
     except CatalogUnavailable as exc:
         return jsonify(error=str(exc)), 503
     except (ValueError, TypeError) as exc:
@@ -512,10 +550,10 @@ def import_plan():
                 cur.execute(sql("""
                     INSERT INTO ozon_fbo_import_corrections
                     (id,supply_id,cargo_barcode,article,source_cell,old_barcode,
-                     new_barcode,actor,created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                     new_barcode,actor,created_at,new_article)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                 """), (str(uuid.uuid4()),sid,change["cargo"],change["article"],
-                      change["source"],change["old"],change["new"],actor,now_iso()))
+                      change["source"],change["old"],change["new"],actor,now_iso(),change["new_article"]))
             for warning in plan["warnings"]:
                 cur.execute(sql("""
                     INSERT INTO ozon_fbo_import_warnings (id,supply_id,warning) VALUES (?,?,?)
