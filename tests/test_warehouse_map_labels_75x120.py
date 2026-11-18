@@ -46,18 +46,19 @@ class WarehouseMapLabelTests(unittest.TestCase):
                 (loc_id, label, code, "2026-11-18T00:00:00Z"),
             )
             self.ids.append((loc_id, label, code))
+        self.product_id = "synthetic-product-" + uuid.uuid4().hex
         self.product_barcode = "460" + str(int(uuid.uuid4().hex[:9], 16)).zfill(10)
         execute("""
             INSERT INTO fbs_catalog_barcodes
             (barcode,product_id,article,name,quantity,is_pack,synced_at)
             VALUES (?,?,?,?,?,?,?)
-        """, (self.product_barcode, "sample-product", "SALAT_3V1",
+        """, (self.product_barcode, self.product_id, "SALAT_3V1",
               "Салатники 3 в 1 ЛАБИРИНТ", 1, 0, "2026-11-18T00:00:00Z"))
         execute("""
             INSERT INTO cell_sku_assignments
             (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
             VALUES (?,?,?,?,?,?,?)
-        """, (self.ids[0][0], "sample-product", "SALAT_3V1",
+        """, (self.ids[0][0], self.product_id, "SALAT_3V1",
               "Салатники 3 в 1 ЛАБИРИНТ", "4601234567890",
               "2026-11-18T00:00:00Z", "Руководитель"))
 
@@ -146,7 +147,7 @@ class WarehouseMapLabelTests(unittest.TestCase):
 
     def test_missing_unit_code_does_not_forge_barcode(self):
         loc_id = self.ids[0][0]
-        execute("DELETE FROM fbs_catalog_barcodes WHERE product_id=?", ("sample-product",))
+        execute("DELETE FROM fbs_catalog_barcodes WHERE product_id=?", (self.product_id,))
         response = self.client.get("/manager/warehouse-map/labels?id=" + loc_id)
         page = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
