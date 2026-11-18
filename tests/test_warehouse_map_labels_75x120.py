@@ -34,7 +34,8 @@ class WarehouseMapLabelTests(unittest.TestCase):
             sess.clear()
             sess["manager_web"] = True
         self.ids = []
-        for label in ("К-01", "К-01-2", "К-02"):
+        serial = int(uuid.uuid4().hex[:7], 16)
+        for label in (f"К-{serial}", f"К-{serial}-2", f"К-{serial + 1}"):
             loc_id = str(uuid.uuid4())
             code = "ONIX-LOC-" + uuid.uuid4().hex[:16].upper()
             execute(
