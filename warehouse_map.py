@@ -92,6 +92,13 @@ input,textarea,select{background:white;border:1px solid #bfceda;border-radius:8p
 .cell.active{outline:3px solid #243c51}
 .cell:focus-visible{outline:3px solid #243c51}
 .cell .mark{position:absolute;top:0;right:2px;font-size:10px}
+.cell-brief{grid-column:1/-1;background:#eef5fb;border:1px solid #6d93b5;border-radius:8px;
+ padding:11px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#1b3648}
+.cell-brief .brief-item{min-width:130px;flex:1 1 180px}
+.cell-brief .brief-label{font-size:11px;color:#5a7081}
+.cell-brief .brief-print{background:#305b7d;color:#fff;text-decoration:none;border-radius:8px;
+ padding:10px 13px;font-weight:700;display:inline-block}
+
 .unknown{background:#e5e9ec}.completed{background:#b5e58f}.queued{background:#ffe06f}
 .started{background:#95d5f0}.delayed{background:#ffc385}.urgent,.blocked{background:#ff9292}
 .bottom{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:13px;margin-top:14px;align-items:start}
@@ -115,7 +122,7 @@ input,textarea,select{background:white;border:1px solid #bfceda;border-radius:8p
  <div class="top"><div><a href="/manager">← Панель руководителя</a> · <a href="/manager/replenishment">Задания пополнения</a> · <a href="/manager/cell-audit">📷 Обход ячеек</a>
  <h1>🗺️ Карта ячеек ONIX WMS</h1>
  <div class="small">Оперативные статусы пополнения по зарегистрированным адресам. Это не карта фактических остатков.</div></div>
- <button class="action" id="reload" type="button">Обновить карту</button></div>
+ <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap"><a class="action" id="printMapAll" href="/manager/warehouse-map/labels" target="_blank" rel="noopener" style="text-decoration:none">🖨 Печать всех ячеек · 75×120</a><button class="action" id="reload" type="button">Обновить карту</button></div></div>
  <div class="small" id="updated">Загрузка…</div><div id="notice" role="alert"></div>
 </header>
 <div class="toolbar">
@@ -186,9 +193,28 @@ function render(){
  root.innerHTML=Object.entries(grouped).map(([line,cells])=>
   '<section class="panel"><h2>'+esc(line==='ПРОЧЕЕ'?'Другие адреса':'Линия '+line)+
   '<span class="counts">'+cells.length+' ячеек</span></h2><div class="cells">'+
-  cells.map(c=>'<button type="button" class="cell '+esc(c.state)+(c.id===selectedId?' active':'')+
+  cells.map((c,index)=>{
+   let tile='<button type="button" class="cell '+esc(c.state)+(c.id===selectedId?' active':'')+
    '" data-id="'+esc(c.id)+'" title="'+esc(c.label+' · '+STATE_TEXT[c.state])+'" aria-label="'+esc(c.label+' · '+STATE_TEXT[c.state])+'">'+
-   esc(c.label)+(c.assignment?'<span class="mark">✓</span>':c.tasks.length?'<span class="mark">'+c.tasks.length+'</span>':'')+'</button>').join('')+
+   esc(c.label)+(c.assignment?'<span class="mark">✓</span>':c.tasks.length?'<span class="mark">'+c.tasks.length+'</span>':'')+'</button>';
+   // Insert the short card directly BELOW the selected tile's grid row.
+   const rowEnd=(index%7===6||index===cells.length-1);
+   if(rowEnd){
+    const rowStart=index-index%7;
+    const chosen=cells.slice(rowStart,index+1).find(x=>x.id===selectedId);
+    if(chosen){
+     const item=chosen.assignment;
+     tile+='<div class="cell-brief" role="region" aria-label="Краткая информация ячейки">'+
+      '<div class="brief-item"><div class="brief-label">ЯЧЕЙКА</div><b>'+esc(chosen.label)+'</b></div>'+
+      '<div class="brief-item"><div class="brief-label">ТОВАР</div><b>'+esc(item?.article||'Не закреплён')+'</b>'+
+      (item?.name?'<div class="small">'+esc(item.name)+'</div>':'')+'</div>'+
+      '<div class="brief-item"><div class="brief-label">КОЛИЧЕСТВО</div><b>Не ведётся</b></div>'+
+      '<a class="brief-print" href="/manager/warehouse-map/labels?id='+encodeURIComponent(chosen.id)+
+      '" target="_blank" rel="noopener">🖨 Печать · 75×120</a></div>';
+    }
+   }
+   return tile;
+  }).join('')+
   '</div></section>').join('')||'<div class="empty">Под выбранный фильтр ячеек нет. Добавить реальные адреса можно ниже.</div>';
  showDetails();
 }
@@ -210,6 +236,7 @@ function showDetails(){
  '<div><dt>Активные задачи</dt><dd>'+c.tasks.length+'</dd></div>'+
  '<div><dt>Последняя проверка товара</dt><dd>'+esc(c.last_task?.verified_product_at?'Да':'Нет данных')+'</dd></div>'+
  '<div><dt>Последняя проверка ячейки</dt><dd>'+esc(c.last_task?.verified_location_at?'Да':'Нет данных')+'</dd></div></dl>'+
+ '<div class="small">Адресный остаток: <b>не ведётся</b> · <a href="/manager/warehouse-map/labels?id='+encodeURIComponent(c.id)+'" target="_blank" rel="noopener">🖨 Этикетка 75×120 мм</a></div>'+ 
  '<h3>Постоянная привязка товара</h3>'+(c.assignment?'<div class="info"><b>'+esc(c.assignment.article)+'</b><div class="small">'+esc(c.assignment.name||'')+'</div><div class="small">Закреплено: '+esc(fmt(c.assignment.assigned_at))+'</div></div>':'<p class="small">Не задана. Последнее пополнение не назначает SKU автоматически.</p>')+
  '<p><a href="/manager/cell-audit?location_id='+encodeURIComponent(c.id)+'">📷 Сканировать товар и привязать к ячейке →</a></p>'+
  '<div class="manage-controls"><h3>Управление ячейкой</h3>'+
@@ -263,7 +290,7 @@ document.getElementById('details').addEventListener('click',async e=>{
   });
   const d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось сохранить');
   await fetchData();
-  if(d.reprint_label)alert('Адрес изменён, QR сохранён. Перепечатай этикетку 58×40 мм и замени старую на стеллаже.');
+  if(d.reprint_label)alert('Адрес изменён, QR сохранён. Перепечатай этикетку карты склада 75×120 мм (если используешь её) и замени старую на стеллаже.');
  }catch(err){alert(err.message);button.disabled=false}
 });
 document.getElementById('zones').addEventListener('click',e=>{
