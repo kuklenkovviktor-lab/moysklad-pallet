@@ -92,7 +92,7 @@ function renderCatalog(){
  const issues=current.discrepancies||[];
  el.innerHTML=!issues.length?'<p class="ok">✓ Все артикулы и штрихкоды сверены с МойСклад.</p>':
  '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Выбери карточку МойСклад либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
- issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':'У товара нет ШК')+'</span>'+
+ issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':i.reason==='manual_review'?'МойСклад отклонил автоматический поиск. Выбери карточку вручную':'У товара нет ШК')+'</span>'+
  '<div class="small">Excel: '+esc(i.excel_barcode)+' · Строки: '+esc(i.sources.join(', '))+' · Грузоместа: '+esc(i.cargo_barcodes.join(', '))+'</div>'+
  '<label>Найти карточку в МойСклад (артикул, название или ШК)<div class="controls"><input data-search="'+esc(i.key)+'" placeholder="Введи артикул, название или ШК"><button type="button" data-search-btn="'+esc(i.key)+'">Найти в каталоге</button></div></label>'+
  '<div data-results="'+esc(i.key)+'" class="small"></div>'+

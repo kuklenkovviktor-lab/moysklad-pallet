@@ -85,6 +85,9 @@ def lookup_article(article):
             candidates.clear()
             params = {"search": article, "limit": page_size, "offset": 0}
             response = request_page(params, fallback=True)
+        if response.status_code == 400 and search_mode:
+            # Unsupported search is a discrepancy for manager review, not an absent SKU.
+            return {"status": "manual_review", "barcodes": []}
         if not response.ok:
             if search_mode:
                 raise CatalogUnavailable(
@@ -229,7 +232,7 @@ def resolved_plan_hash(cargo):
 
 
 def search_catalog_products(query, limit=30):
-    """Search MoySklad products for manager-side discrepancy selection."""
+    """Read-only product candidates; fallback when MoySklad rejects search with HTTP 400."""
     token = os.getenv("MOYSKLAD_TOKEN", "").strip()
     query = str(query or "").strip()
     if not token:
@@ -238,33 +241,66 @@ def search_catalog_products(query, limit=30):
         raise ValueError("Введи минимум 2 символа для поиска.")
     if len(query) > 120:
         raise ValueError("Слишком длинный поисковый запрос.")
+    count = min(max(int(limit), 1), 30)
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     try:
-        response = requests.get(
-            API_BASE + "/entity/product",
-            headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
-            params={"search": query, "limit": min(max(int(limit), 1), 30)},
-            timeout=12,
-        )
+        response = requests.get(API_BASE + "/entity/product", headers=headers,
+                                params={"search": query, "limit": count}, timeout=12)
     except requests.RequestException as exc:
         raise CatalogUnavailable("Не удалось связаться с каталогом МойСклад.") from exc
-    if not response.ok:
-        raise CatalogUnavailable("МойСклад вернул HTTP " + str(response.status_code) + " при поиске товара.")
-    try:
-        rows = response.json().get("rows", [])
-    except (ValueError, AttributeError):
-        raise CatalogUnavailable("МойСклад вернул некорректный ответ каталога.")
-    result = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        codes = _barcodes(row)
-        result.append({
-            "id": str(row.get("id") or ""),
-            "name": str(row.get("name") or ""),
-            "article": str(row.get("article") or ""),
-            "barcodes": codes,
-        })
-    return result
+
+    if response.status_code == 400:
+        # Search parameters can be rejected even when a product exists.
+        # Inspect a bounded read-only window, without treating its absence as proof.
+        rows = []
+        page_size = 100
+        for page in range(20):
+            try:
+                current = requests.get(
+                    API_BASE + "/entity/product", headers=headers,
+                    params={"limit": page_size, "offset": page * page_size}, timeout=12)
+            except requests.RequestException as exc:
+                raise CatalogUnavailable("Не удалось прочитать каталог МойСклад.") from exc
+            if not current.ok:
+                raise CatalogUnavailable("МойСклад не позволил открыть каталог (HTTP " +
+                                         str(current.status_code) + ").")
+            try:
+                payload = current.json()
+            except ValueError as exc:
+                raise CatalogUnavailable("МойСклад вернул некорректный каталог.") from exc
+            if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+                raise CatalogUnavailable("МойСклад вернул неожиданный формат каталога.")
+            page_rows = payload["rows"]
+            for product in page_rows:
+                if not isinstance(product, dict):
+                    continue
+                haystack = " ".join([str(product.get("article") or ""),
+                                     str(product.get("name") or ""),
+                                     " ".join(_barcodes(product))]).casefold()
+                if query.casefold() in haystack:
+                    rows.append(product)
+                    if len(rows) >= count:
+                        break
+            if len(rows) >= count or len(page_rows) < page_size:
+                break
+    elif response.ok:
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise CatalogUnavailable("МойСклад вернул некорректный ответ каталога.") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            raise CatalogUnavailable("МойСклад вернул неожиданный формат каталога.")
+        rows = payload["rows"]
+    else:
+        raise CatalogUnavailable("МойСклад вернул HTTP " + str(response.status_code) +
+                                 " при поиске товара.")
+    return [{
+        "id": str(row.get("id") or ""),
+        "name": str(row.get("name") or ""),
+        "article": str(row.get("article") or ""),
+        "barcodes": _barcodes(row),
+    } for row in rows if isinstance(row, dict)]
+
 
 
 def resolve_catalog_choices(decisions, issues):
