@@ -466,12 +466,25 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-off
 <h1 class="heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10"/></svg>Монитор сборки Ozon FBO</h1><p class="small intro">Подтверждённые сканирования · Обновление каждые 15 секунд · Без списаний в МойСклад</p>
 <div class="card monitor-card"><div class="monitor-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18h3v-7H3zM10 18h3V6h-3zM17 18h3V3h-3z"/></svg><h2>Грузоместа и прогресс сборки</h2><span class="small">Фактические данные Ozon FBO</span></div><div class="scroll"><table><thead><tr><th>Поставка / направление</th><th>ШК грузоместа</th><th>Исполнитель</th><th>Собрано</th><th>Статус</th><th>Действия</th></tr></thead>
 <tbody id="rows"><tr><td colspan="6">Загрузка…</td></tr></tbody></table></div></div>
+<div class="card monitor-card"><h2>Учёт подтверждённых недостач по городам</h2>
+<p class="small">Только согласованные руководителем позиции. Количество суммируется по городу и артикулу.</p>
+<div class="scroll"><table><thead><tr><th>Город</th><th>Артикул</th><th>Не хватило, шт.</th><th>Случаев</th></tr></thead>
+<tbody id="shortageRegister"><tr><td colspan="4">Загрузка…</td></tr></tbody></table></div>
+<div id="shortageRegisterHint" class="small"></div></div>
 <div class="card audit-card"><h2>История грузоместа</h2><div id="audit" class="small">Нажми «История» в строке грузоместа.</div></div>
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let list=[];
 function progressState(c){return c.status==='done'?'is-done':c.status==='started'?'is-started':'is-planned'}
 function statusLabel(c){const approved=(c.shortages||[]).filter(x=>x.status==='approved').reduce((n,x)=>n+x.missing,0);return c.status==='done'&&approved?'Готово с недостачей':({planned:'План',started:'Собирается',done:'Собрано'}[c.status]||c.status)}
+async function loadShortages(){
+ const r=await fetch('/api/manager/ozon-fbo/shortages/register',{cache:'no-store'}),d=await r.json();
+ if(!r.ok)throw Error(d.error||'Не удалось загрузить учёт недостач');
+ document.getElementById('shortageRegister').innerHTML=(d.summary||[]).length?
+ d.summary.map(x=>'<tr><td>'+esc(x.city)+'</td><td>'+esc(x.article)+'</td><td>'+esc(x.missing)+'</td><td>'+esc(x.cases)+'</td></tr>').join(''):
+ '<tr><td colspan="4">Подтверждённых недостач пока нет.</td></tr>';
+ document.getElementById('shortageRegisterHint').textContent=d.limited?'Показаны последние 5000 подтверждений. Для полной выгрузки потребуется пагинация.':'';
+}
 async function load(){
  const r=await fetch('/api/manager/ozon-fbo/progress',{cache:'no-store'}),d=await r.json();
  if(!r.ok)throw Error(d.error||'Не удалось загрузить');
@@ -504,7 +517,7 @@ document.getElementById('rows').addEventListener('click',async e=>{
    const r=await fetch('/api/manager/ozon-fbo/shortage/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
      cargo_id:cargo.id,item_id:item.item_id,decision:approve?'approve':'reject',reason:reason.trim()})});
    const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка согласования');
-   await load();
+   await load();await loadShortages();
   }catch(err){alert(err.message)}finally{shortage.disabled=false}
   return;
  }
@@ -530,6 +543,7 @@ document.getElementById('rows').addEventListener('click',async e=>{
   }catch(e){alert(e.message)}finally{release.disabled=false}
  }
 });
+loadShortages().catch(e=>document.getElementById('shortageRegister').innerHTML='<tr><td colspan="4">'+esc(e.message)+'</td></tr>');
 load().catch(e=>document.getElementById('rows').innerHTML='<tr><td colspan="6">'+esc(e.message)+'</td></tr>');
-setInterval(()=>{if(!document.hidden)load().catch(()=>{})},15000);
+setInterval(()=>{if(!document.hidden){load().catch(()=>{});loadShortages().catch(()=>{});}},15000);
 </script></main></body></html>"""
