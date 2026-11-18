@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -15,6 +17,67 @@ API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 
 class CatalogUnavailable(ValueError):
     pass
+
+
+# A single pacing gate across preflight, manual catalog search and product validation.
+# Multiple manager requests share this gate within each application worker.
+_API_LOCK = threading.Lock()
+_API_NEXT_ALLOWED = 0.0
+_API_MIN_INTERVAL = 0.4
+_API_MAX_RETRIES = 5
+
+
+def _retry_delay(value, attempt):
+    """Honor Retry-After seconds or HTTP-date; otherwise bounded exponential backoff."""
+    fallback = min(2.0 * (2 ** attempt), 30.0)
+    if value:
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            try:
+                stamp = parsedate_to_datetime(value)
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                delay = (stamp - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                return fallback
+        return max(0.0, min(delay, 60.0))
+    return fallback
+
+
+def _catalog_get(url, *, headers, params=None, timeout=12):
+    """Serialize calls and apply one shared retry policy for MoySklad read requests."""
+    global _API_NEXT_ALLOWED
+    for attempt in range(_API_MAX_RETRIES + 1):
+        with _API_LOCK:
+            delay = max(0.0, _API_NEXT_ALLOWED - time.monotonic())
+            if delay:
+                time.sleep(delay)
+            _API_NEXT_ALLOWED = time.monotonic() + _API_MIN_INTERVAL
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=timeout)
+            except requests.Timeout as exc:
+                if attempt == _API_MAX_RETRIES:
+                    raise CatalogUnavailable("МойСклад: истекло время ожидания ответа.") from exc
+                retry = _retry_delay(None, attempt)
+            except requests.RequestException as exc:
+                raise CatalogUnavailable("МойСклад: ошибка сети при чтении каталога.") from exc
+            else:
+                if response.status_code not in (429, 500, 502, 503, 504):
+                    return response
+                if attempt == _API_MAX_RETRIES:
+                    if response.status_code == 429:
+                        raise CatalogUnavailable(
+                            "МойСклад ограничил частоту запросов (HTTP 429). "
+                            "Проверка приостановлена, повтори позже.")
+                    return response
+                retry = _retry_delay(
+                    response.headers.get("Retry-After") if response.status_code == 429 else None,
+                    attempt)
+            # Keep other application threads from immediately hammering the API.
+            _API_NEXT_ALLOWED = max(_API_NEXT_ALLOWED, time.monotonic() + retry)
+    raise CatalogUnavailable("МойСклад: повторные попытки завершились без ответа.")
+
 
 
 def decision_key(article, barcode):
@@ -51,27 +114,7 @@ def lookup_article(article):
     max_pages = 10
 
     def request_page(params, *, fallback=False):
-        for attempt in range(3):
-            try:
-                response = requests.get(endpoint, headers=headers, params=params, timeout=12)
-            except requests.Timeout as exc:
-                if attempt < 2:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-                stage = "резервного поиска артикула " if fallback else "проверки артикула "
-                raise CatalogUnavailable(
-                    "МойСклад: тайм-аут " + stage + article[:80] + " (3 попытки)."
-                ) from exc
-            except requests.RequestException as exc:
-                stage = "резервного поиска артикула " if fallback else "проверки артикула "
-                raise CatalogUnavailable(
-                    "МойСклад: ошибка сети " + stage + article[:80] + "."
-                ) from exc
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            return response
-        raise CatalogUnavailable("МойСклад: проверка артикула не завершена.")
+        return _catalog_get(endpoint, headers=headers, params=params, timeout=12)
 
     # Only switch to search if MoySklad rejects the article filter.
     search_mode = False
@@ -143,10 +186,9 @@ def check_catalog(plan, lookup=lookup_article):
     articles = sorted({article for article, _ in pairs})
     if len(articles) > 500:
         raise CatalogUnavailable("Слишком много уникальных артикулов для одной проверки (максимум 500).")
-    # Four workers minimize latency without flooding MoySklad with requests.
+    # Serial checks prevent bursts; the shared API gate also covers manager searches.
     try:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            matches = dict(zip(articles, pool.map(lookup, articles)))
+        matches = {article: lookup(article) for article in articles}
     except CatalogUnavailable:
         raise
     except Exception as exc:
@@ -244,7 +286,7 @@ def search_catalog_products(query, limit=30):
     count = min(max(int(limit), 1), 30)
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     try:
-        response = requests.get(API_BASE + "/entity/product", headers=headers,
+        response = _catalog_get(API_BASE + "/entity/product", headers=headers,
                                 params={"search": query, "limit": count}, timeout=12)
     except requests.RequestException as exc:
         raise CatalogUnavailable("Не удалось связаться с каталогом МойСклад.") from exc
@@ -256,7 +298,7 @@ def search_catalog_products(query, limit=30):
         page_size = 100
         for page in range(20):
             try:
-                current = requests.get(
+                current = _catalog_get(
                     API_BASE + "/entity/product", headers=headers,
                     params={"limit": page_size, "offset": page * page_size}, timeout=12)
             except requests.RequestException as exc:
@@ -322,7 +364,7 @@ def resolve_catalog_choices(decisions, issues):
         if not product_id or not barcode or len(product_id) > 64:
             raise ValueError("Выбери карточку из результатов поиска МойСклад.")
         try:
-            response = requests.get(
+            response = _catalog_get(
                 API_BASE + "/entity/product/" + product_id,
                 headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
                 timeout=12,
