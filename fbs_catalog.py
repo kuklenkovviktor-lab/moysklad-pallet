@@ -31,6 +31,9 @@ def init_fbs_catalog_db():
         """)
         conn.commit()
         cur.close()
+    # Shared PostgreSQL catalog keeps bundles separately typed to protect FBS scans.
+    from bundle_catalog import init_bundle_catalog_db
+    init_bundle_catalog_db()
 
 
 def _product_fields(product):
@@ -160,6 +163,18 @@ def ozon_catalog_snapshot(max_age_hours=48):
             })
             if not bool(is_pack):
                 record["barcodes"].add(str(code).strip())
+        # Include independently typed bundle cards from the same database.
+        # Missing bundle sync does not invalidate the existing FBS product snapshot.
+        from bundle_catalog import recent_bundles
+        for bundle in recent_bundles(max_age_hours):
+            article = bundle["article"].strip()
+            if not article:
+                continue
+            products.setdefault(article.casefold(), {})["bundle:" + bundle["id"]] = {
+                "article": article, "name": bundle["name"],
+                "code": bundle["code"], "entity_type": "bundle",
+                "barcodes": set(bundle["barcodes"]),
+            }
         return products or None
     except (ValueError, TypeError, OverflowError):
         return None
@@ -182,8 +197,10 @@ def search_ozon_catalog_snapshot(query, limit=30):
                 continue
             if needle in " ".join((product["article"], product["name"], " ".join(barcodes))).casefold():
                 found.append({
-                    "id": product_id, "name": product["name"],
-                    "article": product["article"], "barcodes": barcodes,
+                    "id": product_id.removeprefix("bundle:") if product_id.startswith("bundle:") else product_id,
+                    "entity_type": product.get("entity_type", "product"),
+                    "name": product["name"], "article": product["article"],
+                    "code": product.get("code", ""), "barcodes": barcodes,
                 })
                 if len(found) >= limit:
                     return found
