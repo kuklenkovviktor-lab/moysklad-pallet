@@ -201,6 +201,7 @@ class CellWalkTests(unittest.TestCase):
             session["employee_id"]="anton"
         forbidden=self.client.post("/api/manager/cell-audit/move",json=payload)
         self.assertEqual(forbidden.status_code,403)
+        self.assertEqual(forbidden.json["error"],"Требуется вход в ПК-панель")
         self.assertIsNone(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
                                     (dest,)))
         self.assertEqual(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
