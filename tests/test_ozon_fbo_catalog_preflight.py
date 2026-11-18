@@ -116,6 +116,44 @@ class CatalogValidationTests(unittest.TestCase):
         self.assertIn("article=6794 НАБОР 6 GOLD", get.call_args.kwargs["params"]["filter"])
 
 
+class SelectedProductVerificationTests(unittest.TestCase):
+    def test_selected_card_is_verified_by_id_and_barcode(self):
+        from ozon_fbo_catalog_validation import resolve_catalog_choices
+
+        class Response:
+            ok = True
+            status_code = 200
+            def json(self):
+                return {"id": "product-uuid", "article": "ACTUAL-SKU",
+                        "barcodes": [{"ean13": "4601234567890"}]}
+
+        issues = [{"key": "issue-key"}]
+        supplied = {"issue-key": {"id": "product-uuid", "article": "FORGED-SKU",
+                                    "barcode": "4601234567890"}}
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \\
+             patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()) as get:
+            choices = resolve_catalog_choices(supplied, issues)
+        self.assertEqual(choices, {"issue-key": {
+            "article": "ACTUAL-SKU", "barcode": "4601234567890"}})
+        self.assertIn("/entity/product/product-uuid", get.call_args.args[0])
+
+    def test_unverified_barcode_is_rejected(self):
+        from ozon_fbo_catalog_validation import resolve_catalog_choices
+
+        class Response:
+            ok = True
+            status_code = 200
+            def json(self):
+                return {"id": "product-uuid", "article": "ACTUAL-SKU",
+                        "barcodes": [{"ean13": "4601234567890"}]}
+
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \\
+             patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()):
+            with self.assertRaises(ValueError):
+                resolve_catalog_choices({"key": {"id": "product-uuid",
+                    "barcode": "999999"}}, [{"key": "key"}])
+
+
 class ImportEndpointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
