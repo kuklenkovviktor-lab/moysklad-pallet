@@ -315,8 +315,47 @@ def search_catalog_products(query, limit=30):
     local = search_ozon_catalog_snapshot(query, count)
     if local:
         return local
+    # Bundles are stored and queried separately by MoySklad. Check the
+    # bundle entity first when the local snapshot has no matching entry.
+    from bundle_catalog import bundle_barcodes
+    bundle_headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    bundle_response = _catalog_get(
+        API_BASE + "/entity/bundle", headers=bundle_headers,
+        params={"search": query, "limit": count}, timeout=12)
+    if bundle_response.status_code == 400:
+        # Some accounts reject 'search' but allow ordinary collection listing.
+        bundle_response = _catalog_get(
+            API_BASE + "/entity/bundle", headers=bundle_headers,
+            params={"limit": 100, "offset": 0}, timeout=12)
+    if bundle_response.ok:
+        try:
+            bundle_payload = bundle_response.json()
+        except ValueError as exc:
+            raise CatalogUnavailable("МойСклад вернул некорректный список комплектов.") from exc
+        if not isinstance(bundle_payload, dict) or not isinstance(bundle_payload.get("rows"), list):
+            raise CatalogUnavailable("МойСклад вернул неожиданный список комплектов.")
+        bundles = []
+        for entry in bundle_payload["rows"]:
+            if not isinstance(entry, dict) or entry.get("archived"):
+                continue
+            article = str(entry.get("article") or "")
+            name = str(entry.get("name") or "")
+            code = str(entry.get("code") or "")
+            codes = bundle_barcodes(entry)
+            if query.casefold() not in " ".join((article, name, code, " ".join(codes))).casefold():
+                continue
+            bundles.append({
+                "id": str(entry.get("id") or ""),
+                "entity_type": "bundle", "name": name,
+                "article": article, "code": code, "barcodes": codes
+            })
+        if bundles:
+            return bundles[:count]
+    elif bundle_response.status_code not in (400, 404):
+        raise CatalogUnavailable(
+            "МойСклад: ошибка поиска комплектов HTTP " + str(bundle_response.status_code))
     # A card may be absent from the partial FBS snapshot. Use the throttled
-    # read-only API search only when local lookup produced no candidates.
+    # read-only product API only after checking bundles.
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     try:
         response = _catalog_get(API_BASE + "/entity/product", headers=headers,
@@ -393,12 +432,20 @@ def resolve_catalog_choices(decisions, issues):
         if not isinstance(choice, dict):
             raise ValueError("Выбери карточку товара МойСклад.")
         product_id = str(choice.get("id") or "").strip()
+        entity_type = str(choice.get("entity_type") or "product").strip()
         barcode = str(choice.get("barcode") or "").strip()
+        identifier_type = str(choice.get("identifier_type") or "barcode").strip()
+        if identifier_type not in ("barcode", "code"):
+            raise ValueError("Недопустимый идентификатор карточки.")
+        if identifier_type == "code" and entity_type != "bundle":
+            raise ValueError("Подтверждение по коду разрешено только для комплектов.")
+        if entity_type not in ("product", "bundle"):
+            raise ValueError("Недопустимый тип карточки МойСклад.")
         if not product_id or not barcode or len(product_id) > 64:
             raise ValueError("Выбери карточку из результатов поиска МойСклад.")
         try:
             response = _catalog_get(
-                API_BASE + "/entity/product/" + product_id,
+                API_BASE + "/entity/" + entity_type + "/" + product_id,
                 headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
                 timeout=12,
             )
@@ -411,7 +458,9 @@ def resolve_catalog_choices(decisions, issues):
         except ValueError as exc:
             raise CatalogUnavailable("МойСклад вернул некорректную карточку.") from exc
         article = str(product.get("article") or "").strip()
-        if str(product.get("id") or "") != product_id or not article or barcode not in _barcodes(product):
-            raise ValueError("Выбранная карточка или ШК не подтверждены каталогом МойСклад.")
+        valid_identifier = (barcode in _barcodes(product) if identifier_type == "barcode"
+                            else barcode == str(product.get("code") or "").strip())
+        if str(product.get("id") or "") != product_id or not article or not valid_identifier:
+            raise ValueError("Выбранная карточка или идентификатор не подтверждены МойСклад.")
         verified[key] = {"article": article, "barcode": barcode}
     return verified
