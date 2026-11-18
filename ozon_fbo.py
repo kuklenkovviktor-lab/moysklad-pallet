@@ -119,13 +119,15 @@ document.getElementById('catalogIssues').addEventListener('click',async e=>{
   if(!Array.isArray(d.products))throw Error('Некорректный ответ каталога.');
   const products=d.products;
   out.innerHTML=products.length?products.map(p=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Тип: '+esc(p.entity_type==='bundle'?'Комплект':'Товар')+' · Артикул: '+esc(p.article||'не указан')+' · Код МС: '+esc(p.code||'не указан')+' · ШК: '+esc((p.barcodes||[]).join(', ')||'не указан')+'</div>'+
-   ((p.barcodes||[]).length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-entity-type="'+esc(p.entity_type||'product')+'" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет товарного ШК. Код МойСклад не подменяется штрихкодом.</span>')+'</div>').join(''):'Ничего не найдено. Попробуй название или ШК товара.';
+   (p.barcodes||[]).map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-entity-type="'+esc(p.entity_type||'product')+'" data-identifier-type="barcode" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать ШК · '+esc(code)+'</button>').join(' ')+
+   (p.entity_type==='bundle'&&p.code?'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-entity-type="bundle" data-identifier-type="code" data-article="'+esc(p.article)+'" data-barcode="'+esc(p.code)+'">Подтвердить код комплекта · '+esc(p.code)+'</button>':'')+
+   (!(p.barcodes||[]).length?'<p class="warn">У карточки нет товарного ШК. Код комплекта можно подтвердить только вручную.</p>':'')+'</div>').join(''):'Ничего не найдено. Попробуй название или ШК товара.';
  }catch(err){out.className='danger';out.textContent='Поиск не выполнен: '+err.message}
  finally{b.disabled=false}
 });
 document.getElementById('catalogIssues').addEventListener('click',e=>{
  const b=e.target.closest('button[data-select-product]');if(!b)return;
- catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,entity_type:b.dataset.entityType||'product',article:b.dataset.article,barcode:b.dataset.barcode};
+ catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,entity_type:b.dataset.entityType||'product',identifier_type:b.dataset.identifierType||'barcode',article:b.dataset.article,barcode:b.dataset.barcode};
  renderCatalog();checkButton();
 });
 document.getElementById('catalogIssues').addEventListener('change',e=>{
