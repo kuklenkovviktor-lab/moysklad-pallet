@@ -135,6 +135,77 @@ class CellWalkTests(unittest.TestCase):
              json=self.payload(confirmed_product_id="item-1",expected_current_id=None)).status_code,403)
         self.assertEqual(self.client.get("/manager/cell-audit").status_code,302)
 
+    def _assign_for_move(self):
+        body=self.payload(confirmed_product_id="item-1",expected_current_id=None,replace=False)
+        response=self.post_lookup("/api/manager/cell-audit/assign",body)
+        self.assertEqual(response.status_code,200,response.json)
+
+    def _destination(self):
+        dest_id=str(uuid.uuid4())
+        dest_label="К-"+uuid.uuid4().hex[:6].upper()
+        dest_code="ONIX-LOC-"+uuid.uuid4().hex[:16].upper()
+        execute("""INSERT INTO replenishment_locations(id,label,barcode,created_at,active)
+                   VALUES (?,?,?,?,1)""",(dest_id,dest_label,dest_code,"2026-10-22T00:00:00Z"))
+        return dest_id,dest_label
+
+    def test_manager_moves_existing_item_to_empty_cell_and_updates_map(self):
+        self._assign_for_move()
+        dest,label=self._destination()
+        r=self.client.post("/api/manager/cell-audit/move",
+            json={"source":self.loc_id,"target":label,"expected_product_id":"item-1"})
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertFalse(r.json["stock_changed"])
+        self.assertIsNone(query_one("SELECT product_id FROM cell_sku_assignments WHERE location_id=?",
+                                    (self.loc_id,)))
+        self.assertEqual(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                   (dest,))[0],"SALAT_3V1_NONE")
+        self.assertEqual(query_one("SELECT COUNT(*) FROM cell_sku_assignment_events WHERE kind IN ('move_out','move_in') AND location_id IN (?,?)",
+                                   (self.loc_id,dest))[0],2)
+        page=self.client.get("/api/manager/warehouse-map")
+        self.assertEqual(page.status_code,200,page.json)
+        by_id={cell["id"]:cell for cell in page.json["cells"]}
+        self.assertIsNone(by_id[self.loc_id]["assignment"])
+        self.assertEqual(by_id[dest]["assignment"]["article"],"SALAT_3V1_NONE")
+
+    def test_move_rejects_occupied_destination_or_stale_source(self):
+        self._assign_for_move()
+        dest,label=self._destination()
+        execute("""INSERT INTO cell_sku_assignments
+            (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
+            VALUES (?,?,?,?,?,?,?)""",
+            (dest,"other-product","OTHER","Another","", "2026-11-18T00:00:00Z","manager"))
+        payload={"source":self.loc_id,"target":dest,"expected_product_id":"item-1"}
+        r=self.client.post("/api/manager/cell-audit/move",json=payload)
+        self.assertEqual(r.status_code,409,r.json)
+        self.assertEqual(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                   (self.loc_id,))[0],"SALAT_3V1_NONE")
+        self.assertEqual(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                   (dest,))[0],"OTHER")
+        execute("DELETE FROM cell_sku_assignments WHERE location_id=?",(dest,))
+        stale=self.client.post("/api/manager/cell-audit/move",json={
+            **payload,"expected_product_id":"stale"})
+        self.assertEqual(stale.status_code,409)
+        self.assertIsNone(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                    (dest,)))
+
+    def test_move_blocks_non_manager_and_invalid_destinations(self):
+        self._assign_for_move()
+        dest,label=self._destination()
+        payload={"source":self.loc_id,"target":dest,"expected_product_id":"item-1"}
+        self.assertEqual(self.client.post("/api/manager/cell-audit/move",
+            json={**payload,"target":self.loc_id}).status_code,400)
+        self.assertEqual(self.client.post("/api/manager/cell-audit/move",
+            json={**payload,"target":"unknown"}).status_code,404)
+        with self.client.session_transaction() as session:
+            session.clear()
+            session["employee_id"]="anton"
+        forbidden=self.client.post("/api/manager/cell-audit/move",json=payload)
+        self.assertEqual(forbidden.status_code,403)
+        self.assertIsNone(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                    (dest,)))
+        self.assertEqual(query_one("SELECT article FROM cell_sku_assignments WHERE location_id=?",
+                                   (self.loc_id,))[0],"SALAT_3V1_NONE")
+
     def test_location_id_link_and_mobile_page(self):
         url="/api/manager/cell-audit/locate?code="+self.loc_id
         r=self.client.get(url)
