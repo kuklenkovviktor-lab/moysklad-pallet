@@ -118,14 +118,14 @@ document.getElementById('catalogIssues').addEventListener('click',async e=>{
   if(!r.ok)throw Error(d.error||'Ошибка поиска');
   if(!Array.isArray(d.products))throw Error('Некорректный ответ каталога.');
   const products=d.products;
-  out.innerHTML=products.length?products.map(p=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Артикул: '+esc(p.article||'не указан')+' · ШК: '+esc((p.barcodes||[]).join(', ')||'не указан')+'</div>'+
-   ((p.barcodes||[]).length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет штрихкода</span>')+'</div>').join(''):'Ничего не найдено. Попробуй название или ШК товара.';
+  out.innerHTML=products.length?products.map(p=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Тип: '+esc(p.entity_type==='bundle'?'Комплект':'Товар')+' · Артикул: '+esc(p.article||'не указан')+' · Код МС: '+esc(p.code||'не указан')+' · ШК: '+esc((p.barcodes||[]).join(', ')||'не указан')+'</div>'+
+   ((p.barcodes||[]).length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-entity-type="'+esc(p.entity_type||'product')+'" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет товарного ШК. Код МойСклад не подменяется штрихкодом.</span>')+'</div>').join(''):'Ничего не найдено. Попробуй название или ШК товара.';
  }catch(err){out.className='danger';out.textContent='Поиск не выполнен: '+err.message}
  finally{b.disabled=false}
 });
 document.getElementById('catalogIssues').addEventListener('click',e=>{
  const b=e.target.closest('button[data-select-product]');if(!b)return;
- catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,article:b.dataset.article,barcode:b.dataset.barcode};
+ catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,entity_type:b.dataset.entityType||'product',article:b.dataset.article,barcode:b.dataset.barcode};
  renderCatalog();checkButton();
 });
 document.getElementById('catalogIssues').addEventListener('change',e=>{
