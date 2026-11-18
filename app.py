@@ -308,6 +308,9 @@ def _wms_initializer():
             # Build/refresh the permanent FBS catalog in the background after
             # database startup. It must not block workers, login or picking.
             if TOKEN:
+                # One small, independent bundle refresh on startup. Product
+                # warmup may need thousands of requests and must not block it.
+                start_bundle_sync()
                 start_pack_warmup()
             return
         except Exception as exc:
@@ -2169,15 +2172,6 @@ def _warm_pack_cache_worker():
             except Exception as exc:
                 with CACHE_LOCK:
                     WARMUP_STATE["error"] = str(exc)
-        # Update the separate bundle index after product warmup, not in
-        # parallel. Failure must preserve the last complete bundle snapshot
-        # and must never disrupt FBS product or warehouse operations.
-        try:
-            from bundle_catalog import refresh_bundle_catalog
-            bundles = refresh_bundle_catalog()
-            print(f"GRIT persisted bundle catalog: {bundles} cards", flush=True)
-        except Exception as exc:
-            print(f"GRIT bundle catalog refresh deferred: {type(exc).__name__}", flush=True)
         with CACHE_LOCK:
             WARMUP_STATE["ready"] = not bool(WARMUP_STATE["error"])
             WARMUP_STATE["indexed"] = len(PACK_CACHE)
@@ -2187,6 +2181,35 @@ def _warm_pack_cache_worker():
     finally:
         with CACHE_LOCK:
             WARMUP_STATE["running"] = False
+
+# Bundle refresh is intentionally independent of the potentially long FBS
+# product/packaging warmup. No source of product barcodes is mutated here.
+_BUNDLE_SYNC_LOCK = threading.Lock()
+_BUNDLE_SYNC_RUNNING = False
+
+def _bundle_sync_worker():
+    global _BUNDLE_SYNC_RUNNING
+    try:
+        from bundle_catalog import refresh_bundle_catalog
+        count = refresh_bundle_catalog()
+        print(f"GRIT persisted bundle catalog: {count} cards", flush=True)
+    except Exception as exc:
+        # CatalogUnavailable messages are deliberately sanitized; no bearer
+        # tokens, request headers or full API response bodies in server logs.
+        print(f"GRIT bundle catalog refresh deferred: {type(exc).__name__}: {exc}", flush=True)
+    finally:
+        with _BUNDLE_SYNC_LOCK:
+            _BUNDLE_SYNC_RUNNING = False
+
+def start_bundle_sync():
+    global _BUNDLE_SYNC_RUNNING
+    with _BUNDLE_SYNC_LOCK:
+        if _BUNDLE_SYNC_RUNNING:
+            return False
+        _BUNDLE_SYNC_RUNNING = True
+    threading.Thread(target=_bundle_sync_worker, name="grit-bundle-sync", daemon=True).start()
+    return True
+
 
 def start_pack_warmup():
     with CACHE_LOCK:
