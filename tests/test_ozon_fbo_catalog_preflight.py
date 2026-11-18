@@ -91,6 +91,40 @@ class CatalogValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolved_manifest(plan, issues, {}, [])
 
+    def test_rejected_filter_and_search_becomes_manager_discrepancy(self):
+        class BadRequest:
+            status_code = 400
+            ok = False
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get", return_value=BadRequest()) as get:
+            result = lookup_article("1022_BOROCCO")
+            issues = check_catalog(plan_with_mismatch(), lambda _: result)
+        self.assertEqual(result, {"status": "manual_review", "barcodes": []})
+        self.assertEqual(len(issues), 2)
+        self.assertTrue(all(issue["reason"] == "manual_review" for issue in issues))
+        self.assertEqual(get.call_count, 2)
+
+    def test_manual_catalog_browse_when_search_returns_400(self):
+        from ozon_fbo_catalog_validation import search_catalog_products
+
+        class Response:
+            def __init__(self, status, rows=None):
+                self.status_code = status
+                self.ok = status == 200
+                self.rows = rows or []
+            def json(self):
+                return {"rows": self.rows}
+        records = [{"id": "synthetic-id", "article": "1022_BOROCCO",
+                    "name": "Тестовый товар", "barcodes": [{"ean13": "4601234567890"}]}]
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=[Response(400), Response(200, records)]) as get:
+            result = search_catalog_products("1022_BOROCCO")
+        self.assertEqual(result[0]["article"], "1022_BOROCCO")
+        self.assertEqual(result[0]["barcodes"], ["4601234567890"])
+        self.assertEqual(get.call_count, 2)
+        self.assertNotIn("search", get.call_args.kwargs["params"])
+
     def test_moysklad_unavailable_fails_closed_without_network(self):
         with patch.dict(os.environ, {"MOYSKLAD_TOKEN": ""}):
             with self.assertRaises(CatalogUnavailable):
