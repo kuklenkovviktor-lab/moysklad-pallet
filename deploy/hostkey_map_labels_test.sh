@@ -19,6 +19,7 @@ do
     -e WMS_REQUIRE_POSTGRES=0 -e WMS_BADGE_SECRET=synthetic-badge \
     -e WMS_TERMINAL_SECRET=synthetic-terminal \
     -e SECRET_KEY=synthetic-session -e MOYSKLAD_TOKEN=synthetic \
+    -v "$root/tests:/app/tests:ro" \
     --entrypoint python "$image" -m unittest discover -s tests -p "$file" -v
 done
 echo "MAP LABELS 75x120 ISOLATED TEST PASS: $sha"
