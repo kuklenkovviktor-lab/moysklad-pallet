@@ -193,9 +193,10 @@ def search_ozon_catalog_snapshot(query, limit=30):
     for entries in snapshot.values():
         for product_id, product in entries.items():
             barcodes = sorted(product["barcodes"])
-            if not barcodes:
+            if not barcodes and product.get("entity_type") != "bundle":
                 continue
-            if needle in " ".join((product["article"], product["name"], " ".join(barcodes))).casefold():
+            if needle in " ".join((product["article"], product["name"],
+                                  product.get("code", ""), " ".join(barcodes))).casefold():
                 found.append({
                     "id": product_id.removeprefix("bundle:") if product_id.startswith("bundle:") else product_id,
                     "entity_type": product.get("entity_type", "product"),
