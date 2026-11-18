@@ -75,14 +75,15 @@ class FboShortageTests(unittest.TestCase):
     def test_city_article_shortage_register_uses_approved_only(self):
         self.assertEqual(self.scan(3).status_code, 200)
         self.assertEqual(self.report().status_code, 200)
+        shortage_id = query_one("SELECT id FROM ozon_fbo_shortages WHERE item_id=?", (self.item,))[0]
         self.manager()
         before = self.client.get("/api/manager/ozon-fbo/shortages/register")
         self.assertEqual(before.status_code, 200)
-        self.assertFalse(any(x["id"] == self.item for x in before.json["rows"]))
+        self.assertFalse(any(x["id"] == shortage_id for x in before.json["rows"]))
         self.assertEqual(self.decide("approve").status_code, 200)
         after = self.client.get("/api/manager/ozon-fbo/shortages/register")
         self.assertEqual(after.status_code, 200)
-        rows = [x for x in after.json["rows"] if x["cargo_barcode"] == "GM123456789" and x["supply"] == "Synthetic"]
+        rows = [x for x in after.json["rows"] if x["id"] == shortage_id]
         self.assertTrue(rows)
         self.assertEqual(rows[0]["city"], "Test")
         self.assertEqual(rows[0]["article"], "ART-1")
