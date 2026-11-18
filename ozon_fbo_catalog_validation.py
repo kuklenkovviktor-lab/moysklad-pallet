@@ -209,6 +209,10 @@ def check_catalog(plan, lookup=lookup_article):
     # An absent/stale snapshot is NOT trusted and falls back to live checks.
     try:
         snapshot = ozon_catalog_snapshot() if lookup is lookup_article else None
+        if snapshot is None and lookup is lookup_article:
+            raise CatalogUnavailable(
+                "Локальный справочник МойСклад отсутствует или старше 48 часов. "
+                "Обнови справочник FBS перед проверкой Ozon FBO.")
         matches = ({article: _snapshot_article_result(snapshot, article) for article in articles}
                    if snapshot is not None
                    else {article: lookup(article) for article in articles})
@@ -309,8 +313,10 @@ def search_catalog_products(query, limit=30):
     count = min(max(int(limit), 1), 30)
     # Use the same persisted catalog for manager search, avoiding API bursts.
     local = search_ozon_catalog_snapshot(query, count)
-    if local is not None:
+    if local:
         return local
+    # A card may be absent from the partial FBS snapshot. Use the throttled
+    # read-only API search only when local lookup produced no candidates.
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     try:
         response = _catalog_get(API_BASE + "/entity/product", headers=headers,
