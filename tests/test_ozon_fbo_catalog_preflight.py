@@ -130,7 +130,7 @@ class SelectedProductVerificationTests(unittest.TestCase):
         issues = [{"key": "issue-key"}]
         supplied = {"issue-key": {"id": "product-uuid", "article": "FORGED-SKU",
                                     "barcode": "4601234567890"}}
-        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \\
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
              patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()) as get:
             choices = resolve_catalog_choices(supplied, issues)
         self.assertEqual(choices, {"issue-key": {
@@ -147,7 +147,7 @@ class SelectedProductVerificationTests(unittest.TestCase):
                 return {"id": "product-uuid", "article": "ACTUAL-SKU",
                         "barcodes": [{"ean13": "4601234567890"}]}
 
-        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \\
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
              patch("ozon_fbo_catalog_validation.requests.get", return_value=Response()):
             with self.assertRaises(ValueError):
                 resolve_catalog_choices({"key": {"id": "product-uuid",
