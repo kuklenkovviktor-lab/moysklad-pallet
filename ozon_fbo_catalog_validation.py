@@ -114,7 +114,12 @@ def lookup_article(article):
     max_pages = 10
 
     def request_page(params, *, fallback=False):
-        return _catalog_get(endpoint, headers=headers, params=params, timeout=12)
+        try:
+            return _catalog_get(endpoint, headers=headers, params=params, timeout=12)
+        except CatalogUnavailable as exc:
+            # Preserve the offending article without exposing credentials.
+            # Diagnostics and managers need the same context as before.
+            raise CatalogUnavailable(str(exc) + " Артикул: " + article[:80] + ".") from exc
 
     # Only switch to search if MoySklad rejects the article filter.
     search_mode = False
