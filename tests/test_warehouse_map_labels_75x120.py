@@ -17,6 +17,7 @@ os.environ["WMS_DB_PATH"] = os.path.join(_TEMP.name, "map-labels.sqlite")
 
 import app
 from cell_audit import ensure_cell_audit_db
+from fbs_catalog import init_fbs_catalog_db
 from warehouse_map_labels import direction_for_location
 from wms import execute, init_wms_db, query_one
 
@@ -26,6 +27,7 @@ class WarehouseMapLabelTests(unittest.TestCase):
     def setUpClass(cls):
         init_wms_db()
         ensure_cell_audit_db()
+        init_fbs_catalog_db()
         app._WMS_READY.set()
 
     def setUp(self):
@@ -44,6 +46,13 @@ class WarehouseMapLabelTests(unittest.TestCase):
                 (loc_id, label, code, "2026-11-18T00:00:00Z"),
             )
             self.ids.append((loc_id, label, code))
+        self.product_barcode = "460" + str(int(uuid.uuid4().hex[:9], 16)).zfill(10)
+        execute("""
+            INSERT INTO fbs_catalog_barcodes
+            (barcode,product_id,article,name,quantity,is_pack,synced_at)
+            VALUES (?,?,?,?,?,?,?)
+        """, (self.product_barcode, "sample-product", "SALAT_3V1",
+              "Салатники 3 в 1 ЛАБИРИНТ", 1, 0, "2026-11-18T00:00:00Z"))
         execute("""
             INSERT INTO cell_sku_assignments
             (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
@@ -68,14 +77,18 @@ class WarehouseMapLabelTests(unittest.TestCase):
         self.assertIn("width:120mm;height:75mm", page)
         self.assertIn("Салатники 3 в 1 ЛАБИРИНТ", page)
         self.assertIn('data-arrow="down"', page)
+        self.assertIn('class="direction-svg"', page)
+        self.assertIn("font-size:49pt", page)
+        self.assertIn("grid-template-columns:30mm minmax(0,1fr) 31mm", page)
         self.assertEqual(page.count('class="sheet"'), 1)
         qr = re.search(r'<img alt="QR адреса" src="data:image/png;base64,([^"]+)"', page)
-        code = re.search(r'<img alt="Code128 адреса" src="data:image/svg\+xml;base64,([^"]+)"', page)
+        code = re.search(r'<img alt="Code128 товара" src="data:image/svg\+xml;base64,([^"]+)"', page)
         self.assertIsNotNone(qr)
         self.assertIsNotNone(code)
         self.assertTrue(base64.b64decode(qr.group(1)).startswith(b"\x89PNG"))
         self.assertIn(b"<svg", base64.b64decode(code.group(1)))
-        self.assertIn(payload, page)  # printed human-readable address barcode
+        self.assertIn("SALAT_3V1", page)
+        self.assertNotIn('class="code-text">' + payload, page)
         self.assertEqual(query_one("SELECT barcode FROM replenishment_locations WHERE id=?",
                                    (loc_id,))[0], payload)
 
@@ -84,6 +97,9 @@ class WarehouseMapLabelTests(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn('data-arrow="up"', page)
+        self.assertIn('class="direction-svg"', page)
+        self.assertNotIn('alt="Code128 товара"', page)
+        self.assertIn("ШТРИХКОД ТОВАРА НЕ ПОДТВЕРЖДЁН", page)
         self.assertIn("ЯЧЕЙКА БЕЗ ЗАКРЕПЛЁННОГО ТОВАРА", page)
         self.assertNotIn("Остаток: 0", page)
 
@@ -115,6 +131,28 @@ class WarehouseMapLabelTests(unittest.TestCase):
         self.assertIn("cell-brief", page)
         self.assertIn("Не ведётся", page)
         self.assertIn("/manager/warehouse-map/labels?id=", page)
+
+    def test_product_barcode_is_verified_not_packaging_or_article(self):
+        loc_id = self.ids[0][0]
+        execute("""
+            UPDATE cell_sku_assignments SET source_barcode=?
+            WHERE location_id=?
+        """, ("ONIX-LOC-DONT-ENCODE", loc_id))
+        response = self.client.get("/manager/warehouse-map/labels?id=" + loc_id)
+        page = response.get_data(as_text=True)
+        self.assertIn('alt="Code128 товара"', page)
+        self.assertIn("SALAT_3V1", page)
+        self.assertNotIn("ONIX-LOC-DONT-ENCODE", page)
+
+    def test_missing_unit_code_does_not_forge_barcode(self):
+        loc_id = self.ids[0][0]
+        execute("DELETE FROM fbs_catalog_barcodes WHERE product_id=?", ("sample-product",))
+        response = self.client.get("/manager/warehouse-map/labels?id=" + loc_id)
+        page = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('alt="Code128 товара"', page)
+        self.assertIn("ШТРИХКОД ТОВАРА НЕ ПОДТВЕРЖДЁН", page)
+        self.assertIn("SALAT_3V1", page)
 
     def test_old_replenishment_labels_remain_58x40(self):
         r = self.client.get("/manager/replenishment/label?id=" + self.ids[0][0])
