@@ -92,6 +92,28 @@ class BundleCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "не подтверждены"):
                 resolve_catalog_choices(choice, [{"key": "issue"}])
 
+    def test_bundle_search_uses_bundle_endpoint_when_local_cache_misses(self):
+        from ozon_fbo_catalog_validation import search_catalog_products
+
+        class Response:
+            status_code = 200
+            ok = True
+            headers = {}
+            def json(self):
+                return {"rows": [{
+                    "id": "bundle-4", "name": "Банка четыре",
+                    "article": "БАНКА_240_ОВАЛ_4шт",
+                    "code": "2038693831791", "barcodes": []
+                }]}
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   return_value=Response()) as get:
+            products = search_catalog_products("БАНКА_240_ОВАЛ_4шт")
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0]["entity_type"], "bundle")
+        self.assertEqual(products[0]["code"], "2038693831791")
+        self.assertIn("/entity/bundle", get.call_args.args[0])
+
     def test_failed_bundle_refresh_preserves_prior_snapshot(self):
         persist_bundle_snapshot([self._bundle()])
         class Response:
