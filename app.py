@@ -2169,6 +2169,15 @@ def _warm_pack_cache_worker():
             except Exception as exc:
                 with CACHE_LOCK:
                     WARMUP_STATE["error"] = str(exc)
+        # Update the separate bundle index after product warmup, not in
+        # parallel. Failure must preserve the last complete bundle snapshot
+        # and must never disrupt FBS product or warehouse operations.
+        try:
+            from bundle_catalog import refresh_bundle_catalog
+            bundles = refresh_bundle_catalog()
+            print(f"GRIT persisted bundle catalog: {bundles} cards", flush=True)
+        except Exception as exc:
+            print(f"GRIT bundle catalog refresh deferred: {type(exc).__name__}", flush=True)
         with CACHE_LOCK:
             WARMUP_STATE["ready"] = not bool(WARMUP_STATE["error"])
             WARMUP_STATE["indexed"] = len(PACK_CACHE)
