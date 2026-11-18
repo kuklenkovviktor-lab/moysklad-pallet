@@ -33,6 +33,29 @@ class PersistentCatalogTests(unittest.TestCase):
             app.PACK_CACHE.clear()
             app.WARMUP_STATE.update(running=False, ready=False, error="")
 
+    def test_ozon_snapshot_skips_packaging_barcode(self):
+        from fbs_catalog import ozon_catalog_snapshot
+        item = {"id": "product-1", "name": "Test", "article": "TEST-SKU"}
+        save_fbs_catalog_snapshot(
+            {"UNIT-1": item},
+            {"PALLET-144": {"product": item, "pack": {"quantity": 144}}},
+        )
+        snapshot = ozon_catalog_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["test-sku"]["product-1"]["barcodes"], {"UNIT-1"})
+
+    def test_ozon_snapshot_rejects_stale_data(self):
+        from fbs_catalog import ozon_catalog_snapshot
+        from wms import db_connect, sql
+        item = {"id": "product-1", "name": "Test", "article": "TEST-SKU"}
+        save_fbs_catalog_snapshot({"UNIT-1": item}, {})
+        with db_connect() as conn:
+            conn.execute(sql(
+                "UPDATE fbs_catalog_meta SET value=? WHERE name=?"
+            ), ("2020-01-01T00:00:00+00:00", "last_successful_sync"))
+            conn.commit()
+        self.assertIsNone(ozon_catalog_snapshot())
+
     def test_restarted_worker_finds_product_without_moysklad(self):
         item = {"id": "p1", "name": "Crystal", "article": "1240_CRYSTAL_NONE"}
         save_fbs_catalog_snapshot({"4601234567890": item}, {})

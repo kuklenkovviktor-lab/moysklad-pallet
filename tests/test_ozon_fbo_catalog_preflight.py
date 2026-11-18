@@ -200,6 +200,50 @@ class MoySkladRateLimitTests(unittest.TestCase):
         self.assertEqual(len(issues), 1)
 
 
+class SharedSnapshotIntegrationTests(unittest.TestCase):
+    def test_snapshot_validates_matching_unit_without_http(self):
+        from ozon_fbo_catalog_validation import _snapshot_article_result
+        snapshot = {"sku": {"item-1": {
+            "article": "SKU", "name": "Товар", "barcodes": {"UNIT"}}}}
+        result = _snapshot_article_result(snapshot, "sku")
+        self.assertEqual(result, {"status": "found", "barcodes": ["UNIT"]})
+        plan = plan_with_mismatch()
+        plan["cargo"][0]["items"][0]["article"] = "SKU"
+        plan["cargo"][0]["items"][0]["barcode"] = "UNIT"
+        plan["cargo"][1]["items"][0]["article"] = "SKU"
+        plan["cargo"][1]["items"][0]["barcode"] = "UNIT"
+        with patch("ozon_fbo_catalog_validation.ozon_catalog_snapshot", return_value=snapshot), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=AssertionError("Unexpected API")):
+            self.assertEqual(check_catalog(plan), [])
+
+    def test_snapshot_missing_and_ambiguous_require_manager_review(self):
+        from ozon_fbo_catalog_validation import _snapshot_article_result
+        snapshot = {"sku": {
+            "item-1": {"article": "SKU", "barcodes": {"UNIT"}},
+            "item-2": {"article": "SKU", "barcodes": {"OTHER"}}}}
+        self.assertEqual(_snapshot_article_result(snapshot, "SKU")["status"], "ambiguous")
+        self.assertEqual(_snapshot_article_result(snapshot, "ABSENT")["status"], "manual_review")
+
+    def test_stale_snapshot_fails_closed_without_api_storm(self):
+        with patch("ozon_fbo_catalog_validation.ozon_catalog_snapshot", return_value=None), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=AssertionError("Unexpected API")):
+            with self.assertRaisesRegex(CatalogUnavailable, "48 часов"):
+                check_catalog(plan_with_mismatch())
+
+    def test_search_uses_local_snapshot_without_network(self):
+        from ozon_fbo_catalog_validation import search_catalog_products
+        local = [{"id": "p1", "name": "Банка", "article": "SKU",
+                  "barcodes": ["UNIT"]}]
+        with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
+             patch("ozon_fbo_catalog_validation.search_ozon_catalog_snapshot",
+                   return_value=local), \
+             patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=AssertionError("Unexpected API")):
+            self.assertEqual(search_catalog_products("SKU"), local)
+
+
 class SelectedProductVerificationTests(unittest.TestCase):
     def test_selected_card_is_verified_by_id_and_barcode(self):
         from ozon_fbo_catalog_validation import resolve_catalog_choices

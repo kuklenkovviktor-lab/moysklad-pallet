@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 import requests
+from fbs_catalog import ozon_catalog_snapshot, search_ozon_catalog_snapshot
 
 API_BASE = "https://api.moysklad.ru/api/remap/1.2"
 
@@ -179,6 +180,18 @@ def lookup_article(article):
     )
 
 
+def _snapshot_article_result(snapshot, article):
+    """Fail closed on duplicate article IDs; unit codes only, never packages."""
+    candidates = snapshot.get(str(article).strip().casefold())
+    if not candidates:
+        # The FBS snapshot may not cover all products. Do not call it 'missing'.
+        return {"status": "manual_review", "barcodes": []}
+    if len(candidates) != 1:
+        return {"status": "ambiguous", "barcodes": []}
+    codes = sorted(next(iter(candidates.values()))["barcodes"])
+    return {"status": "found" if codes else "no_barcodes", "barcodes": codes}
+
+
 def check_catalog(plan, lookup=lookup_article):
     """Return only mismatches, one per distinct article+barcode pair."""
     pairs = {}
@@ -191,9 +204,18 @@ def check_catalog(plan, lookup=lookup_article):
     articles = sorted({article for article, _ in pairs})
     if len(articles) > 500:
         raise CatalogUnavailable("Слишком много уникальных артикулов для одной проверки (максимум 500).")
-    # Serial checks prevent bursts; the shared API gate also covers manager searches.
+    # Reuse the recent persisted FBS snapshot. No per-article MoySklad calls
+    # when the snapshot is available. Unlisted articles require manager review.
+    # An absent/stale snapshot is NOT trusted and falls back to live checks.
     try:
-        matches = {article: lookup(article) for article in articles}
+        snapshot = ozon_catalog_snapshot() if lookup is lookup_article else None
+        if snapshot is None and lookup is lookup_article:
+            raise CatalogUnavailable(
+                "Локальный справочник МойСклад отсутствует или старше 48 часов. "
+                "Обнови справочник FBS перед проверкой Ozon FBO.")
+        matches = ({article: _snapshot_article_result(snapshot, article) for article in articles}
+                   if snapshot is not None
+                   else {article: lookup(article) for article in articles})
     except CatalogUnavailable:
         raise
     except Exception as exc:
@@ -289,6 +311,12 @@ def search_catalog_products(query, limit=30):
     if len(query) > 120:
         raise ValueError("Слишком длинный поисковый запрос.")
     count = min(max(int(limit), 1), 30)
+    # Use the same persisted catalog for manager search, avoiding API bursts.
+    local = search_ozon_catalog_snapshot(query, count)
+    if local:
+        return local
+    # A card may be absent from the partial FBS snapshot. Use the throttled
+    # read-only API search only when local lookup produced no candidates.
     headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
     try:
         response = _catalog_get(API_BASE + "/entity/product", headers=headers,
