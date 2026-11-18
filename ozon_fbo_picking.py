@@ -679,6 +679,37 @@ def manager_progress():
     return jsonify(cargo=result)
 
 
+@fbo_picking_bp.get("/api/manager/ozon-fbo/shortages/register")
+def manager_shortage_register():
+    """Durable, manager-only history of approved missing items by destination."""
+    if not manager_access():
+        return jsonify(error="Требуется доступ руководителя"), 403
+    _ensure_picking_db()
+    rows = query_all("""SELECT c.destination,i.article,i.barcode,sh.missing_qty,
+        sh.resolved_at,sh.created_at,sh.employee_id,sh.manager_reason,
+        c.barcode,s.title,sh.id
+        FROM ozon_fbo_shortages sh
+        JOIN ozon_fbo_items i ON i.id=sh.item_id
+        JOIN ozon_fbo_cargo c ON c.id=sh.cargo_id
+        JOIN ozon_fbo_supplies s ON s.id=c.supply_id
+        WHERE sh.status='approved'
+        ORDER BY sh.resolved_at DESC,sh.id DESC LIMIT 5000""")
+    details = [{"city":r[0],"article":r[1],"barcode":r[2],"missing":r[3],
+                "approved_at":r[4],"reported_at":r[5],"employee_id":r[6],
+                "manager_reason":r[7],"cargo_barcode":r[8],"supply":r[9],"id":r[10]}
+               for r in rows]
+    by_key = {}
+    for entry in details:
+        key = (entry["city"],entry["article"])
+        if key not in by_key:
+            by_key[key] = {"city":entry["city"],"article":entry["article"],
+                           "missing":0,"cases":0}
+        by_key[key]["missing"] += entry["missing"]
+        by_key[key]["cases"] += 1
+    summary = sorted(by_key.values(),key=lambda v:(v["city"].casefold(),v["article"].casefold()))
+    return jsonify(rows=details,summary=summary,limited=len(details)==5000)
+
+
 @fbo_picking_bp.post("/api/manager/ozon-fbo/release")
 def manager_release():
     if not manager_access():
