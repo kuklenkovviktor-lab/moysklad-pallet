@@ -351,6 +351,32 @@ class ImportEndpointTests(unittest.TestCase):
             })
             self.assertEqual(response.status_code, 503)
 
+    def test_catalog_search_endpoint_returns_local_candidates(self):
+        matches = [{"id": "item-1", "article": "2204_NEO_MIX",
+                    "name": "Смесь", "barcodes": ["4601234567890"]}]
+        with patch("ozon_fbo.search_catalog_products", return_value=matches) as search:
+            response = self.client.get("/api/manager/ozon-fbo/catalog-search?q=2204_NEO_MIX")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["products"], matches)
+        search.assert_called_once_with("2204_NEO_MIX")
+
+    def test_catalog_search_endpoint_explains_unavailable_catalog(self):
+        with patch("ozon_fbo.search_catalog_products",
+                   side_effect=CatalogUnavailable("Каталог временно недоступен")):
+            response = self.client.get("/api/manager/ozon-fbo/catalog-search?q=2204")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Каталог временно недоступен", response.json["error"])
+
+    def test_catalog_search_ui_prefills_article_and_shows_feedback(self):
+        page = self.client.get("/manager/ozon-fbo")
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("value=\"'+esc(i.article)+'\"", html)
+        self.assertIn("role=\"status\" aria-live=\"polite\"", html)
+        self.assertIn("out.textContent='Ищу «'+query+'»", html)
+        self.assertIn("data-article=\"'+esc(p.article)+'\"", html)
+        self.assertIn("Поиск не выполнен:", html)
+
     def test_unauthorized_cannot_query_or_import(self):
         with self.client.session_transaction() as session:
             session.clear()
