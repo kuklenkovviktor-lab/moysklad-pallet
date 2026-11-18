@@ -72,6 +72,23 @@ class FboShortageTests(unittest.TestCase):
             "cargo_id":self.cargo,"item_id":self.item,
             "decision":decision,"reason":reason})
 
+    def test_city_article_shortage_register_uses_approved_only(self):
+        self.assertEqual(self.scan(3).status_code, 200)
+        self.assertEqual(self.report().status_code, 200)
+        self.manager()
+        before = self.client.get("/api/manager/ozon-fbo/shortages/register")
+        self.assertEqual(before.status_code, 200)
+        self.assertFalse(any(x["id"] == self.item for x in before.json["rows"]))
+        self.assertEqual(self.decide("approve").status_code, 200)
+        after = self.client.get("/api/manager/ozon-fbo/shortages/register")
+        self.assertEqual(after.status_code, 200)
+        rows = [x for x in after.json["rows"] if x["cargo_barcode"] == "GM123456789" and x["supply"] == "Synthetic"]
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["city"], "Test")
+        self.assertEqual(rows[0]["article"], "ART-1")
+        self.assertEqual(rows[0]["missing"], 2)
+        self.assertTrue(any(x["city"] == "Test" and x["article"] == "ART-1" and x["missing"] >= 2 for x in after.json["summary"]))
+
     def test_approve_shortage_then_existing_qr_can_close(self):
         self.assertEqual(self.scan(3).status_code,200)
         reported=self.report()
