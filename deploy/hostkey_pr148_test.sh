@@ -24,24 +24,28 @@ docker image inspect "$image" >/dev/null || {
 echo "TEST SOURCE: $sha"
 echo "TEST IMAGE: $image"
 echo "ISOLATION: --network none; no host DB socket; no secrets or production env mounts"
-docker run --rm \
-  --network none \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
-  --tmpfs /tmp:rw,noexec,nosuid,size=192m \
-  -e WMS_REQUIRE_POSTGRES=0 \
-  -e WMS_BADGE_SECRET=synthetic-badge \
-  -e WMS_TERMINAL_SECRET=synthetic-terminal \
-  -e SECRET_KEY=synthetic-session \
-  -e MOYSKLAD_TOKEN=synthetic \
-  -v "$root:/app:ro" \
-  -w /app \
-  --entrypoint python \
-  "$image" -m unittest -v \
-    tests.test_ozon_fbo_catalog_preflight \
-    tests.test_ozon_fbo_shortages \
-    tests.test_ozon_fbo_picking \
-    tests.test_ozon_fbo_parser \
-    tests.test_ozon_fbo_moysklad_diagnostics
+for test_file in \
+  test_ozon_fbo_catalog_preflight.py \
+  test_ozon_fbo_shortages.py \
+  test_ozon_fbo_picking.py \
+  test_ozon_fbo_parser.py \
+  test_ozon_fbo_moysklad_diagnostics.py
+do
+  echo "RUN: $test_file"
+  docker run --rm \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --tmpfs /tmp:rw,noexec,nosuid,size=192m \
+    -e WMS_REQUIRE_POSTGRES=0 \
+    -e WMS_BADGE_SECRET=synthetic-badge \
+    -e WMS_TERMINAL_SECRET=synthetic-terminal \
+    -e SECRET_KEY=synthetic-session \
+    -e MOYSKLAD_TOKEN=synthetic \
+    -v "$root:/app:ro" \
+    -w /app \
+    --entrypoint python \
+    "$image" -m unittest discover -s tests -p "$test_file" -v
+done
 echo "PR148 ISOLATED TEST PASS: $sha"
