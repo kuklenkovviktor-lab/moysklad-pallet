@@ -94,25 +94,38 @@ function renderCatalog(){
  '<h2>Расхождения с МойСклад: '+issues.length+'</h2><p class="small">Выбери карточку МойСклад либо исключи затронутое грузоместо целиком. Нельзя выпускать частично проверенную палету.</p>'+
  issues.map(i=>'<div class="issue"><b>'+esc(i.article)+'</b> · <span class="danger">'+esc(i.reason==='mismatch'?'ШК не совпадает':i.reason==='missing'?'Артикул не найден':i.reason==='ambiguous'?'Артикул неоднозначен':i.reason==='manual_review'?'МойСклад отклонил автоматический поиск. Выбери карточку вручную':'У товара нет ШК')+'</span>'+
  '<div class="small">Excel: '+esc(i.excel_barcode)+' · Строки: '+esc(i.sources.join(', '))+' · Грузоместа: '+esc(i.cargo_barcodes.join(', '))+'</div>'+
- '<label>Найти карточку в МойСклад (артикул, название или ШК)<div class="controls"><input data-search="'+esc(i.key)+'" placeholder="Введи артикул, название или ШК"><button type="button" data-search-btn="'+esc(i.key)+'">Найти в каталоге</button></div></label>'+
- '<div data-results="'+esc(i.key)+'" class="small"></div>'+
+ '<label for="catalog-search-'+esc(i.key)+'">Найти карточку в МойСклад (артикул, название или ШК)</label>'+
+ '<div class="controls"><input id="catalog-search-'+esc(i.key)+'" data-search="'+esc(i.key)+'" value="'+esc(i.article)+'" placeholder="Введи артикул, название или ШК" autocomplete="off"><button type="button" data-search-btn="'+esc(i.key)+'">Найти в каталоге</button></div>'+
+ '<div data-results="'+esc(i.key)+'" class="small" role="status" aria-live="polite"></div>'+
  (catalogChoices[i.key]?'<p class="ok">Выбрано: '+esc(catalogChoices[i.key].article)+' · '+esc(catalogChoices[i.key].barcode)+'</p>':'')+
  (unresolved(i)?'<p class="danger">Требует решения</p>':'<p class="ok">Разрешено</p>')+'</div>').join('');
 }
 document.getElementById('catalogIssues').addEventListener('click',async e=>{
  const b=e.target.closest('button[data-search-btn]');if(!b)return;
- const key=b.dataset.searchBtn, input=document.querySelector('input[data-search="'+key+'"]'), out=document.querySelector('[data-results="'+key+'"]');
- b.disabled=true;out.textContent='Ищу в МойСклад…';
+ e.preventDefault();
+ const key=b.dataset.searchBtn;
+ const input=document.querySelector('input[data-search="'+key+'"]');
+ const out=document.querySelector('[data-results="'+key+'"]');
+ if(!input||!out)return;
+ const query=input.value.trim();
+ if(query.length<2){out.className='danger';out.textContent='Введи минимум 2 символа для поиска.';input.focus();return}
+ b.disabled=true;
+ out.className='small';
+ out.textContent='Ищу «'+query+'» в справочнике…';
  try{
-  const r=await fetch('/api/manager/ozon-fbo/catalog-search?q='+encodeURIComponent(input.value),{cache:'no-store'}),d=await r.json();
+  const r=await fetch('/api/manager/ozon-fbo/catalog-search?q='+encodeURIComponent(query),{cache:'no-store'});
+  const d=await r.json();
   if(!r.ok)throw Error(d.error||'Ошибка поиска');
-  out.innerHTML=d.products.length?d.products.map((p,n)=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Артикул: '+esc(p.article||'не указан')+' · ШК: '+esc(p.barcodes.join(', ')||'не указан')+'</div>'+
-   (p.barcodes.length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет штрихкода</span>')+'</div>').join(''):'Ничего не найдено.';
- }catch(err){out.textContent=err.message}finally{b.disabled=false}
+  if(!Array.isArray(d.products))throw Error('Некорректный ответ каталога.');
+  const products=d.products;
+  out.innerHTML=products.length?products.map(p=>'<div class="issue"><b>'+esc(p.name)+'</b><div class="small">Артикул: '+esc(p.article||'не указан')+' · ШК: '+esc((p.barcodes||[]).join(', ')||'не указан')+'</div>'+
+   ((p.barcodes||[]).length?p.barcodes.map(code=>'<button type="button" data-select-product="'+esc(key)+'" data-product-id="'+esc(p.id)+'" data-article="'+esc(p.article)+'" data-barcode="'+esc(code)+'">Выбрать карточку · '+esc(code)+'</button>').join(' '):'<span class="warn">У карточки нет штрихкода</span>')+'</div>').join(''):'Ничего не найдено. Попробуй название или ШК товара.';
+ }catch(err){out.className='danger';out.textContent='Поиск не выполнен: '+err.message}
+ finally{b.disabled=false}
 });
 document.getElementById('catalogIssues').addEventListener('click',e=>{
  const b=e.target.closest('button[data-select-product]');if(!b)return;
- catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,article:b.closest('.issue').querySelector('.small').textContent.split(' · ')[0].replace('Артикул: ','').trim(),barcode:b.dataset.barcode};
+ catalogChoices[b.dataset.selectProduct]={id:b.dataset.productId,article:b.dataset.article,barcode:b.dataset.barcode};
  renderCatalog();checkButton();
 });
 document.getElementById('catalogIssues').addEventListener('change',e=>{
