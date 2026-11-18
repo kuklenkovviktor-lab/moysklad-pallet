@@ -434,6 +434,11 @@ def resolve_catalog_choices(decisions, issues):
         product_id = str(choice.get("id") or "").strip()
         entity_type = str(choice.get("entity_type") or "product").strip()
         barcode = str(choice.get("barcode") or "").strip()
+        identifier_type = str(choice.get("identifier_type") or "barcode").strip()
+        if identifier_type not in ("barcode", "code"):
+            raise ValueError("Недопустимый идентификатор карточки.")
+        if identifier_type == "code" and entity_type != "bundle":
+            raise ValueError("Подтверждение по коду разрешено только для комплектов.")
         if entity_type not in ("product", "bundle"):
             raise ValueError("Недопустимый тип карточки МойСклад.")
         if not product_id or not barcode or len(product_id) > 64:
@@ -453,7 +458,9 @@ def resolve_catalog_choices(decisions, issues):
         except ValueError as exc:
             raise CatalogUnavailable("МойСклад вернул некорректную карточку.") from exc
         article = str(product.get("article") or "").strip()
-        if str(product.get("id") or "") != product_id or not article or barcode not in _barcodes(product):
-            raise ValueError("Выбранная карточка или ШК не подтверждены каталогом МойСклад.")
+        valid_identifier = (barcode in _barcodes(product) if identifier_type == "barcode"
+                            else barcode == str(product.get("code") or "").strip())
+        if str(product.get("id") or "") != product_id or not article or not valid_identifier:
+            raise ValueError("Выбранная карточка или идентификатор не подтверждены МойСклад.")
         verified[key] = {"article": article, "barcode": barcode}
     return verified
