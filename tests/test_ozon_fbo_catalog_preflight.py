@@ -150,6 +150,56 @@ class CatalogValidationTests(unittest.TestCase):
         self.assertIn("article=6794 НАБОР 6 GOLD", get.call_args.kwargs["params"]["filter"])
 
 
+class MoySkladRateLimitTests(unittest.TestCase):
+    def test_http_429_retry_after_then_success(self):
+        from ozon_fbo_catalog_validation import _catalog_get
+
+        class Response:
+            def __init__(self, status):
+                self.status_code = status
+                self.headers = {"Retry-After": "3"} if status == 429 else {}
+                self.ok = status == 200
+
+        with patch("ozon_fbo_catalog_validation.requests.get",
+                   side_effect=[Response(429), Response(200)]) as get, \
+             patch("ozon_fbo_catalog_validation.time.sleep") as sleep, \
+             patch("ozon_fbo_catalog_validation.time.monotonic",
+                   side_effect=[100, 100, 100, 100, 110, 110, 110, 110]):
+            result = _catalog_get("https://api.moysklad.ru/api/remap/1.2/entity/product",
+                                  headers={"Authorization": "Bearer synthetic"})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(get.call_count, 2)
+        self.assertTrue(any(call.args[0] >= 3 for call in sleep.call_args_list))
+
+    def test_persistent_http_429_blocks_import_without_manual_review(self):
+        from ozon_fbo_catalog_validation import _catalog_get
+
+        class Response:
+            status_code = 429
+            ok = False
+            headers = {"Retry-After": "1"}
+
+        with patch("ozon_fbo_catalog_validation.requests.get",
+                   return_value=Response()) as get, \
+             patch("ozon_fbo_catalog_validation.time.sleep"):
+            with self.assertRaisesRegex(CatalogUnavailable, "HTTP 429"):
+                _catalog_get("https://api.moysklad.ru/api/remap/1.2/entity/product",
+                             headers={"Authorization": "Bearer synthetic"})
+        self.assertEqual(get.call_count, 6)
+
+    def test_serial_lookup_and_one_check_per_unique_article(self):
+        plan = plan_with_mismatch()
+        plan["cargo"][1]["items"][0]["article"] = "6794 НАБОР 6 GOLD"
+        plan["cargo"][1]["items"][0]["barcode"] = "2057054984679"
+        calls = []
+        def lookup(article):
+            calls.append(article)
+            return {"status": "found", "barcodes": ["2057054984679"]}
+        issues = check_catalog(plan, lookup)
+        self.assertEqual(calls, ["6794 НАБОР 6 GOLD"])
+        self.assertEqual(len(issues), 1)
+
+
 class SelectedProductVerificationTests(unittest.TestCase):
     def test_selected_card_is_verified_by_id_and_barcode(self):
         from ozon_fbo_catalog_validation import resolve_catalog_choices
