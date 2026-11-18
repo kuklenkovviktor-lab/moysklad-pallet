@@ -109,7 +109,7 @@ def lookup_article(article):
     if not token:
         raise CatalogUnavailable("API МойСклад не настроен. Импорт заблокирован.")
     article = str(article).strip()
-    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8"}
     endpoint = API_BASE + "/entity/product"
     page_size = 100
     max_pages = 10
@@ -318,7 +318,7 @@ def search_catalog_products(query, limit=30):
     # Bundles are stored and queried separately by MoySklad. Check the
     # bundle entity first when the local snapshot has no matching entry.
     from bundle_catalog import bundle_barcodes
-    bundle_headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    bundle_headers = {"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8"}
     bundle_response = _catalog_get(
         API_BASE + "/entity/bundle", headers=bundle_headers,
         params={"search": query, "limit": count}, timeout=12)
@@ -356,7 +356,7 @@ def search_catalog_products(query, limit=30):
             "МойСклад: ошибка поиска комплектов HTTP " + str(bundle_response.status_code))
     # A card may be absent from the partial FBS snapshot. Use the throttled
     # read-only product API only after checking bundles.
-    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8"}
     try:
         response = _catalog_get(API_BASE + "/entity/product", headers=headers,
                                 params={"search": query, "limit": count}, timeout=12)
@@ -446,7 +446,7 @@ def resolve_catalog_choices(decisions, issues):
         try:
             response = _catalog_get(
                 API_BASE + "/entity/" + entity_type + "/" + product_id,
-                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                headers={"Authorization": "Bearer " + token, "Accept": "application/json;charset=utf-8"},
                 timeout=12,
             )
         except requests.RequestException as exc:
