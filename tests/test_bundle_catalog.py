@@ -141,8 +141,8 @@ class BundleCatalogTests(unittest.TestCase):
         with patch.dict(os.environ, {"MOYSKLAD_TOKEN": "synthetic"}), \
              patch("ozon_fbo_catalog_validation.requests.get",
                    return_value=Response()) as mocked:
-            self.assertEqual(refresh_bundle_catalog(), 1)
             self.assertEqual(search_catalog_products(self_entry["article"])[0]["entity_type"], "bundle")
+            self.assertEqual(refresh_bundle_catalog(), 1)
         self.assertGreaterEqual(mocked.call_count, 2)
         for call in mocked.call_args_list:
             self.assertEqual(
