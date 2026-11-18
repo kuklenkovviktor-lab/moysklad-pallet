@@ -265,3 +265,42 @@ def search_catalog_products(query, limit=30):
             "barcodes": codes,
         })
     return result
+
+
+def resolve_catalog_choices(decisions, issues):
+    """Re-read selected products from MoySklad: browser fields are never authoritative."""
+    if not isinstance(decisions, dict):
+        raise ValueError("Некорректный выбор товаров.")
+    keys = {issue["key"] for issue in issues}
+    if set(decisions) - keys:
+        raise ValueError("Выбор не соответствует проверке файла.")
+    token = os.getenv("MOYSKLAD_TOKEN", "").strip()
+    if decisions and not token:
+        raise CatalogUnavailable("API МойСклад не настроен.")
+    verified = {}
+    for key, choice in decisions.items():
+        if not isinstance(choice, dict):
+            raise ValueError("Выбери карточку товара МойСклад.")
+        product_id = str(choice.get("id") or "").strip()
+        barcode = str(choice.get("barcode") or "").strip()
+        if not product_id or not barcode or len(product_id) > 64:
+            raise ValueError("Выбери карточку из результатов поиска МойСклад.")
+        try:
+            response = requests.get(
+                API_BASE + "/entity/product/" + product_id,
+                headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                timeout=12,
+            )
+        except requests.RequestException as exc:
+            raise CatalogUnavailable("Не удалось проверить выбранную карточку МойСклад.") from exc
+        if not response.ok:
+            raise CatalogUnavailable("Не удалось проверить карточку МойСклад (HTTP " + str(response.status_code) + ").")
+        try:
+            product = response.json()
+        except ValueError as exc:
+            raise CatalogUnavailable("МойСклад вернул некорректную карточку.") from exc
+        article = str(product.get("article") or "").strip()
+        if str(product.get("id") or "") != product_id or not article or barcode not in _barcodes(product):
+            raise ValueError("Выбранная карточка или ШК не подтверждены каталогом МойСклад.")
+        verified[key] = {"article": article, "barcode": barcode}
+    return verified
