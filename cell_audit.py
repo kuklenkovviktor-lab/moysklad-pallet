@@ -234,6 +234,86 @@ def cell_audit_assign():
                    article=product["article"], replaced=bool(previous), stock_changed=False)
 
 
+
+@cell_audit_bp.post("/api/manager/cell-audit/move")
+def cell_audit_move():
+    """Manager-only atomic reassignment to an already registered, empty cell.
+
+    This changes GRIT address mapping only, never MoySklad stocks or locations.
+    Explicit expected_product_id prevents stale browser overwrites.
+    """
+    if not manager_access():
+        return jsonify(error="Требуется вход руководителя"), 403
+    ensure_cell_audit_db()
+    data = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(data, dict):
+        return jsonify(error="Нужны данные переноса"), 400
+    source = _locate(data.get("source"))
+    target = _locate(data.get("target"))
+    if not source or not target:
+        return jsonify(error="Одна из ячеек не зарегистрирована на карте склада"), 404
+    if source["id"] == target["id"]:
+        return jsonify(error="Выбери другую ячейку для переноса"), 400
+    expected = str(data.get("expected_product_id") or "").strip()
+    if not expected or len(expected) > 160:
+        return jsonify(error="Сначала найди исходную ячейку с привязанным товаром"), 400
+    stamp = now_iso()
+    try:
+        with db_connect() as conn:
+            cur = conn.cursor()
+            try:
+                from wms import DATABASE_URL
+                # Order locks consistently across simultaneous moves to avoid
+                # deadlocks; an occupied destination must never be overwritten.
+                query = ("SELECT location_id,product_id,article,product_name,source_barcode "
+                         "FROM cell_sku_assignments WHERE location_id IN (?,?)")
+                if DATABASE_URL:
+                    query += " ORDER BY location_id FOR UPDATE"
+                else:
+                    query += " ORDER BY location_id"
+                cur.execute(sql(query), (source["id"], target["id"]))
+                assignments = {row[0]: row for row in cur.fetchall()}
+                original = assignments.get(source["id"])
+                destination = assignments.get(target["id"])
+                if not original or original[1] != expected:
+                    return jsonify(error="Исходная привязка изменилась. Найди ячейку заново."), 409
+                if destination:
+                    return jsonify(error="Новая ячейка уже занята: " + destination[2] +
+                                   ". Перенос отменён, привязки не изменены."), 409
+
+                # Delete exactly the confirmed source, then insert its exact
+                # product data into the target in a single transaction.
+                cur.execute(sql(
+                    "DELETE FROM cell_sku_assignments WHERE location_id=? AND product_id=?"
+                ), (source["id"], expected))
+                if cur.rowcount != 1:
+                    return jsonify(error="Привязка изменилась. Повтори проверку."), 409
+                cur.execute(sql("""
+                    INSERT INTO cell_sku_assignments
+                    (location_id,product_id,article,product_name,source_barcode,assigned_at,assigned_by)
+                    VALUES (?,?,?,?,?,?,?)
+                """), (target["id"], original[1], original[2], original[3],
+                       original[4], stamp, "Руководитель"))
+                for location_id, old_id, old_article, new_id, new_article, kind in (
+                    (source["id"], original[1], original[2], None, None, "move_out"),
+                    (target["id"], None, None, original[1], original[2], "move_in"),
+                ):
+                    cur.execute(sql("""
+                        INSERT INTO cell_sku_assignment_events
+                        (id,location_id,old_product_id,old_article,
+                         new_product_id,new_article,kind,actor,created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?)
+                    """), (str(uuid.uuid4()), location_id, old_id, old_article,
+                           new_id, new_article, kind, "Руководитель", stamp))
+                conn.commit()
+            finally:
+                cur.close()
+    except Exception:
+        return jsonify(error="Не удалось перенести товар. Проверь обе ячейки и повтори."), 409
+    return jsonify(ok=True, source=source, target=target, article=original[2],
+                   stock_changed=False)
+
+
 @cell_audit_bp.get("/api/manager/cell-audit/assignments")
 def cell_audit_assignments():
     if not manager_access():
@@ -285,6 +365,14 @@ button:disabled{opacity:.55;cursor:not-allowed}
  <div class="actions"><button class="secondary" id="checkLocation" type="button">Найти ячейку</button>
  <button class="secondary" id="scanLocation" type="button">📷 Скан ячейки</button></div>
  <div id="locResult" class="help" aria-live="polite">Если на полке только текст артикула, выбери ячейку на карте или введи её адрес вручную.</div>
+ <div id="movePanel" class="info hidden" style="margin-top:12px">
+  <b>Изменить место закреплённого товара</b>
+  <p id="moveItem" class="help"></p>
+  <label for="moveTarget">Новая ячейка / ШК ONIX</label>
+  <input id="moveTarget" autocomplete="off" placeholder="Например, K-08">
+  <button id="moveButton" type="button" style="width:100%;margin-top:9px">Перенести привязку</button>
+  <p class="help">Только руководитель. Новая ячейка должна быть пустой. Остатки МойСклад не меняются.</p>
+ </div>
 </section>
 <section class="card">
  <h2>2. Какой товар лежит здесь?</h2>
@@ -328,9 +416,13 @@ function drawLocation(d){
  ' · сейчас закреплено <b>'+escapeHTML(d.assigned.article)+'</b>':
  ' · ещё нет привязанного товара');
  clearPreview();
+ el('movePanel').classList.toggle('hidden', !d.assigned);
+ el('moveItem').textContent=d.assigned?'Закреплено: '+d.assigned.article+' → '+d.location.label:'';
+ el('moveTarget').value='';
 }
 async function locate(){
  if(scanBusy)return;clearPreview();locationData=null;
+ el('movePanel').classList.add('hidden');
  const code=el('location').value.trim();
  if(!code){el('locResult').textContent='Укажи адрес ячейки';return}
  try{const d=await api('/api/manager/cell-audit/locate?code='+encodeURIComponent(code),{cache:'no-store'});
@@ -382,6 +474,24 @@ async function save(){
  }catch(e){msg(e.message,'bad');el('save').disabled=false}
  finally{saving=false}
 }
+async function moveAssignment(){
+ if(!locationData||!locationData.assigned){msg('Сначала найди занятую ячейку','bad');return}
+ const source=locationData.location,target=el('moveTarget').value.trim();
+ if(!target){msg('Укажи новую ячейку','bad');return}
+ if(!confirm('Перенести '+locationData.assigned.article+' из '+source.label+
+             ' в '+target+'? Новая ячейка должна быть пустой.'))return;
+ const b=el('moveButton');b.disabled=true;
+ try{
+  const result=await api('/api/manager/cell-audit/move',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({source:source.id,target,
+     expected_product_id:locationData.assigned.product_id})
+  });
+  msg('✓ Перенесено: '+result.article+' · '+result.source.label+' → '+result.target.label,'good');
+  el('location').value=result.target.label;await locate();
+ }catch(e){msg(e.message,'bad')}
+ finally{b.disabled=false}
+}
 async function stopCamera(){
  if(!scanner)return;
  try{await scanner.stop()}catch(_e){}
@@ -410,9 +520,10 @@ async function scan(which){
 el('checkLocation').addEventListener('click',locate);
 el('preview').addEventListener('click',preview);
 el('save').addEventListener('click',save);
+el('moveButton').addEventListener('click',moveAssignment);
 el('scanLocation').addEventListener('click',()=>scan('location'));
 el('scanProduct').addEventListener('click',()=>scan('product'));
-el('location').addEventListener('input',()=>{locationData=null;clearPreview()});
+el('location').addEventListener('input',()=>{locationData=null;clearPreview();el('movePanel').classList.add('hidden')});
 el('barcode').addEventListener('input',clearPreview);
 el('article').addEventListener('input',clearPreview);
 el('location').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();locate()}});
@@ -420,7 +531,7 @@ el('barcode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefaul
 el('article').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();preview()}});
 el('next').addEventListener('click',async()=>{
  await stopCamera();el('location').value='';el('barcode').value='';el('article').value='';
- locationData=null;clearPreview();el('locResult').textContent='Введи адрес или выбери следующую ячейку на карте.';
+ locationData=null;clearPreview();el('movePanel').classList.add('hidden');el('locResult').textContent='Введи адрес или выбери следующую ячейку на карте.';
  msg('Готово к следующей ячейке');el('location').focus();
 });
 const initial=new URLSearchParams(location.search).get('location_id');
