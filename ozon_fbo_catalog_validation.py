@@ -85,6 +85,9 @@ def lookup_article(article):
             candidates.clear()
             params = {"search": article, "limit": page_size, "offset": 0}
             response = request_page(params, fallback=True)
+        if response.status_code == 400 and search_mode:
+            # Unsupported search is a discrepancy for manager review, not an absent SKU.
+            return {"status": "manual_review", "barcodes": []}
         if not response.ok:
             if search_mode:
                 raise CatalogUnavailable(
