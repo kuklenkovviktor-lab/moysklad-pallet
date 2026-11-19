@@ -180,7 +180,10 @@ def upload(path, expected):
         raise Failure('s3_upload_failed') from None
     try:
         head = client.head_object(Bucket=bucket, Key=key)
-        if head['ContentLength'] != expected['size'] or head.get('Metadata', {}).get('sha256') != expected['sha256']:
+        # S3-compatible providers may change the case of user metadata keys (e.g. Sha256).
+        # Keep checking the expected checksum; normalize only the metadata key name.
+        metadata = {str(name).lower(): value for name, value in head.get('Metadata', {}).items()}
+        if head['ContentLength'] != expected['size'] or metadata.get('sha256') != expected['sha256']:
             raise Failure('s3_verification_failed')
         version = head.get('VersionId')
         options = {'VersionId': version} if version else {}
