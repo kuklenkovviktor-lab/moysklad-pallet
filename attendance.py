@@ -197,19 +197,20 @@ def journal():
            '<p>Вход/выход не зависят от производственной смены. Время: Москва.</p>',
            '<form method="get"><input type="date" name="day" value="'+escape(day)+'">'
            '<button>Показать</button> <a href="/manager/attendance/qr">Печать двух QR</a></form>',
-           '<div class="scroll"><table><tr><th>Сотрудник</th><th>Статус</th>'
-           '<th>Приход</th><th>Уход</th><th>Учитывать</th></tr>']
+           '<div class="scroll"><table><tr><th>Сотрудник</th><th>Приход</th>'
+           '<th>Уход</th><th>Категория и учёт</th></tr>']
     for eid,name,st,enabled,arrived,left in rows:
-        parts.append('<tr><td>'+escape(name)+'</td><td>'
+        parts.append('<tr><td>'+escape(name)+'</td>'
+                     '<td>'+escape(_format_time(arrived))+'</td>'
+                     '<td>'+escape(_format_time(left))+'</td><td>'
                      '<form method="post" action="/manager/attendance/profile">'
                      '<input type="hidden" name="csrf" value="'+formtoken+'">'
                      '<input type="hidden" name="employee_id" value="'+escape(eid)+'">'
                      '<input type="hidden" name="day" value="'+escape(day)+'">'
                      '<select name="status"><option value="staff"'+(' selected' if st=="staff" else '')+'>Штатный</option>'
-                     '<option value="trainee"'+(' selected' if st=="trainee" else '')+'>Стажёр</option></select></td>'
-                     '<td>'+escape(_format_time(arrived))+'</td><td>'+escape(_format_time(left))+'</td>'
-                     '<td><label><input type="checkbox" name="enabled" value="1"'
-                     +(' checked' if enabled else '')+'> Активен</label> '
+                     '<option value="trainee"'+(' selected' if st=="trainee" else '')+'>Стажёр</option></select>'
+                     '<label><input type="checkbox" name="enabled" value="1"'
+                     +(' checked' if enabled else '')+'> Учитывать</label> '
                      '<button>Сохранить</button></form></td></tr>')
     parts.append('</table></div></section>')
     return page("Журнал",''.join(parts))
