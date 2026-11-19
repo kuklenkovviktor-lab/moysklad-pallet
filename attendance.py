@@ -10,14 +10,13 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from html import escape
 from urllib.parse import urlparse
-from zoneinfo import ZoneInfo
 
 from flask import Blueprint, Response, request, session, redirect
 
 from wms import db_connect, get_session_employee, sql
 
 attendance_bp = Blueprint("attendance", __name__)
-MSK = ZoneInfo("Europe/Moscow")
+MSK = timezone(timedelta(hours=3), "MSK")
 STYLES = """
 :root{color-scheme:dark;font-family:system-ui;background:#09121e;color:#f1f6ff}
 *{box-sizing:border-box}body{margin:0;padding:20px;min-height:100vh;background:#09121e}
