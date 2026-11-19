@@ -34,6 +34,7 @@ from warehouse_map_labels import map_labels_bp
 from cell_audit import cell_audit_bp
 from fbs_diagnostics import diag_bp
 from shift_history import shift_history_bp
+from attendance import attendance_bp
 from integrations import integrations_bp
 from grit_theme import GRIT_CSS
 from fbs_pdf_import import fbs_pdf_bp
@@ -111,6 +112,7 @@ app.register_blueprint(map_labels_bp)
 app.register_blueprint(cell_audit_bp)
 app.register_blueprint(diag_bp)
 app.register_blueprint(shift_history_bp)
+app.register_blueprint(attendance_bp)
 app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(print_bridge_bp)
 app.register_blueprint(ozon_fbo_bp)
@@ -334,7 +336,7 @@ def _start_wms_initializer():
 # Centralized theme is injected only into authenticated desktop HTML pages.
 # Do not restyle employee terminals, QR scanners, label printing, or partner printouts.
 _GRIT_DESKTOP_PAGES = frozenset({
-    "/manager/shifts", "/manager/shift-history",
+    "/manager/shifts", "/manager/shift-history", "/manager/attendance",
     "/manager/fbs-pdf", "/manager/warehouse-map", "/manager/replenishment",
     "/manager/cell-audit", "/manager/fbs-diagnostics", "/manager/ozon-fbo",
     "/manager/partners", "/manager/integrations", "/manager/onix-print-test",
@@ -471,6 +473,9 @@ def require_employee_login():
         "/manager",
         "/manager/shifts",
         "/manager/shift-history",
+        "/manager/attendance",
+        "/manager/attendance/qr",
+        "/manager/attendance/profile",
         "/manager/fbs-pdf",
         "/manager/fbs-skip",
         "/api/manager/fbs/skip-qr",
