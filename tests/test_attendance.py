@@ -81,7 +81,7 @@ class AttendanceTests(unittest.TestCase):
             s.clear();s["manager_web"]=True
         page=self.client.get("/manager/attendance")
         self.assertEqual(page.status_code,200)
-        self.assertIn("Посещаемость".encode(),page.data)
+        self.assertIn("Журнал посещаемости".encode(),page.data)
         self.assertNotIn("Виктор".encode(),page.data)
         self.assertEqual(self.client.get("/manager/attendance/qr").status_code,200)
 
