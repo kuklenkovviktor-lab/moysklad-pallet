@@ -118,6 +118,28 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(qr.status_code,200)
         self.assertIn(b'class="grit-nav-pill"',qr.data)
 
+    def test_camera_and_hid_scans_route_action_qr_before_badge(self):
+        # The login camera used to POST the attendance URL as a badge and fail.
+        # Preserve camera scanning for the second (employee badge) QR.
+        from ast import parse, Assign, Constant
+        module=parse((ROOT/"wms.py").read_text(encoding="utf-8"))
+        login_html=next(
+            node.value.value for node in module.body
+            if isinstance(node,Assign)
+            and any(getattr(t,"id",None)=="LOGIN_PAGE" for t in node.targets)
+            and isinstance(node.value,Constant)
+        )
+        self.assertIn("function attendanceActionFromQr(value)",login_html)
+        self.assertIn("parsed.origin!==location.origin",login_html)
+        self.assertIn("parsed.pathname==='/attendance/in'",login_html)
+        self.assertIn("parsed.pathname==='/attendance/out'",login_html)
+        self.assertIn("pendingAttendanceAction=action",login_html)
+        self.assertIn("pendingAttendanceAction ||",login_html)
+        self.assertIn("if(!setAttendanceAction(attendanceActionFromQr(code))){",login_html)
+        self.assertIn("// Keep the camera open to scan the personal badge next.",login_html)
+        self.assertIn("if(setAttendanceAction(attendanceActionFromQr(code)))return;",login_html)
+        self.assertIn("await login(code)",login_html)
+
     def test_qr_to_badge_login_returns_to_correct_action(self):
         # Both QR entry points preserve the intended action without an employee session.
         for action in ("in", "out"):
