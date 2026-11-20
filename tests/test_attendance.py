@@ -118,6 +118,35 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(qr.status_code,200)
         self.assertIn(b'class="grit-nav-pill"',qr.data)
 
+    def test_qr_to_badge_login_returns_to_correct_action(self):
+        # Both QR entry points preserve the intended action without an employee session.
+        for action in ("in", "out"):
+            with self.subTest(action=action):
+                response=self.client.get("/attendance/"+action)
+                self.assertEqual(response.status_code,302)
+                self.assertEqual(response.headers["Location"],"/login?next=/attendance/"+action)
+
+        # Badge login is not altered for ordinary FBS logins.
+        page=self.client.get("/login?next=/attendance/out")
+        self.assertEqual(page.status_code,200)
+        self.assertIn(b"requestedNext",page.data)
+        self.assertIn(b"nextTarget",page.data)
+        self.assertIn(b"'/attendance/in'",page.data)
+        self.assertIn(b"'/attendance/out'",page.data)
+
+        self.login()
+        self.assertEqual(self.client.get("/login?next=/attendance/in").headers["Location"],"/attendance/in")
+        self.assertEqual(self.client.get("/login?next=/attendance/out").headers["Location"],"/attendance/out")
+        # External URLs cannot be used as post-login redirects.
+        external=self.client.get("/login?next=https://evil.example")
+        self.assertEqual(external.status_code,302)
+        self.assertNotIn("evil.example",external.headers["Location"])
+
+    def test_production_auth_gate_preserves_attendance_intent(self):
+        source=(ROOT/"app.py").read_text(encoding="utf-8")
+        self.assertIn('if path in ("/attendance/in", "/attendance/out"):',source)
+        self.assertIn('return redirect("/login?next=" + path)',source)
+
     def test_qr_print_two_exact_58x40mm_labels(self):
         with self.client.session_transaction() as sess:
             sess["manager_web"] = True
