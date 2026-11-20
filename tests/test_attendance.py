@@ -60,13 +60,22 @@ class AttendanceTests(unittest.TestCase):
         self.assertIn(b'requestSubmit()',arrival_page.data)
         self.assertIn(b'id="attendance-action"',arrival_page.data)
         self.assertNotIn("Подтвердить вход".encode(),arrival_page.data)
+        self.assertNotIn("Отмечаем время на сервере".encode(),arrival_page.data)
+        self.assertIn(b"visibility:hidden",arrival_page.data)
         with self.client.session_transaction() as sess:
             csrf=sess["attendance_csrf"]
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,409)
+        arrival=self.client.post("/attendance/in",data={"csrf":csrf})
+        self.assertEqual(arrival.status_code,303)
+        self.assertEqual(arrival.headers["Location"],"/fbs")
+        repeat=self.client.post("/attendance/in",data={"csrf":csrf})
+        self.assertEqual(repeat.status_code,303)
+        self.assertEqual(repeat.headers["Location"],"/fbs")
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits WHERE employee_id=?",(self.employee_id,))[0],1)
         departure_page=self.client.get("/attendance/out")
         self.assertIn(b'requestSubmit()',departure_page.data)
-        self.assertEqual(self.client.post("/attendance/out",data={"csrf":csrf}).status_code,200)
+        departure=self.client.post("/attendance/out",data={"csrf":csrf})
+        self.assertEqual(departure.status_code,303)
+        self.assertEqual(departure.headers["Location"],"/login?attendance_exit=1")
         visit=self.wms.query_one("SELECT arrived_at,left_at FROM attendance_visits WHERE employee_id=?",(self.employee_id,))
         self.assertTrue(visit[0] and visit[1])
         self.assertIsNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(original_shift,)))
@@ -76,13 +85,18 @@ class AttendanceTests(unittest.TestCase):
         with self.client.session_transaction() as sess:
             self.assertNotIn("employee_id",sess)
         self.assertEqual(self.client.get("/attendance/out").status_code,302)
+        # The terminal is no longer occupied, ready for another badge.
+        logged_out_page=self.client.get("/login?attendance_exit=1")
+        self.assertEqual(logged_out_page.status_code,200)
+        self.assertIn(b"localStorage.removeItem(key)",logged_out_page.data)
+        self.assertIn(b"history.replaceState(null,'','/login')",logged_out_page.data)
         self.assertEqual(self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0],self.badge)
 
     def test_failed_shift_close_rolls_back_departure(self):
         self.login()
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
         csrf=self.token("/attendance/in")
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
+        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,303)
         with patch("fbs_transactions.event",side_effect=RuntimeError("synthetic failure")):
             response=self.client.post("/attendance/out",data={"csrf":csrf})
         self.assertEqual(response.status_code,409)
@@ -90,6 +104,16 @@ class AttendanceTests(unittest.TestCase):
         self.assertIsNotNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(shift,)))
         with self.client.session_transaction() as sess:
             self.assertEqual(sess["employee_id"],self.employee_id)
+
+    def test_automatic_redirects_do_not_require_confirmation_screen(self):
+        self.login()
+        for action in ("in","out"):
+            with self.subTest(action=action):
+                page=self.client.get("/attendance/"+action)
+                self.assertEqual(page.status_code,200)
+                self.assertIn(b'requestSubmit()',page.data)
+                self.assertIn(b"visibility:hidden",page.data)
+                self.assertNotIn("Отмечаем время на сервере".encode(),page.data)
 
     def test_departure_without_arrival_does_not_close_shift(self):
         self.login()
