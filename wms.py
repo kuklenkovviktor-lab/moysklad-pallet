@@ -924,7 +924,7 @@ body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!importan
     <input id="hidBadge" class="scan-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
   </div>
   <div class="camera-box">
-    <div class="camera-title"><span><b>Вход через камеру</b> · QR бейджа</span><button onclick="toggleCamera()">📷 Камера</button></div>
+    <div class="camera-title"><span><b>Вход через камеру</b> · QR посещаемости / бейджа</span><button onclick="toggleCamera()">📷 Камера</button></div>
     <div id="reader"></div>
     <div id="result"></div>
   </div>
@@ -937,6 +937,26 @@ body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!importan
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
 const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
+// Attendance QR is an action URL, NOT an employee badge.
+// Keep the selected action until a real badge is scanned.
+let pendingAttendanceAction=null;
+function attendanceActionFromQr(value){
+ const raw=String(value||'').trim();
+ if(!raw)return null;
+ try{
+  const parsed=new URL(raw,location.origin);
+  if(parsed.origin!==location.origin||parsed.username||parsed.password||parsed.search||parsed.hash)return null;
+  return (parsed.pathname==='/attendance/in'||parsed.pathname==='/attendance/out')
+    ? parsed.pathname : null;
+ }catch(_){return null}
+}
+function setAttendanceAction(action){
+ if(action!=='/attendance/in'&&action!=='/attendance/out')return false;
+ pendingAttendanceAction=action;
+ document.getElementById('result').innerHTML='<div class="ok">QR '+(action.endsWith('/in')?'ВХОД':'ВЫХОД')+' считан. Теперь сканируй личный бейдж.</div>';
+ return true;
+}
+
 let zebraReady=false;
 
 function setScannerReady(){
@@ -993,6 +1013,7 @@ function submitHidValue(){
   return;
  }
  if(code){
+  if(setAttendanceAction(attendanceActionFromQr(code)))return;
   if(!zebraReady){
    document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
    setTimeout(focusHid,80);
@@ -1004,7 +1025,9 @@ function submitHidValue(){
 }
 
 async function login(code){
- code=normalizeHidCode(code); if(!code||busy)return; busy=true;
+ code=normalizeHidCode(code); if(!code||busy)return;
+ if(setAttendanceAction(attendanceActionFromQr(code)))return;
+ busy=true;
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),8000);
  try{
@@ -1022,8 +1045,9 @@ async function login(code){
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
   // Only our two attendance QR destinations are accepted, never arbitrary URLs.
   const requestedNext=new URLSearchParams(location.search).get('next');
-  const nextTarget=(requestedNext==='/attendance/in'||requestedNext==='/attendance/out')
-    ? requestedNext : '/fbs';
+  const nextTarget=pendingAttendanceAction ||
+    ((requestedNext==='/attendance/in'||requestedNext==='/attendance/out')
+      ? requestedNext : '/fbs');
   setTimeout(()=>location.href=nextTarget,250);
  }catch(e){
   const msg=(e&&e.name==='AbortError')?'Сервер не ответил за 8 секунд. Повтори скан.':'Ошибка входа: '+String((e&&e.message)||e||'сеть');
@@ -1088,6 +1112,7 @@ document.addEventListener('keydown',e=>{
   const code=normalizeHidCode(hidBuffer); hidBuffer=''; clearTimeout(hidTimer);
   if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
   if(code){
+   if(setAttendanceAction(attendanceActionFromQr(code)))return;
    if(!zebraReady){
     document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
     return;
@@ -1192,10 +1217,13 @@ async function toggleCamera(){
      const found=jsQR(frame.data,w,h,{inversionAttempts:'dontInvert'});
      const code=normalizeHidCode(found&&found.data);
      if(code){
-      result.innerHTML='<div class="ok">QR считан · проверяю бейдж…</div>';
-      await stopBadgeCamera();
-      await login(code);
-      return;
+      if(!setAttendanceAction(attendanceActionFromQr(code))){
+       result.innerHTML='<div class="ok">Бейдж считан · проверяю…</div>';
+       await stopBadgeCamera();
+       await login(code);
+       return;
+      }
+      // Keep the camera open to scan the personal badge next.
      }
     }
    }catch(e){}
