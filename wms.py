@@ -934,6 +934,13 @@ body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!importan
 </div>
 </div></div>
 <script>
+// After a successful QR exit, forget terminal-local employee state.
+// The server-side session has already been cleared.
+if(new URLSearchParams(location.search).get('attendance_out')==='1'){
+  ['onix_employee_id','fbs_shift_id','receipt_id','receipt_name'].forEach(k=>localStorage.removeItem(k));
+  try{sessionStorage.removeItem('openExitQr')}catch(_){}
+  history.replaceState(null,'','/login');
+}
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
 const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
