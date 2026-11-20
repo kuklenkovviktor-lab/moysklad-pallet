@@ -154,12 +154,15 @@ def worker_page(action):
     if not person or not person[5]:
         return page("Отметка недоступна", '<section class="panel"><h1>Учёт посещаемости отключён</h1></section>',403)
     label = "ВХОД" if action=="in" else "ВЫХОД"
+    # Visiting the QR page never writes by GET. One same-origin CSRF POST follows
+    # automatically; a manual fallback remains if JavaScript is disabled.
     body=('<section class="panel"><h1>GRIT · '+label+'</h1><p>'
-          +escape(person[1])+'</p><p>Подтвердите отметку. Время запишет сервер.</p>'
-          '<form method="post" action="/attendance/'+action+'">'
+          +escape(person[1])+'</p><p>Отмечаем время на сервере…</p>'
+          '<form id="attendance-action" method="post" action="/attendance/'+action+'">'
           '<input type="hidden" name="csrf" value="'+escape(_token())+'">'
-          '<button>Подтвердить '+label.lower()+'</button></form></section>'
-          '<a href="/">Вернуться в GRIT</a>')
+          '<noscript><button>Зафиксировать '+label.lower()+'</button></noscript>'
+          '</form></section>'
+          '<script>document.getElementById("attendance-action").requestSubmit();</script>')
     return page(label,body)
 
 @attendance_bp.post("/attendance/<action>")
@@ -175,11 +178,19 @@ def worker_mark(action):
     person=_staff(emp["id"])
     if not person or not person[5]:
         return Response("Учёт отключён",403)
+    from wms import DATABASE_URL
+    from fbs_transactions import event
     with db_connect() as conn:
         cur=conn.cursor()
         try:
+            if not DATABASE_URL:
+                cur.execute("BEGIN IMMEDIATE")
+            # Serialize attendance and shift transitions for this employee.
+            cur.execute(sql("SELECT id FROM employees WHERE id=?" +
+                            (" FOR NO KEY UPDATE" if DATABASE_URL else "")), (emp["id"],))
+            cur.fetchone()
             cur.execute(sql("""SELECT id FROM attendance_visits WHERE employee_id=?
-                AND left_at IS NULL LIMIT 1"""),(emp["id"],))
+                AND left_at IS NULL LIMIT 1"""), (emp["id"],))
             open_visit=cur.fetchone()
             if action=="in" and open_visit:
                 message,status="Приход уже отмечен",409
@@ -189,22 +200,35 @@ def worker_mark(action):
                 cur.execute(sql("""INSERT INTO attendance_visits
                     (id,employee_id,arrived_at,source) VALUES(?,?,?,'qr')"""),
                     (str(uuid.uuid4()),emp["id"],_stamp()))
-                message,status="Приход успешно отмечен",200
+                message,status="Приход отмечен",200
             else:
+                stamp=_stamp()
                 cur.execute(sql("UPDATE attendance_visits SET left_at=? WHERE id=? AND left_at IS NULL"),
-                            (_stamp(),open_visit[0]))
-                message,status="Уход успешно отмечен",200
+                            (stamp,open_visit[0]))
+                cur.execute(sql("""SELECT id FROM shifts WHERE employee_id=?
+                    AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1""" +
+                    (" FOR UPDATE" if DATABASE_URL else "")), (emp["id"],))
+                shift=cur.fetchone()
+                if shift:
+                    cur.execute(sql("UPDATE activities SET ended_at=? WHERE shift_id=? AND ended_at IS NULL"),
+                                (stamp,shift[0]))
+                    cur.execute(sql("UPDATE shifts SET ended_at=? WHERE id=? AND ended_at IS NULL"),
+                                (stamp,shift[0]))
+                    event(cur,emp["id"],shift[0],"shift","end",result="attendance-out")
+                message,status="Уход отмечен. Смена завершена.",200
             if status==200:
                 conn.commit()
             else:
                 conn.rollback()
         except Exception:
             conn.rollback()
-            message,status="Не удалось зафиксировать отметку. Проверьте журнал.",409
+            message,status="Не удалось завершить отметку. Повтори сканирование.",409
         finally:
             cur.close()
+    if status==200 and action=="out":
+        session.clear()
     return page("Посещаемость",'<section class="panel"><h1>'+escape(message)
-                +'</h1><p>'+escape(person[1])+'</p><a href="/">Вернуться в GRIT</a></section>',status)
+                +'</h1><p>'+escape(person[1])+'</p></section>',status)
 
 @attendance_bp.get("/manager/attendance")
 def journal():
