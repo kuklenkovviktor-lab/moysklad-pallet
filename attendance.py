@@ -148,7 +148,7 @@ def worker_page(action):
         return Response("Not found", 404)
     emp=get_session_employee()
     if not emp:
-        return redirect("/login")
+        return redirect("/login?next=/attendance/"+action)
     init_attendance_db()
     person=_staff(emp["id"])
     if not person or not person[5]:
@@ -168,7 +168,7 @@ def worker_mark(action):
         return Response("Not found",404)
     emp=get_session_employee()
     if not emp:
-        return redirect("/login")
+        return redirect("/login?next=/attendance/"+action)
     if not _csrf_ok(request.form.get("csrf")):
         return Response("Недействительная форма",403)
     init_attendance_db()

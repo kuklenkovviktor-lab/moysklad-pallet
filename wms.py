@@ -1020,7 +1020,11 @@ async function login(code){
   localStorage.setItem('onix_employee_id',d.employee.id);
   localStorage.setItem('fbs_shift_id',d.shift_id||'');
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
-  setTimeout(()=>location.href='/fbs',250);
+  // Only our two attendance QR destinations are accepted, never arbitrary URLs.
+  const requestedNext=new URLSearchParams(location.search).get('next');
+  const nextTarget=(requestedNext==='/attendance/in'||requestedNext==='/attendance/out')
+    ? requestedNext : '/fbs';
+  setTimeout(()=>location.href=nextTarget,250);
  }catch(e){
   const msg=(e&&e.name==='AbortError')?'Сервер не ответил за 8 секунд. Повтори скан.':'Ошибка входа: '+String((e&&e.message)||e||'сеть');
   document.getElementById('result').innerHTML='<div class="err">'+msg+'</div>';
@@ -2852,7 +2856,12 @@ def bootstrap_viktor_badge():
 @wms_bp.get("/login")
 def login_page():
     ensure_db()
+    # QR attendance must resume after badge login, including existing sessions.
+    requested_next = request.args.get("next", "")
+    attendance_next = requested_next if requested_next in ("/attendance/in", "/attendance/out") else None
     employee = get_session_employee()
+    if employee and attendance_next:
+        return redirect(attendance_next)
     if employee:
         # On browser restart return to the operation this employee was actually
         # doing, rather than always redirecting a receiver to FBS picking.
