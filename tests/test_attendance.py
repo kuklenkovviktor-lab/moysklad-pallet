@@ -78,6 +78,19 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/attendance/out").status_code,302)
         self.assertEqual(self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0],self.badge)
 
+    def test_failed_shift_close_rolls_back_departure(self):
+        self.login()
+        shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
+        csrf=self.token("/attendance/in")
+        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
+        with patch("fbs_transactions.event",side_effect=RuntimeError("synthetic failure")):
+            response=self.client.post("/attendance/out",data={"csrf":csrf})
+        self.assertEqual(response.status_code,409)
+        self.assertIsNone(self.wms.query_one("SELECT left_at FROM attendance_visits WHERE employee_id=?",(self.employee_id,))[0])
+        self.assertIsNotNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(shift,)))
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["employee_id"],self.employee_id)
+
     def test_departure_without_arrival_does_not_close_shift(self):
         self.login()
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
