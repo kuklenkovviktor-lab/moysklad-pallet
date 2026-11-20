@@ -28,7 +28,16 @@ border-radius:9px;padding:10px;min-height:42px}button{background:#176eae;cursor:
 button:focus-visible,a:focus-visible{outline:2px solid #ff9230}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #30465c;padding:9px;text-align:left}
 th{color:#9eb5ca}.scroll{overflow-x:auto}.qr{background:white;padding:12px;border-radius:9px;width:220px}
-@media print{body,.panel{background:#fff;color:#000;border:none}nav,button{display:none}}
+/* Same GRIT translucent navigation capsule as the desktop shared theme. */
+.grit-nav-pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+min-height:44px;padding:10px 18px;border-radius:9999px;
+text-decoration:none;color:#f1f6ff;background:rgba(126,164,199,.12);
+border:1px solid rgba(170,204,237,.22);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+transition:background-color .18s ease,border-color .18s ease}
+.grit-nav-pill:hover{background:rgba(126,164,199,.22);border-color:rgba(170,204,237,.36);color:#fff}
+.grit-nav-pill:focus-visible{outline:2px solid #ff9230;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.grit-nav-pill{transition:none}}
+@media print{body,.panel{background:#fff;color:#000;border:none}nav,button,.grit-nav-pill{display:none}}
 """
 
 def page(title, body, status=200):
@@ -191,7 +200,7 @@ def journal():
             (start,end))
         rows=cur.fetchall();cur.close()
     formtoken=escape(_token())
-    parts=['<nav><a href="/manager">← Панель руководителя</a></nav>',
+    parts=['<nav><a class="grit-nav-pill" href="/manager">← Панель руководителя</a></nav>',
            '<section class="panel"><h1>Журнал посещаемости</h1>',
            '<p>Вход/выход не зависят от производственной смены. Время: Москва.</p>',
            '<form method="get"><input type="date" name="day" value="'+escape(day)+'">'
@@ -255,4 +264,4 @@ def print_qr():
                         '<h1>'+label+'</h1><img class="qr" src="'+image+'" alt="'+label+'">'
                         '<p>GRIT WMS · '+label+'</p></section>')
     return page("QR посещаемости",'<nav><button onclick="window.print()">Печать QR</button> '
-                '<a href="/manager/attendance">Назад</a></nav>'+''.join(sections))
+                '<a class="grit-nav-pill" href="/manager/attendance">← Назад</a></nav>'+''.join(sections))
