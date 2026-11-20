@@ -2133,7 +2133,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   <a href="/manager/partners"><svg class="ui-icon" aria-hidden="true"><use href="#ic-users"></use></svg>Партнёры</a>
   <a href="/manager/integrations"><svg class="ui-icon" aria-hidden="true"><use href="#ic-link"></use></svg>Интеграции</a>
   <a href="/badges"><svg class="ui-icon" aria-hidden="true"><use href="#ic-badge"></use></svg>Бейджи</a>
-  <a href="#" onclick="openExitQr();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>QR выхода</a>
+  <a href="/manager/attendance/qr"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>QR посещаемости</a>
   <a class="logout" href="#" onclick="managerLogout();return false"><svg class="ui-icon" aria-hidden="true"><use href="#ic-logout"></use></svg>Выйти из ПК</a>
  </nav>
  <div class="sidebar-art" role="img" aria-label="Фирменная иллюстрация склада GRIT"></div>
@@ -2215,19 +2215,9 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 </div></main>
 </div>
 
-<div id="exitQrModal" class="modal" onclick="if(event.target===this)closeExitQr()">
- <div class="modal-card">
-  <div class="modal-head"><h2>🔐 QR завершения смены</h2><button class="close-btn" onclick="closeExitQr()" aria-label="Закрыть">×</button></div>
-  <div class="small" style="margin-top:6px">Код меняется каждые 30 секунд.</div>
-  <div id="managerExitQr" class="qrbox"></div>
-  <div class="ttl"><span id="managerExitTtl">—</span> сек.</div>
-  <div class="qr-note">до следующего QR</div>
-  <div id="managerExitError" class="small" style="margin-top:8px"></div>
- </div>
-</div>
 
 <script>
-let currentPlan=0,exitQrTimer=null,lastExitQrCode='';
+let currentPlan=0;
 let wbAssemblyCount=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
@@ -2370,17 +2360,6 @@ async function savePlan(){
  currentPlan=v;runDashboardLoad();
 }
 
-async function refreshExitQr(){
- try{
-  const r=await fetch('/api/admin/supervisor-exit-code',{cache:'no-store'}),d=await r.json();
-  if(!r.ok){document.getElementById('managerExitError').textContent=d.error||'Не удалось получить QR';return}
-  document.getElementById('managerExitError').textContent='';document.getElementById('managerExitTtl').textContent=d.expires_in;
-  if(d.code!==lastExitQrCode){lastExitQrCode=d.code;const box=document.getElementById('managerExitQr');box.innerHTML='';new QRCode(box,{text:d.code,width:280,height:280})}
- }catch(e){document.getElementById('managerExitError').textContent='Ошибка обновления QR'}
-}
-function openExitQr(){document.getElementById('exitQrModal').classList.add('open');refreshExitQr();if(!exitQrTimer)exitQrTimer=setInterval(refreshExitQr,1000)}
-function closeExitQr(){document.getElementById('exitQrModal').classList.remove('open');if(exitQrTimer){clearInterval(exitQrTimer);exitQrTimer=null}}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExitQr()});
 
 async function loadWbStatus(){
  try{
@@ -2999,40 +2978,22 @@ def exit_page():
 
 @wms_bp.get("/supervisor-terminal/setup")
 def supervisor_terminal_setup_page():
-    ensure_db()
-    if not is_manager():
-        return redirect("/fbs")
-    return SUPERVISOR_TERMINAL_SETUP_PAGE
+    return redirect("/manager/attendance/qr", code=303)
 
 
 @wms_bp.post("/api/supervisor-terminal/activate")
 def supervisor_terminal_activate():
-    ensure_db()
-    emp = get_session_employee()
-    if not emp or emp["role"] != "manager":
-        return jsonify(error="Доступ только руководителю"), 403
-    data = request.get_json(silent=True) or {}
-    supervisor_code = str(data.get("supervisor_code") or "").strip()
-    if not valid_supervisor_exit_code(supervisor_code):
-        return jsonify(error="Для переназначения терминала также нужен действующий QR старшего"), 403
-    token = issue_supervisor_terminal_token()
-    log_event(emp["id"], "supervisor_terminal", "activate", result="ok")
-    session.clear()
-    return jsonify(ok=True, terminal_token=token)
+    return jsonify(error="QR старшего отключён."), 410
 
 
 @wms_bp.get("/supervisor-terminal")
 def supervisor_terminal_page():
-    return SUPERVISOR_TERMINAL_PAGE
+    return redirect("/manager/attendance/qr", code=303)
 
 
 @wms_bp.get("/api/supervisor-terminal/qr")
 def supervisor_terminal_qr():
-    token = request.headers.get("X-Supervisor-Terminal", "")
-    if not valid_supervisor_terminal_token(token):
-        return jsonify(error="Терминал не авторизован"), 401
-    code, step, remaining = current_supervisor_exit_code()
-    return jsonify(code=code, expires_in=remaining, period=SUPERVISOR_QR_PERIOD, step=step)
+    return jsonify(error="QR старшего отключён."), 410
 
 
 @wms_bp.get("/supervisor-qr")
