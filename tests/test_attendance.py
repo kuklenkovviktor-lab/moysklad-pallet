@@ -107,6 +107,9 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/exit").headers["Location"],"/attendance/out")
         self.assertEqual(self.client.post("/api/auth/logout",json={}).status_code,410)
         self.assertEqual(self.client.get("/api/admin/supervisor-exit-code").status_code,410)
+        self.assertEqual(self.client.post("/api/supervisor-terminal/activate",json={}).status_code,410)
+        self.assertEqual(self.client.get("/api/supervisor-terminal/qr").status_code,410)
+        self.assertEqual(self.client.get("/supervisor-terminal").headers["Location"],"/manager/attendance/qr")
         with self.client.session_transaction() as sess:
             sess.clear()
             sess["manager_web"]=True
@@ -118,6 +121,12 @@ class AttendanceTests(unittest.TestCase):
                   and isinstance(node.value,Constant))
         self.assertIn('href="/attendance/out"',html)
         self.assertNotIn('href="/exit"',html)
+        manager_html=next(node.value.value for node in wms_ast.body
+                          if isinstance(node,Assign) and any(getattr(t,"id",None)=="STATS_PAGE" for t in node.targets)
+                          and isinstance(node.value,Constant))
+        self.assertIn('href="/manager/attendance/qr"',manager_html)
+        self.assertNotIn('openExitQr()',manager_html)
+        self.assertNotIn('exitQrModal',manager_html)
 
     def test_no_post_without_csrf_and_no_guest(self):
         self.assertEqual(self.client.post("/attendance/in",data={}).status_code,302)
