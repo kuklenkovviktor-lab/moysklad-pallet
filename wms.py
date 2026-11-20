@@ -1444,7 +1444,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
           <a href="/fbs-diagnostics">📶 Тест скорости</a>
           <a href="/ozon-fbo">📦 Ozon FBO</a>
         </div>
-        <a class="exit-btn" href="/exit">🚪 Завершить смену</a>
+        <a class="exit-btn" href="/attendance/out">🚪 Завершить смену</a>
       </div>
     </div>
   </div>
@@ -2935,7 +2935,7 @@ def auth_login():
     current = get_session_employee()
     if current:
         return jsonify(
-            error="Терминал занят: " + current["name"] + ". Для смены сотрудника нужен QR старшего.",
+            error="Терминал занят: " + current["name"] + ". Сотрудник должен завершить смену через QR ВЫХОД.",
             occupied=True,
             employee=current["name"],
         ), 409
@@ -2993,10 +2993,8 @@ def auth_login():
 
 @wms_bp.get("/exit")
 def exit_page():
-    ensure_db()
-    if not get_session_employee():
-        return redirect("/login")
-    return EXIT_PAGE
+    # Retired supervisor-QR exit screen. Existing navigation points to OUT.
+    return redirect("/attendance/out", code=303)
 
 
 @wms_bp.get("/supervisor-terminal/setup")
@@ -3039,46 +3037,20 @@ def supervisor_terminal_qr():
 
 @wms_bp.get("/supervisor-qr")
 def supervisor_qr_page():
-    ensure_db()
-    if not is_manager():
-        return redirect("/fbs")
-    return SUPERVISOR_QR_PAGE
+    # Deprecated: QR старшего больше не нужен для завершения смены.
+    return redirect("/manager", code=303)
 
 
 @wms_bp.get("/api/admin/supervisor-exit-code")
 def supervisor_exit_code_api():
-    ensure_db()
-    if not manager_access():
-        return jsonify(error="Доступ только руководителю"), 403
-    code, step, remaining = current_supervisor_exit_code()
-    return jsonify(code=code, expires_in=remaining, period=SUPERVISOR_QR_PERIOD, step=step)
+    # Old QR code must not be minted for regular employee exits.
+    return jsonify(error="QR старшего отключён. Используйте QR ВЫХОД."), 410
 
 
 @wms_bp.post("/api/auth/logout")
 def auth_logout():
-    ensure_db()
-    emp = get_session_employee()
-    if not emp:
-        return jsonify(error="Активная учётная запись не найдена"), 401
-
-    data = request.get_json(silent=True) or {}
-    supervisor_code = str(data.get("supervisor_code", "")).strip()
-    if not valid_supervisor_exit_code(supervisor_code):
-        log_event(emp["id"], "auth", "logout_denied", object_code="invalid-supervisor-qr", result="denied")
-        return jsonify(error="Нужен QR старшего. Смена не завершена."), 403
-
-    row = query_one(
-        "SELECT id FROM shifts WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
-        (emp["id"],),
-    )
-    if row:
-        shift_id = row[0]
-        from fbs_transactions import close_shift
-        close_shift(shift_id, emp["id"])
-
-    log_event(emp["id"], "auth", "logout", object_code="supervisor-qr", result="ok")
-    session.clear()
-    return jsonify(ok=True)
+    # Prevent legacy logout from bypassing attendance records and shift closure.
+    return jsonify(error="Используйте QR ВЫХОД для закрытия смены."), 410
 
 
 @wms_bp.get("/api/auth/me")
@@ -4174,7 +4146,7 @@ body .nav a{color:#e0f0ff!important}
   </script>
   <div id="topbar">
     <div class="who"><span id="identity"></span></div>
-    <a href="/exit">🚪 Завершить смену</a>
+    <a href="/attendance/out">🚪 Завершить смену</a>
   </div>
   <div class="card">
     <div class="stage">
