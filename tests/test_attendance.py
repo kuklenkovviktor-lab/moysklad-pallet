@@ -118,6 +118,18 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(qr.status_code,200)
         self.assertIn(b'class="grit-nav-pill"',qr.data)
 
+    def test_qr_print_two_exact_58x40mm_labels(self):
+        with self.client.session_transaction() as sess:
+            sess["manager_web"] = True
+        response = self.client.get("/manager/attendance/qr")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"@page{size:58mm 40mm;margin:0}", response.data)
+        self.assertIn(b"width:58mm!important;height:40mm!important", response.data)
+        self.assertIn(b"page-break-after:always", response.data)
+        self.assertIn(b"section.attendance-label:last-child", response.data)
+        self.assertEqual(response.data.count(b'class="panel attendance-label"'), 2)
+        self.assertEqual(response.data.count(b"data:image/png;base64,"), 2)
+
     def test_dark_theme_and_two_qr_links(self):
         with self.client.session_transaction() as s:
             s["manager_web"]=True
