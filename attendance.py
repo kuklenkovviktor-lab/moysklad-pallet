@@ -156,14 +156,14 @@ def worker_page(action):
     label = "ВХОД" if action=="in" else "ВЫХОД"
     # Visiting the QR page never writes by GET. One same-origin CSRF POST follows
     # automatically; a manual fallback remains if JavaScript is disabled.
-    body=('<section class="panel"><h1>GRIT · '+label+'</h1><p>'
-          +escape(person[1])+'</p><p>Отмечаем время на сервере…</p>'
-          '<form id="attendance-action" method="post" action="/attendance/'+action+'">'
+    # One invisible same-origin CSRF form submission; only failures display
+    # a message. Successful POST responses redirect to the correct terminal.
+    body=('<form id="attendance-action" method="post" action="/attendance/'+action+'">'
           '<input type="hidden" name="csrf" value="'+escape(_token())+'">'
           '<noscript><button>Зафиксировать '+label.lower()+'</button></noscript>'
-          '</form></section>'
+          '</form>'
           '<script>document.getElementById("attendance-action").requestSubmit();</script>')
-    return page(label,body)
+    return page(label,body,extra_css='main{visibility:hidden}')
 
 @attendance_bp.post("/attendance/<action>")
 def worker_mark(action):
@@ -193,7 +193,8 @@ def worker_mark(action):
                 AND left_at IS NULL LIMIT 1"""), (emp["id"],))
             open_visit=cur.fetchone()
             if action=="in" and open_visit:
-                message,status="Приход уже отмечен",409
+                # Idempotent: the attendance visit already exists; no duplicate insert.
+                message,status="Приход уже отмечен",200
             elif action=="out" and not open_visit:
                 message,status="Нет открытого прихода, обратитесь к руководителю",409
             elif action=="in":
@@ -225,8 +226,12 @@ def worker_mark(action):
             message,status="Не удалось завершить отметку. Повтори сканирование.",409
         finally:
             cur.close()
-    if status==200 and action=="out":
-        session.clear()
+    if status==200:
+        if action=="out":
+            session.clear()
+            # The login page clears worker-specific localStorage on terminal.
+            return redirect("/login?attendance_exit=1", code=303)
+        return redirect("/fbs", code=303)
     return page("Посещаемость",'<section class="panel"><h1>'+escape(message)
                 +'</h1><p>'+escape(person[1])+'</p></section>',status)
 
