@@ -40,11 +40,41 @@ transition:background-color .18s ease,border-color .18s ease}
 @media print{body,.panel{background:#fff;color:#000;border:none}nav,button,.grit-nav-pill{display:none}}
 """
 
-def page(title, body, status=200):
+
+# Attendance QR printing is strictly 58 x 40 mm: two labels, two pages.
+QR_PRINT_CSS = """
+@page{size:58mm 40mm;margin:0}
+@media print{
+ html,body,main{width:58mm!important;min-width:58mm!important;max-width:58mm!important;
+  margin:0!important;padding:0!important;background:#fff!important;color:#000!important}
+ body{overflow:visible!important}
+ main{display:block!important}
+ nav{display:none!important}
+ body section.attendance-label{display:flex!important;flex-direction:column!important;
+  align-items:center!important;justify-content:center!important;gap:0.7mm!important;
+  box-sizing:border-box!important;width:58mm!important;height:40mm!important;
+  min-height:40mm!important;max-height:40mm!important;margin:0!important;
+  padding:1.5mm 2mm!important;border:0!important;border-radius:0!important;
+  background:#fff!important;color:#000!important;box-shadow:none!important;
+  break-inside:avoid!important;page-break-inside:avoid!important;
+  break-after:page;page-break-after:always;overflow:hidden!important}
+ body section.attendance-label:last-child{break-after:auto;page-break-after:auto}
+ body section.attendance-label h1{font:700 11pt/1.1 Arial,sans-serif!important;
+  color:#000!important;margin:0!important;padding:0!important}
+ body section.attendance-label img.qr{display:block!important;width:25mm!important;
+  height:25mm!important;max-width:25mm!important;max-height:25mm!important;
+  padding:0!important;margin:0!important;border:0!important;border-radius:0!important;
+  object-fit:contain!important;background:#fff!important}
+ body section.attendance-label p{font:6pt/1.1 Arial,sans-serif!important;
+  color:#000!important;margin:0!important;padding:0!important}
+}
+"""
+
+def page(title, body, status=200, extra_css=""):
     doc = ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
            '<meta name="viewport" content="width=device-width,initial-scale=1">'
            '<meta name="theme-color" content="#09121e"><title>GRIT · '
-           + escape(title) + '</title><style>' + STYLES + '</style></head>'
+           + escape(title) + '</title><style>' + STYLES + extra_css + '</style></head>'
            '<body><main>' + body + '</main></body></html>')
     return Response(doc, status=status, mimetype="text/html",
                     headers={"Cache-Control": "no-store"})
@@ -260,8 +290,8 @@ def print_qr():
         qr=qrcode.make("https://gritwms.space/attendance/"+action)
         output=io.BytesIO();qr.save(output,format="PNG")
         image="data:image/png;base64,"+base64.b64encode(output.getvalue()).decode("ascii")
-        sections.append('<section class="panel" style="display:inline-block;text-align:center;margin:12px">'
+        sections.append('<section class="panel attendance-label" style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;margin:12px;padding:12px">'
                         '<h1>'+label+'</h1><img class="qr" src="'+image+'" alt="'+label+'">'
                         '<p>GRIT WMS · '+label+'</p></section>')
     return page("QR посещаемости",'<nav><button onclick="window.print()">Печать QR</button> '
-                '<a class="grit-nav-pill" href="/manager/attendance">← Назад</a></nav>'+''.join(sections))
+                '<a class="grit-nav-pill" href="/manager/attendance">← Назад</a></nav>'+''.join(sections), extra_css=QR_PRINT_CSS)
