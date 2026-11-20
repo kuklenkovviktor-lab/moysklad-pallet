@@ -370,7 +370,7 @@ def grit_desktop_theme(response):
     if "</head>" not in html.lower() or "grit-ui.css" in html:
         return response
     # No mutation of form, script, SVG/QR payloads, or route handlers.
-    html = html.replace("</head>", '<link rel="stylesheet" href="/grit-ui.css?v=2"></head>', 1)
+    html = html.replace("</head>", '<link rel="stylesheet" href="/grit-ui.css?v=3"></head>', 1)
     response.set_data(html)
     return response
 
