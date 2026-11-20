@@ -552,6 +552,8 @@ def require_employee_login():
         return None
     if path.startswith("/api/"):
         return jsonify(error="Требуется вход по бейджу"), 401
+    if path in ("/attendance/in", "/attendance/out"):
+        return redirect("/login?next=" + path)
     return redirect("/login")
 
 
