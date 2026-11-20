@@ -60,13 +60,20 @@ class AttendanceTests(unittest.TestCase):
         self.assertIn(b'requestSubmit()',arrival_page.data)
         self.assertIn(b'id="attendance-action"',arrival_page.data)
         self.assertNotIn("Подтвердить вход".encode(),arrival_page.data)
+        self.assertNotIn("Отмечаем время на сервере".encode(),arrival_page.data)
+        self.assertIn(b'style="display:none"',arrival_page.data)
         with self.client.session_transaction() as sess:
             csrf=sess["attendance_csrf"]
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
+        entry=self.client.post("/attendance/in",data={"csrf":csrf})
+        self.assertEqual(entry.status_code,303)
+        self.assertEqual(entry.headers["Location"],"/")
         self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,409)
         departure_page=self.client.get("/attendance/out")
         self.assertIn(b'requestSubmit()',departure_page.data)
-        self.assertEqual(self.client.post("/attendance/out",data={"csrf":csrf}).status_code,200)
+        exit_response=self.client.post("/attendance/out",data={"csrf":csrf})
+        self.assertEqual(exit_response.status_code,303)
+        self.assertEqual(exit_response.headers["Location"],"/login?attendance_out=1")
+        self.assertEqual(self.client.get("/api/auth/me").status_code,401)
         visit=self.wms.query_one("SELECT arrived_at,left_at FROM attendance_visits WHERE employee_id=?",(self.employee_id,))
         self.assertTrue(visit[0] and visit[1])
         self.assertIsNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(original_shift,)))
@@ -76,13 +83,17 @@ class AttendanceTests(unittest.TestCase):
         with self.client.session_transaction() as sess:
             self.assertNotIn("employee_id",sess)
         self.assertEqual(self.client.get("/attendance/out").status_code,302)
+        login_page=self.client.get("/login?attendance_out=1")
+        self.assertEqual(login_page.status_code,200)
+        self.assertIn(b"attendance_out",login_page.data)
+        self.assertIn(b"localStorage.removeItem(k)",login_page.data)
         self.assertEqual(self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0],self.badge)
 
     def test_failed_shift_close_rolls_back_departure(self):
         self.login()
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
         csrf=self.token("/attendance/in")
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
+        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,303)
         with patch("fbs_transactions.event",side_effect=RuntimeError("synthetic failure")):
             response=self.client.post("/attendance/out",data={"csrf":csrf})
         self.assertEqual(response.status_code,409)
