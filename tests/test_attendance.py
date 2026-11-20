@@ -103,6 +103,21 @@ class AttendanceTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.client.get("/attendance/in").status_code,403)
 
+    def test_translucent_pill_navigation(self):
+        from grit_theme import GRIT_CSS
+        self.assertIn("body .grit-nav-pill", GRIT_CSS)
+        self.assertIn("rgba(126,164,199,.12)", GRIT_CSS)
+        self.assertIn("backdrop-filter:blur(12px)", GRIT_CSS)
+        with self.client.session_transaction() as sess:
+            sess["manager_web"] = True
+        journal=self.client.get("/manager/attendance")
+        self.assertEqual(journal.status_code,200)
+        self.assertIn(b'class="grit-nav-pill"', journal.data)
+        self.assertIn(b"rgba(126,164,199,.12)",journal.data)
+        qr=self.client.get("/manager/attendance/qr")
+        self.assertEqual(qr.status_code,200)
+        self.assertIn(b'class="grit-nav-pill"',qr.data)
+
     def test_dark_theme_and_two_qr_links(self):
         with self.client.session_transaction() as s:
             s["manager_web"]=True
