@@ -52,20 +52,59 @@ class AttendanceTests(unittest.TestCase):
         with self.client.session_transaction() as s:
             return s["attendance_csrf"]
 
-    def test_existing_badge_survives_and_attendance_is_independent(self):
+    def test_entry_badge_exit_closes_shift_and_clears_session(self):
         self.login()
         original_shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
-        token=self.token("/attendance/in")
-        first=self.client.post("/attendance/in",data={"csrf":token})
-        self.assertEqual(first.status_code,200)
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":token}).status_code,409)
-        self.assertEqual(self.client.post("/attendance/out",data={"csrf":token}).status_code,200)
-        self.assertEqual(self.client.post("/attendance/out",data={"csrf":token}).status_code,409)
+        arrival_page=self.client.get("/attendance/in")
+        self.assertEqual(arrival_page.status_code,200)
+        self.assertIn(b'requestSubmit()',arrival_page.data)
+        self.assertIn(b'id="attendance-action"',arrival_page.data)
+        self.assertNotIn("Подтвердить вход".encode(),arrival_page.data)
+        with self.client.session_transaction() as sess:
+            csrf=sess["attendance_csrf"]
+        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,200)
+        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,409)
+        departure_page=self.client.get("/attendance/out")
+        self.assertIn(b'requestSubmit()',departure_page.data)
+        self.assertEqual(self.client.post("/attendance/out",data={"csrf":csrf}).status_code,200)
         visit=self.wms.query_one("SELECT arrived_at,left_at FROM attendance_visits WHERE employee_id=?",(self.employee_id,))
         self.assertTrue(visit[0] and visit[1])
-        same_shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
-        self.assertEqual(original_shift,same_shift)
+        self.assertIsNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(original_shift,)))
+        self.assertIsNotNone(self.wms.query_one("SELECT ended_at FROM shifts WHERE id=?",(original_shift,))[0])
+        self.assertIsNone(self.wms.query_one("SELECT id FROM activities WHERE shift_id=? AND ended_at IS NULL",(original_shift,)))
+        self.assertIsNotNone(self.wms.query_one("SELECT id FROM operation_events WHERE shift_id=? AND operation_type='shift' AND event_type='end'",(original_shift,)))
+        with self.client.session_transaction() as sess:
+            self.assertNotIn("employee_id",sess)
+        self.assertEqual(self.client.get("/attendance/out").status_code,302)
         self.assertEqual(self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0],self.badge)
+
+    def test_departure_without_arrival_does_not_close_shift(self):
+        self.login()
+        shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
+        csrf=self.token("/attendance/out")
+        response=self.client.post("/attendance/out",data={"csrf":csrf})
+        self.assertEqual(response.status_code,409)
+        self.assertIsNotNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(shift,)))
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["employee_id"],self.employee_id)
+
+    def test_supervisor_qr_is_no_longer_required_or_offered(self):
+        self.login()
+        self.assertEqual(self.client.get("/exit").headers["Location"],"/attendance/out")
+        self.assertEqual(self.client.post("/api/auth/logout",json={}).status_code,410)
+        self.assertEqual(self.client.get("/api/admin/supervisor-exit-code").status_code,410)
+        with self.client.session_transaction() as sess:
+            sess.clear()
+            sess["manager_web"]=True
+        self.assertEqual(self.client.get("/supervisor-qr").headers["Location"],"/manager")
+        from ast import parse,Assign,Constant
+        wms_ast=parse((ROOT/"wms.py").read_text(encoding="utf-8"))
+        html=next(node.value.value for node in wms_ast.body
+                  if isinstance(node,Assign) and any(getattr(t,"id",None)=="FBS_PAGE" for t in node.targets)
+                  and isinstance(node.value,Constant))
+        self.assertIn('href="/attendance/out"',html)
+        self.assertNotIn('href="/exit"',html)
 
     def test_no_post_without_csrf_and_no_guest(self):
         self.assertEqual(self.client.post("/attendance/in",data={}).status_code,302)
