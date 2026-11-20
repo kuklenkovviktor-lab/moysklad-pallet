@@ -934,6 +934,15 @@ body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!importan
 </div>
 </div></div>
 <script>
+// Server-side session is already closed by the OUT action. Clean this terminal's
+// cached worker state before showing it ready for the next employee.
+if(new URLSearchParams(location.search).get('attendance_exit')==='1'){
+ for(const key of ['fbs_shift_id','receipt_id','receipt_name','onix_employee_id',
+                   'onix_fbo_pending_scan_v1','onix_fbo_pending_undo_v1']){
+  localStorage.removeItem(key);
+ }
+ try{history.replaceState(null,'','/login')}catch(_){}
+}
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
 const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
