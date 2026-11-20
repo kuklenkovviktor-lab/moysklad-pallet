@@ -2087,6 +2087,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
  <nav class="side-nav">
   <a class="active" href="/manager"><svg class="ui-icon" aria-hidden="true"><use href="#ic-home"></use></svg>Главная</a>
   <a href="/manager/shift-history"><svg class="ui-icon" aria-hidden="true"><use href="#ic-calendar"></use></svg>История смен</a>
+  <a href="/manager/attendance"><svg class="ui-icon" aria-hidden="true"><use href="#ic-calendar"></use></svg>Посещаемость</a>
   <a href="/manager/fbs-pdf"><svg class="ui-icon" aria-hidden="true"><use href="#ic-file"></use></svg>Загрузка PDF FBS</a>
   <a href="/manager/fbs-skip"><svg class="ui-icon" aria-hidden="true"><use href="#ic-qr"></use></svg>Пропуск товара · QR</a>
   <a href="/fbs-journal"><svg class="ui-icon" aria-hidden="true"><use href="#ic-clipboard"></use></svg>Журнал FBS</a>

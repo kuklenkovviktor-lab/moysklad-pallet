@@ -109,4 +109,27 @@ body img.qr,body .qr img,body .qr canvas{background:#fff!important}
  body .badge *,body .print-target *{color:#000!important}
  body .top,body .print-one{display:none!important}
 }
+
+/* GRIT translucent pill navigation: navigation links only, never scanning/actions. */
+body .grit-nav-pill,body .top a[href]:not(.button):not(.action),body a.grit-back-link{
+ display:inline-flex!important;align-items:center!important;justify-content:center!important;
+ gap:8px!important;min-height:44px!important;padding:10px 18px!important;
+ border-radius:9999px!important;text-decoration:none!important;
+ background:rgba(126,164,199,.12)!important;
+ border:1px solid rgba(170,204,237,.22)!important;color:#f1f6ff!important;
+ -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+ transition:background-color .18s ease,border-color .18s ease!important;
+}
+body .grit-nav-pill:hover,body .top a[href]:not(.button):not(.action):hover,body a.grit-back-link:hover{
+ background:rgba(126,164,199,.22)!important;
+ border-color:rgba(170,204,237,.36)!important;color:#fff!important;
+}
+body .grit-nav-pill:focus-visible,body .top a[href]:not(.button):not(.action):focus-visible,
+body a.grit-back-link:focus-visible{outline:2px solid #ff9230!important;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){
+ body .grit-nav-pill,body .top a[href]:not(.button):not(.action),body a.grit-back-link{transition:none!important}
+}
+@media print{
+ body .grit-nav-pill,body a.grit-back-link{display:none!important}
+}
 """
