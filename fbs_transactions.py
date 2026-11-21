@@ -78,6 +78,13 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
             if verdict["result"] != "MATCH":
                 raise ValueError("WB FBS: " + verdict["result"])
             wb_order_id = verdict["order_id"]
+            # Re-read the sticker on the locked order inside this transaction.
+            # Reject a sticker mapping that changed during the first lookup.
+            cur.execute(sql("""SELECT COUNT(*) FROM wb_fbs_stickers
+                WHERE account_id=? AND order_id=? AND barcode=?"""),
+                (account, wb_order_id, barcode))
+            if cur.fetchone()[0] != 1:
+                raise ValueError("WB-стикер изменился во время проверки")
         else:
             cur.execute('SELECT 1 FROM pdf_fbs_orders LIMIT 1')
         if not v11 and cur.fetchone():
