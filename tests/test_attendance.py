@@ -67,7 +67,13 @@ class AttendanceTests(unittest.TestCase):
         entry=self.client.post("/attendance/in",data={"csrf":csrf})
         self.assertEqual(entry.status_code,303)
         self.assertEqual(entry.headers["Location"],"/")
-        self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,409)
+        # Rescanning entry must neither duplicate a visit nor strand the user.
+        duplicate_entry=self.client.post("/attendance/in",data={"csrf":csrf})
+        self.assertEqual(duplicate_entry.status_code,303)
+        self.assertEqual(duplicate_entry.headers["Location"],"/")
+        self.assertEqual(self.wms.query_one(
+            "SELECT COUNT(*) FROM attendance_visits WHERE employee_id=?",
+            (self.employee_id,))[0],1)
         departure_page=self.client.get("/attendance/out")
         self.assertIn(b'requestSubmit()',departure_page.data)
         exit_response=self.client.post("/attendance/out",data={"csrf":csrf})
@@ -87,6 +93,7 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(login_page.status_code,200)
         self.assertIn(b"attendance_out",login_page.data)
         self.assertIn(b"localStorage.removeItem(k)",login_page.data)
+        self.assertIn(b"history.replaceState(null,'','/login')",login_page.data)
         self.assertEqual(self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0],self.badge)
 
     def test_failed_shift_close_rolls_back_departure(self):
@@ -97,6 +104,8 @@ class AttendanceTests(unittest.TestCase):
         with patch("fbs_transactions.event",side_effect=RuntimeError("synthetic failure")):
             response=self.client.post("/attendance/out",data={"csrf":csrf})
         self.assertEqual(response.status_code,409)
+        self.assertIn(b'href="/attendance/out"',response.data)
+        self.assertIn(b'href="/"',response.data)
         self.assertIsNone(self.wms.query_one("SELECT left_at FROM attendance_visits WHERE employee_id=?",(self.employee_id,))[0])
         self.assertIsNotNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(shift,)))
         with self.client.session_transaction() as sess:
@@ -225,6 +234,8 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(page.status_code,200)
         self.assertIn(b"requestedNext",page.data)
         self.assertIn(b"nextTarget",page.data)
+        self.assertIn(b"location.replace(nextTarget)",page.data)
+        self.assertIn(b"catch(storageError)",page.data)
         self.assertIn(b"'/attendance/in'",page.data)
         self.assertIn(b"'/attendance/out'",page.data)
 
