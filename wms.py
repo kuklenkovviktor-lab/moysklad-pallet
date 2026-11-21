@@ -4341,7 +4341,8 @@ def fbs_scan():
     # WB FBS v1.1 is opt-in. The product is already pending on this terminal;
     # the *second* scan identifies the WB order. No legacy article fallback.
     if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
-        from wb_fbs_sync_v11 import verify_pair, log_verification
+        from wb_fbs_sync_v11 import verify_pair, log_verification, normalize_api_sticker
+        barcode = normalize_api_sticker(barcode)
         from fbs_skip_authorization import pending_for_shift
         # Compare the exact machine-readable sticker value returned by WB API.
         # Do not infer an orderId by decoding the QR payload.

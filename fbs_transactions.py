@@ -58,6 +58,9 @@ def replay(request_id, shift_id, employee_id, barcode, product_barcode, cur=None
 
 def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, wb_order_id, scan_type, request_id, require_pending):
     from wms import sql, now_iso
+    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+        from wb_fbs_sync_v11 import normalize_api_sticker
+        barcode = normalize_api_sticker(barcode)
     with shift_transaction(shift_id) as (cur, shift):
         if replay(request_id, shift_id, employee_id, barcode, product_barcode, cur):
             return True

@@ -249,6 +249,18 @@ def ingest_stickers(account_id, stickers, fmt="png"):
     return updated
 
 
+def normalize_api_sticker(value):
+    """Preserve WB's API QR; repair Russian HID keyboard substitution only."""
+    code = _clean(value)
+    if len(code) == 9 and code[0] in ("*", ";"):
+        from wb_qr_codec import QR_DATA_RE, RU_HID_TO_EN
+        candidate = ("*" if code[0] == ";" else "*") + code[1:]
+        candidate = candidate.translate(RU_HID_TO_EN)
+        if QR_DATA_RE.fullmatch(candidate):
+            return candidate
+    return code
+
+
 def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     """Local DB verification; optionally read using the FBS commit transaction.
 
@@ -257,7 +269,7 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     """
     product = _clean(product_barcode)
     # API returns the exact 9-character QR value; match raw scanned bytes.
-    sticker = _clean(sticker_barcode)
+    sticker = normalize_api_sticker(sticker_barcode)
     if not product:
         return {"result": "PRODUCT_REQUIRED", "order_id": None, "expected_skus": []}
     if not sticker:
