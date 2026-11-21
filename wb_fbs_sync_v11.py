@@ -20,7 +20,14 @@ from wms import db_connect, sql
 
 MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
 CONTENT_API = "https://content-api.wildberries.ru"
-PICKABLE_STATUSES = frozenset({"confirm", "complete"})
+# A WB sticker may be available for a shipped order. That does NOT make the
+# order eligible for a new picking scan.
+PICKABLE_STATUSES = frozenset({"confirm"})
+STICKER_AVAILABLE_STATUSES = frozenset({"confirm", "complete"})
+BLOCKED_WB_STATUSES = frozenset({
+    "sold", "canceled", "canceled_by_client", "declined_by_client",
+    "defect", "canceled_by_missed_call", "canceled_by_carrier"
+})
 _SYNC_LOCK = threading.Lock()
 
 
@@ -405,7 +412,13 @@ class WBClient:
                                 self.marketplace_token,
                                 json={"orders": [int(x) for x in ids[offset:offset + 1000]]})
             for item in data.get("orders") or []:
-                result[_clean(item.get("id"))] = _clean(item.get("supplierStatus"))
+                seller_status = _clean(item.get("supplierStatus"))
+                wb_status = _clean(item.get("wbStatus"))
+                # Even if supplierStatus is still "confirm", a canceled or
+                # otherwise finalized WB order is not eligible for picking.
+                result[_clean(item.get("id"))] = (
+                    "cancel" if wb_status in BLOCKED_WB_STATUSES else seller_status
+                )
         return result
 
     def stickers(self, ids):
@@ -438,7 +451,7 @@ def sync_once(account_id, client, date_from=None):
             statuses = client.statuses(list(rows)) if rows else {}
             updated = ingest_orders(account_id, rows.values(), statuses)
             wanted = [int(oid) for oid, status in statuses.items()
-                      if status in PICKABLE_STATUSES and oid in rows]
+                      if status in STICKER_AVAILABLE_STATUSES and oid in rows]
             if wanted:
                 ingest_stickers(account_id, client.stickers(wanted))
             execute("""UPDATE wb_fbs_sync_runs SET finished_at=?,status='ok',
@@ -586,7 +599,7 @@ def _sync_new_once_unlocked(account_id, client):
     existing = {row[0] for row in query_all(
         "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
     eligible = [int(oid) for oid in ids
-                if statuses.get(oid) in PICKABLE_STATUSES and oid not in existing]
+                if statuses.get(oid) in STICKER_AVAILABLE_STATUSES and oid not in existing]
     if eligible:
         ingest_stickers(account_id, client.stickers(eligible))
     return {"received": len(orders), "updated": updated}
@@ -615,7 +628,7 @@ def _sync_status_once_unlocked(account_id, client):
     existing = {row[0] for row in query_all(
         "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
     eligible = [int(oid) for oid, status in statuses.items()
-                if status in PICKABLE_STATUSES and oid not in existing]
+                if status in STICKER_AVAILABLE_STATUSES and oid not in existing]
     if eligible:
         ingest_stickers(account_id, client.stickers(eligible))
     return len(statuses)
