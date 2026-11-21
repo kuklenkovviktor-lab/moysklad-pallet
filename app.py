@@ -2629,10 +2629,35 @@ def fbs_product_info():
         if not barcode:
             return jsonify(error="Пустой ШК товара"), 400
 
-        # PDF control is opt-in per employee shift and must never query MoySklad.
+        # In WB API picking, stage the scanned SKU from the cached CONFIRM
+        # orders. Never require an imported PDF or a MoySklad lookup.
         from wms import pdf_picking_active
         from fbs_skip_authorization import record_pending_item
         shift_id = str(data.get("shift_id") or "").strip()
+        if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+            account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+            row = query_one(
+                """SELECT o.seller_article FROM wb_fbs_order_skus s
+                   JOIN wb_fbs_orders o ON o.account_id=s.account_id
+                     AND o.order_id=s.order_id
+                   WHERE s.account_id=? AND s.sku=?
+                     AND o.wb_status='confirm' AND o.local_status<>'complete'
+                   LIMIT 1""",
+                (account, barcode),
+            )
+            if not row:
+                return jsonify(
+                    error="ШК товара не найден среди заказов WB «На сборке»",
+                    reason="wb_sku_not_in_confirm_orders",
+                ), 404
+            article = row[0] or ""
+            pending = record_pending_item(
+                shift_id, employee["id"], barcode, article, article or "Товар WB"
+            )
+            return jsonify(
+                ok=True, barcode=barcode, article=pending["article"],
+                name=pending["name"], source="wb_api",
+            )
         if pdf_picking_active(shift_id, employee["id"]):
             mapped = query_all(
                 "SELECT DISTINCT article, product_barcode "
