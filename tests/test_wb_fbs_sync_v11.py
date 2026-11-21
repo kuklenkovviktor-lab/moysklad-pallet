@@ -61,7 +61,7 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(verdict["result"], "MATCH")
         self.assertEqual(verdict["order_id"], "123")
         self.assertEqual(self.mod.verify_pair("a", "WRONG", "*DfgaMEc2")["result"], "MISMATCH")
-        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*DfgaMEc3")["result"],
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*DfgbAmo1")["result"],
                          "UNKNOWN_STICKER")
 
     def test_product_only_never_completes(self):
