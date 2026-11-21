@@ -156,6 +156,28 @@ class PGStress(unittest.TestCase):
             self.scan(1,1)
         self.assertEqual(db_one("SELECT COUNT(*) FROM scans WHERE barcode='SYNTH-WB-1'"),1)
 
+    def test_02b_simultaneous_duplicate_order_one_winner(self):
+        # Different shifts racing the same fresh sticker must create ONE scan.
+        from threading import Barrier
+        number=1600
+        for i in (0,1):
+            self.pending(i,number)
+        barrier=Barrier(2)
+        def race(i):
+            barrier.wait(timeout=5)
+            try:
+                self.scan(i,number)
+                return "OK"
+            except Exception:
+                return "REJECTED"
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            outcome=list(pool.map(race,(0,1)))
+        self.assertEqual(sorted(outcome),["OK","REJECTED"])
+        self.assertEqual(db_one("SELECT COUNT(*) FROM scans WHERE barcode=%s",
+                                (f"SYNTH-WB-{number}",)),1)
+        self.assertEqual(db_one("SELECT COUNT(*) FROM wb_fbs_orders WHERE order_id=%s AND local_status='complete'",
+                                (str(ORDER_BASE+number),)),1)
+
     def test_03_wrong_sku_does_not_increment(self):
         self.pending(0,1500)
         before=db_one("SELECT COUNT(*) FROM scans")
