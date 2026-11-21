@@ -16,7 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -n "$DATABASE_URL" || -n "$WB_API_TOKEN" || -n "$WB_CONTENT_TOKEN" ]]; then
+if [[ -n "${DATABASE_URL:-}" || -n "${WB_API_TOKEN:-}" || -n "${WB_CONTENT_TOKEN:-}" ]]; then
   echo "STOP: unset DATABASE_URL, WB_API_TOKEN and WB_CONTENT_TOKEN in your shell first." >&2
   exit 2
 fi
