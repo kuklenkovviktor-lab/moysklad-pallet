@@ -553,7 +553,7 @@ def manager_wb_page_v11():
                     mimetype="text/html", headers={"Cache-Control": "no-store"})
 
 
-def sync_new_once(account_id, client):
+def _sync_new_once_unlocked(account_id, client):
     """Fast 30-second discovery; only newly eligible sticker IDs are fetched."""
     init_schema()
     orders = client.new_orders()
@@ -572,7 +572,7 @@ def sync_new_once(account_id, client):
     return {"received": len(orders), "updated": updated}
 
 
-def sync_status_once(account_id, client):
+def _sync_status_once_unlocked(account_id, client):
     """Refresh active cached orders without touching WB statuses remotely."""
     from wms import execute, query_all
     init_schema()
@@ -597,10 +597,25 @@ def sync_status_once(account_id, client):
     return len(statuses)
 
 
-def sync_catalog_once(account_id, client):
+def _sync_catalog_once_unlocked(account_id, client):
     """Six-hour read-only SKU catalog refresh."""
     init_schema()
     return ingest_catalog(account_id, client.cards())
+
+
+def sync_new_once(account_id, client):
+    with _exclusive_sync(account_id):
+        return _sync_new_once_unlocked(account_id, client)
+
+
+def sync_status_once(account_id, client):
+    with _exclusive_sync(account_id):
+        return _sync_status_once_unlocked(account_id, client)
+
+
+def sync_catalog_once(account_id, client):
+    with _exclusive_sync(account_id):
+        return _sync_catalog_once_unlocked(account_id, client)
 
 
 def worker_loop(account_id, client, stop=None):
