@@ -290,7 +290,7 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     try:
         updated_at = datetime.fromisoformat(synced_at)
         stale = (datetime.now(timezone.utc) - updated_at.astimezone(timezone.utc)).total_seconds() > int(
-            os.getenv("WB_FBS_MAX_STALE_SECONDS", "1800"))
+            os.getenv("WB_FBS_MAX_STALE_SECONDS", "180"))
     except (ValueError, TypeError, AttributeError, OverflowError):
         stale = True
     if local_status == "complete":
