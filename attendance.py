@@ -154,14 +154,16 @@ def worker_page(action):
     if not person or not person[5]:
         return page("Отметка недоступна", '<section class="panel"><h1>Учёт посещаемости отключён</h1></section>',403)
     label = "ВХОД" if action=="in" else "ВЫХОД"
-    # Visiting the QR page never writes by GET. One same-origin CSRF POST follows
-    # automatically; a manual fallback remains if JavaScript is disabled.
-    body=('<section class="panel"><h1>GRIT · '+label+'</h1><p>'
-          +escape(person[1])+'</p><p>Отмечаем время на сервере…</p>'
-          '<form id="attendance-action" method="post" action="/attendance/'+action+'">'
+    # QR destinations remain GET-safe: the actual attendance write is a
+    # same-origin CSRF-protected POST. Do not display an intermediate status page.
+    # JavaScript submits immediately; a visible fallback exists only without JS.
+    body=('<form id="attendance-action" method="post" action="/attendance/'+action+'" '
+          'style="display:none">'
           '<input type="hidden" name="csrf" value="'+escape(_token())+'">'
-          '<noscript><button>Зафиксировать '+label.lower()+'</button></noscript>'
-          '</form></section>'
+          '</form>'
+          '<noscript><section class="panel"><h1>GRIT · '+label+'</h1>'
+          '<button form="attendance-action">Зафиксировать '+label.lower()+'</button>'
+          '</section></noscript>'
           '<script>document.getElementById("attendance-action").requestSubmit();</script>')
     return page(label,body)
 
@@ -193,7 +195,9 @@ def worker_mark(action):
                 AND left_at IS NULL LIMIT 1"""), (emp["id"],))
             open_visit=cur.fetchone()
             if action=="in" and open_visit:
-                message,status="Приход уже отмечен",409
+                # Idempotent arrival: never overwrite the original arrival time
+                # or strand a worker on a confirmation/error page after rescan.
+                message,status="Приход уже отмечен",200
             elif action=="out" and not open_visit:
                 message,status="Нет открытого прихода, обратитесь к руководителю",409
             elif action=="in":
@@ -225,10 +229,20 @@ def worker_mark(action):
             message,status="Не удалось завершить отметку. Повтори сканирование.",409
         finally:
             cur.close()
-    if status==200 and action=="out":
-        session.clear()
+    if status == 200:
+        if action == "out":
+            # Deactivate the employee terminal, including its browser session.
+            session.clear()
+            return redirect("/login?attendance_out=1", code=303)
+        # Entry is already persisted at this point. Go straight to GRIT home.
+        return redirect("/", code=303)
+    # Errors must remain visible: never pretend that a failed scan succeeded.
+    # A genuine failure must not be silently acknowledged. Make the page
+    # recoverable so a terminal never becomes a dead end.
+    fallback = ('<a class="grit-nav-pill" href="/attendance/'+action+'">Повторить</a> '
+                '<a class="grit-nav-pill" href="/">На главную</a>')
     return page("Посещаемость",'<section class="panel"><h1>'+escape(message)
-                +'</h1><p>'+escape(person[1])+'</p></section>',status)
+                +'</h1><p>'+escape(person[1])+'</p>'+fallback+'</section>',status)
 
 @attendance_bp.get("/manager/attendance")
 def journal():

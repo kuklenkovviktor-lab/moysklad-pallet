@@ -934,6 +934,15 @@ body .barcode-wrap,body canvas.barcode,body svg.barcode{background:#fff!importan
 </div>
 </div></div>
 <script>
+// After a successful QR exit, forget terminal-local employee state.
+// The server-side session has already been cleared.
+if(new URLSearchParams(location.search).get('attendance_out')==='1'){
+  try{
+    ['onix_employee_id','fbs_shift_id','receipt_id','receipt_name'].forEach(k=>localStorage.removeItem(k));
+    sessionStorage.removeItem('openExitQr');
+  }catch(_){}
+  history.replaceState(null,'','/login');
+}
 let scanner=null,busy=false,hidBuffer='',hidTimer=null;
 const hidBadge=document.getElementById('hidBadge');
 const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
@@ -1035,20 +1044,24 @@ async function login(code){
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code}),signal:controller.signal});
   const d=await r.json();
   if(!r.ok){document.getElementById('result').innerHTML='<div class="err">'+String(d.error||'Бейдж не принят')+'</div>';return}
-  const previousEmployee=localStorage.getItem('onix_employee_id');
-  if(previousEmployee && previousEmployee!==d.employee.id){
-    localStorage.removeItem('receipt_id');
-    localStorage.removeItem('receipt_name');
-  }
-  localStorage.setItem('onix_employee_id',d.employee.id);
-  localStorage.setItem('fbs_shift_id',d.shift_id||'');
+  // Browser storage can be unavailable (private mode or blocked storage).
+  // A successful server login must still navigate to the attendance action.
+  try{
+    const previousEmployee=localStorage.getItem('onix_employee_id');
+    if(previousEmployee && previousEmployee!==d.employee.id){
+      localStorage.removeItem('receipt_id');
+      localStorage.removeItem('receipt_name');
+    }
+    localStorage.setItem('onix_employee_id',d.employee.id);
+    localStorage.setItem('fbs_shift_id',d.shift_id||'');
+  }catch(storageError){console.warn('Terminal cache unavailable');}
   document.getElementById('result').innerHTML='<div class="ok">Вход: '+String(d.employee.name)+'</div>';
   // Only our two attendance QR destinations are accepted, never arbitrary URLs.
   const requestedNext=new URLSearchParams(location.search).get('next');
   const nextTarget=pendingAttendanceAction ||
     ((requestedNext==='/attendance/in'||requestedNext==='/attendance/out')
       ? requestedNext : '/fbs');
-  setTimeout(()=>location.href=nextTarget,250);
+  location.replace(nextTarget);
  }catch(e){
   const msg=(e&&e.name==='AbortError')?'Сервер не ответил за 8 секунд. Повтори скан.':'Ошибка входа: '+String((e&&e.message)||e||'сеть');
   document.getElementById('result').innerHTML='<div class="err">'+msg+'</div>';
