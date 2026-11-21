@@ -54,15 +54,13 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(value["result"], "MATCH")
         self.assertEqual(value["order_id"], "123")
 
-    def test_encoded_wb_qr_matches_api_decimal_sticker(self):
-        # Captured sticker format, paired with its deterministic decimal decoding.
-        self.seed(barcode="59997040711")
+    def test_raw_wb_qr_matches_exact_api_sticker(self):
+        self.seed(barcode="*DfgaMEc2")
         verdict = self.mod.verify_pair("a", "4601234567890", "*DfgaMEc2")
         self.assertEqual(verdict["result"], "MATCH")
         self.assertEqual(verdict["order_id"], "123")
         self.assertEqual(self.mod.verify_pair("a", "WRONG", "*DfgaMEc2")["result"], "MISMATCH")
-        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*DfgbAmo1")["result"],
-                         "UNKNOWN_STICKER")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "59997040711")["result"], "UNKNOWN_STICKER")
 
     def test_product_only_never_completes(self):
         self.seed()
@@ -187,7 +185,7 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         with client.session_transaction() as ss:
             ss["employee_id"] = emp
             ss["employee_shift_id"] = shift
-        self.seed(barcode="59997040711")
+        self.seed(barcode="*DfgaMEc2")
         with patch.dict(os.environ, {"WB_FBS_V11_ENABLED":"1","WB_FBS_V11_ACCOUNT_ID":"a"}):
             record_pending_item(shift,emp,"WRONG","test","test")
             response=client.post("/api/fbs/scan",json={
