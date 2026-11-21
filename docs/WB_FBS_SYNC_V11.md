@@ -21,7 +21,7 @@ No WB HTTP request is made by the scan handler. Existing PDF mode is unchanged w
 - `WB_FBS_V11_ACCOUNT_ID`: account namespace; default `default` (single seller).
 - `WB_API_TOKEN`: marketplace token, server-side only.
 - `WB_CONTENT_TOKEN`: optional separate Content API key, server-side only.
-- `WB_FBS_MAX_STALE_SECONDS`: maximum age of cached order state, default 1800.
+- `WB_FBS_MAX_STALE_SECONDS`: maximum age of cached order state, default 180.
 
 **Never enable v1.1 without end-to-end tests, API schema verification, and documented owner approval.**
 
