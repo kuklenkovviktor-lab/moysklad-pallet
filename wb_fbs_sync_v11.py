@@ -609,8 +609,16 @@ def _sync_status_once_unlocked(account_id, client):
     """Refresh active cached orders without touching WB statuses remotely."""
     from wms import execute, query_all
     init_schema()
+    # Keep each 30-second cycle bounded: refresh all known NEW/CONFIRM orders
+    # (including those created earlier), plus other recently created orders.
+    # Previously this scanned all 14-day history, making 30-second updates
+    # impossible on a busy FBS account.
+    recent_cutoff = datetime.fromtimestamp(
+        time.time() - 2 * 86400, timezone.utc).isoformat()
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
-        WHERE account_id=? AND local_status<>'complete'""", (account_id,))]
+        WHERE account_id=? AND local_status<>'complete'
+          AND (wb_status IN ('new','confirm') OR created_at>=?)""",
+        (account_id, recent_cutoff))]
     statuses = client.statuses(ids) if ids else {}
     # Missing order entries in the WB response cannot silently retain an old
     # pickable status. Fail closed until a complete status response is obtained.
@@ -659,7 +667,7 @@ def worker_loop(account_id, client, stop=None):
     """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
-    intervals = {"new": 30, "status": 60, "catalog": 21600, "full": 86400}
+    intervals = {"new": 30, "status": 30, "catalog": 21600, "full": 86400}
     last = {key: -float("inf") for key in intervals}
     while stop is None or not stop.is_set():
         now = time.monotonic()
