@@ -72,6 +72,8 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
             article, name = pending[1] or article, pending[2] or name
         v11 = os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
         if v11:
+            from wb_qr_codec import canonical_wb_sticker
+            barcode = canonical_wb_sticker(barcode)
             from wb_fbs_sync_v11 import verify_pair
             account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
             verdict = verify_pair(account, product_barcode, barcode, cursor=cur)
