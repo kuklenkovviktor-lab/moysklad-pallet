@@ -59,3 +59,15 @@ Do not mount production DB, compose volumes, employee badges, or live WB credent
 - App-only deployment and rollback plan approved separately.
 
 No changes to live PostgreSQL schema or warehouse data should occur during testing.
+
+
+## Pre-merge audit, 2026-11-21
+
+1. **WB API contract**: v1.1 endpoints and fields checked against published Marketplace FBS and Content API references. Exact QR scanner output versus API sticker.barcode still needs controlled validation; no real token was used.
+2. **Cache freshness**: maximum age defaults to 1800 seconds; malformed timestamps and missing status entries reject scans. Old confirm is not reused if the status response omitted an order.
+3. **Concurrent sync**: every sync entry point has a process lock plus PostgreSQL per-account advisory lock. Postgres cross-process tests on an isolated synthetic database are still required.
+4. **Scan bypasses**: authenticated employee, active picking shift, server-held pending product, exact SKU, WB sticker and atomic revalidation required. No article-only fallback when v1.1 is enabled. Existing PDF path stays untouched when disabled.
+
+New HTTP mock cases cover cancellation, status changes, sticker replacement, 401/403, 429, 5xx, timeout, cache retention, missing status and lock contention.
+
+**Test gate not yet confirmed after these audit changes.** Run isolated Docker verification before merging. Physical scanner/QR identity is an explicit remaining release gate.
