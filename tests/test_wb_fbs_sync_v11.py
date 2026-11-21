@@ -54,6 +54,16 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(value["result"], "MATCH")
         self.assertEqual(value["order_id"], "123")
 
+    def test_encoded_wb_qr_matches_api_decimal_sticker(self):
+        # Captured sticker format, paired with its deterministic decimal decoding.
+        self.seed(barcode="59997040711")
+        verdict = self.mod.verify_pair("a", "4601234567890", "*DfgaMEc2")
+        self.assertEqual(verdict["result"], "MATCH")
+        self.assertEqual(verdict["order_id"], "123")
+        self.assertEqual(self.mod.verify_pair("a", "WRONG", "*DfgaMEc2")["result"], "MISMATCH")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*DfgaMEc3")["result"],
+                         "UNKNOWN_STICKER")
+
     def test_product_only_never_completes(self):
         self.seed()
         self.assertEqual(self.mod.verify_pair("a", "4601234567890", "")["result"], "STICKER_REQUIRED")
