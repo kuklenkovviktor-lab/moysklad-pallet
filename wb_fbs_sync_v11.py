@@ -6,6 +6,7 @@ The caller must supply the already-scanned product barcode before the WB sticker
 import json
 import os
 import random
+import secrets
 import threading
 import time
 import uuid
@@ -387,7 +388,7 @@ def sync_once(account_id, client, date_from=None):
 
 
 # Manager-facing control is explicitly disabled until the opt-in flag is set.
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, session
 from wms import manager_access, query_one
 
 wb_fbs_v11_bp = Blueprint("wb_fbs_v11", __name__)
@@ -446,6 +447,11 @@ def manager_wb_sync_v11():
         return jsonify(error="Только для руководителя"), 403
     if not _allowed() or not os.getenv("WB_API_TOKEN", "").strip():
         return jsonify(error="WB FBS v1.1 отключён или нет API-ключа"), 503
+    csrf = session.get("wb_fbs_v11_csrf") or ""
+    if not csrf or not secrets.compare_digest(
+        request.headers.get("X-CSRF-Token", ""), csrf
+    ):
+        return jsonify(error="Неверный CSRF-токен"), 403
     if _UI_STATE["running"] or _SYNC_LOCK.locked():
         return jsonify(running=True), 202
     threading.Thread(target=_manual_sync, daemon=True, name="wb-fbs-v11-manual").start()
@@ -469,6 +475,7 @@ button{background:#e58a34;border:0;border-radius:8px;padding:12px 18px;font-weig
 <button onclick="syncNow()">Синхронизировать сейчас</button>
 <p class="muted" id="message">Никакие WB-статусы и поставки не изменяются.</p></div>
 <script>
+const csrfToken=CSRF_VALUE;
 async function refresh(){
  const r=await fetch('/api/wb-v11/status',{cache:'no-store'});const d=await r.json();
  if(!r.ok){document.getElementById('stats').textContent=d.error||'Ошибка доступа';return}
@@ -481,7 +488,7 @@ async function refresh(){
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
 }
 async function syncNow(){
- const r=await fetch('/api/wb-v11/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ const r=await fetch('/api/wb-v11/sync',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});
  const d=await r.json();document.getElementById('message').textContent=d.error||'Синхронизация запущена';
  refresh();
 }
@@ -494,5 +501,8 @@ def manager_wb_page_v11():
     if not manager_access():
         from flask import redirect
         return redirect("/manager-login")
-    return Response(MANAGER_PAGE, mimetype="text/html", headers={"Cache-Control": "no-store"})
+    token = secrets.token_urlsafe(32)
+    session["wb_fbs_v11_csrf"] = token
+    return Response(MANAGER_PAGE.replace("CSRF_VALUE", json.dumps(token)),
+                    mimetype="text/html", headers={"Cache-Control": "no-store"})
 
