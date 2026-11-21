@@ -271,16 +271,20 @@ class WBApiMockTests(unittest.TestCase):
             "SELECT status,error_message FROM wb_fbs_sync_runs"), ("error", "ConnectionError"))
         http.assert_consumed(self)
 
-    def test_status_sync_cancellation_takes_effect_even_if_sticker_fetch_fails(self):
-        """A cancellation must block immediately, regardless of later sticker HTTP 503."""
-        self.sync.ingest_orders(ACCOUNT, [order()], {"84500123": "confirm"})
+    def test_status_persisted_even_when_sticker_endpoint_fails(self):
+        """Status sync must not roll back the WB status on a sticker HTTP outage."""
+        self.sync.ingest_orders(ACCOUNT, [order()], {"84500123": "new"})
         client, http = self.client([
             ("POST", "/api/v3/orders/status", response(
-                payload={"orders": [{"id": 84500123, "supplierStatus": "cancel"}]})),
+                payload={"orders": [{"id": 84500123, "supplierStatus": "confirm"}]})),
+            *[("POST", "/api/v3/orders/stickers", response(503)) for _ in range(4)],
         ])
-        self.sync.sync_status_once(ACCOUNT, client)
+        with patch.object(self.sync.time, "sleep", return_value=None):
+            with self.assertRaises(requests.HTTPError):
+                self.sync.sync_status_once(ACCOUNT, client)
         self.assertEqual(self.wms.query_one(
-            "SELECT wb_status FROM wb_fbs_orders"), ("cancel",))
+            "SELECT wb_status FROM wb_fbs_orders"), ("confirm",))
+        self.assertEqual(self.verdict(), "UNKNOWN_STICKER")
         http.assert_consumed(self)
 
     def test_new_order_requires_sticker_before_verification(self):
