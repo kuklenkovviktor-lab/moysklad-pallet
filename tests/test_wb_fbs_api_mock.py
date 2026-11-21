@@ -133,7 +133,7 @@ class WBApiMockTests(unittest.TestCase):
 
     def test_status_confirm_to_new_to_complete(self):
         self.seed()
-        for status, expected in [("new", "BLOCKED_STATUS"), ("complete", "MATCH")]:
+        for status, expected in [("new", "BLOCKED_STATUS"), ("complete", "BLOCKED_STATUS")]:
             client, http = self.client([
                 ("POST", "/api/v3/orders/status", response(
                     payload={"orders": [{"id": 84500123, "supplierStatus": status}]})),
@@ -453,6 +453,36 @@ class WBApiMockTests(unittest.TestCase):
         opts = http.calls[0][2]
         self.assertEqual(opts["params"], {"type": "png", "width": 58, "height": 40})
         self.assertEqual(opts["json"], {"orders": [84500123]})
+        http.assert_consumed(self)
+
+    def test_wb_cancellation_overrides_supplier_confirm(self):
+        self.seed()
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": [{
+                "id": 84500123, "supplierStatus": "confirm",
+                "wbStatus": "canceled_by_client"}]})),
+        ])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+        self.assertEqual(self.wms.query_one(
+            "SELECT wb_status FROM wb_fbs_orders"), ("cancel",))
+        http.assert_consumed(self)
+
+    def test_order_already_in_delivery_not_pickable(self):
+        self.sync.ingest_orders(ACCOUNT, [order()], {"84500123": "complete"})
+        self.sync.ingest_stickers(ACCOUNT, [sticker()])
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+
+    def test_complete_order_sticker_can_still_be_synced(self):
+        self.sync.ingest_orders(ACCOUNT, [order()], {"84500123": "complete"})
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": [{
+                "id": 84500123, "supplierStatus": "complete", "wbStatus": "waiting"}]})),
+            ("POST", "/api/v3/orders/stickers", response(payload={"stickers": [sticker()]})),
+        ])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM wb_fbs_stickers")[0], 1)
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
         http.assert_consumed(self)
 
 
