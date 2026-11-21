@@ -236,35 +236,49 @@ def ingest_stickers(account_id, stickers, fmt="png"):
     return updated
 
 
-def verify_pair(account_id, product_barcode, sticker_barcode):
-    """Pure local lookup, no network. Returns result, order ID and authorized SKUs."""
+def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
+    """Local DB verification; optionally read using the FBS commit transaction.
+
+    Within a PostgreSQL transaction, lock the matched order row so a status
+    update cannot slip between verification and completed-scan commit.
+    """
     product = _clean(product_barcode)
     sticker = _clean(sticker_barcode)
     if not product:
         return {"result": "PRODUCT_REQUIRED", "order_id": None, "expected_skus": []}
     if not sticker:
         return {"result": "STICKER_REQUIRED", "order_id": None, "expected_skus": []}
-    with db_connect() as conn:
-        cur = conn.cursor()
-        cur.execute(sql("""SELECT o.order_id,o.wb_status,o.local_status,o.synced_at
+    from wms import DATABASE_URL
+    from contextlib import nullcontext
+    context = db_connect() if cursor is None else nullcontext(None)
+    with context as conn:
+        cur = cursor if cursor is not None else conn.cursor()
+        statement = """SELECT o.order_id,o.wb_status,o.local_status,o.synced_at
             FROM wb_fbs_stickers s JOIN wb_fbs_orders o
             ON o.account_id=s.account_id AND o.order_id=s.order_id
-            WHERE s.account_id=? AND s.barcode=?"""), (account_id, sticker))
+            WHERE s.account_id=? AND s.barcode=?"""
+        # Locking only the order row is sufficient: sticker mapping is
+        # checked immediately again inside the same transaction.
+        if cursor is not None and DATABASE_URL:
+            statement += " FOR UPDATE OF o"
+        cur.execute(sql(statement), (account_id, sticker))
         matches = cur.fetchall()
         if len(matches) != 1:
-            cur.close()
+            if cursor is None:
+                cur.close()
             return {"result": "AMBIGUOUS_STICKER" if matches else "UNKNOWN_STICKER",
                     "order_id": None, "expected_skus": []}
         oid, status, local_status, synced_at = matches[0]
         cur.execute(sql("""SELECT sku FROM wb_fbs_order_skus
             WHERE account_id=? AND order_id=?"""), (account_id, oid))
         allowed = sorted(x[0] for x in cur.fetchall())
-        cur.close()
+        if cursor is None:
+            cur.close()
     try:
         updated_at = datetime.fromisoformat(synced_at)
         stale = (datetime.now(timezone.utc) - updated_at.astimezone(timezone.utc)).total_seconds() > int(
             os.getenv("WB_FBS_MAX_STALE_SECONDS", "1800"))
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, OverflowError):
         stale = True
     if local_status == "complete":
         result = "ALREADY_COMPLETE"
