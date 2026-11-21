@@ -344,6 +344,7 @@ button:focus-visible,a:focus-visible{outline:2px solid #ff9230;outline-offset:2p
 <h1>Интеграции</h1></div><a href="/manager">← Панель управления</a></header>
 <div class="notice">Первый этап: реестр интеграций. Токены не отображаются и не сохраняются на этой странице.
 Новые сервисы нельзя подключить до реализации и проверки их адаптеров. Уже работающие соединения не изменены.</div>
+<p><a href="/manager/wb-fbs-v11">📦 Wildberries FBS · синхронизация и проверка SKU</a></p>
 <p><a href="/manager/integrations/lab">🧪 Открыть лабораторию маркетплейсов (без API-ключей)</a></p><p><a href="/manager/integrations/http">🌐 HTTP-адаптеры и журнал синхронизации (тестовый контур)</a></p>\n<section class="grid">""" + "".join(cards) + """</section>
 <script>
 const check=document.getElementById('checkMoysklad');
