@@ -38,6 +38,11 @@ def init_schema():
         """CREATE TABLE IF NOT EXISTS wb_fbs_order_skus (
             account_id TEXT NOT NULL, order_id TEXT NOT NULL, sku TEXT NOT NULL,
             PRIMARY KEY(account_id, order_id, sku))""",
+        """CREATE TABLE IF NOT EXISTS wb_fbs_catalog_variants (
+            account_id TEXT NOT NULL, nm_id TEXT NOT NULL,
+            chrt_id TEXT NOT NULL, sku TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(account_id,nm_id,chrt_id,sku))""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_stickers (
             account_id TEXT NOT NULL, order_id TEXT NOT NULL,
             barcode TEXT NOT NULL, part_a TEXT, part_b TEXT,
@@ -85,6 +90,11 @@ def ingest_orders(account_id, orders, statuses=None):
                 nm = _clean(item.get("nmId"))
                 chrt = _clean(item.get("chrtId"))
                 skus = sorted({_clean(s) for s in (item.get("skus") or []) if _clean(s)})
+                if not skus and nm and chrt:
+                    cur.execute(sql("""SELECT sku FROM wb_fbs_catalog_variants
+                        WHERE account_id=? AND nm_id=? AND chrt_id=?"""),
+                        (account_id, nm, chrt))
+                    skus = sorted(x[0] for x in cur.fetchall())
                 status = _clean(statuses.get(oid) or item.get("wbStatus") or item.get("status") or "unknown")
                 if status not in PICKABLE_STATUSES:
                     if status not in {"new", "cancel", "canceled", "cancelled", "decline", "unknown"}:
@@ -110,6 +120,37 @@ def ingest_orders(account_id, orders, statuses=None):
                             ON CONFLICT(account_id,order_id,sku) DO NOTHING"""),
                             (account_id, oid, sku))
                 updated += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+    return updated
+
+
+def ingest_catalog(account_id, cards):
+    """Store exact WB nmId + chrtId -> SKU variants for offline fallback."""
+    updated = 0
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            for card in cards:
+                nm = _clean(card.get("nmID"))
+                if not nm:
+                    continue
+                for variant in card.get("sizes") or []:
+                    chrt = _clean(variant.get("chrtID"))
+                    if not chrt:
+                        continue
+                    skus = sorted({_clean(s) for s in (variant.get("skus") or []) if _clean(s)})
+                    cur.execute(sql("""DELETE FROM wb_fbs_catalog_variants
+                        WHERE account_id=? AND nm_id=? AND chrt_id=?"""), (account_id, nm, chrt))
+                    for sku in skus:
+                        cur.execute(sql("""INSERT INTO wb_fbs_catalog_variants
+                            (account_id,nm_id,chrt_id,sku,updated_at) VALUES(?,?,?,?,?)"""),
+                            (account_id, nm, chrt, sku, utcnow()))
+                    updated += 1
             conn.commit()
         except Exception:
             conn.rollback()
@@ -242,6 +283,26 @@ class WBClient:
                     raise
                 time.sleep(0.3 * (2 ** attempt) + random.random() * 0.2)
         raise last
+
+    def cards(self):
+        if not self.content_token:
+            raise ValueError("WB Content API token missing")
+        cursor = {"limit": 100}
+        seen = set()
+        all_cards = []
+        while True:
+            payload = self.request("POST", CONTENT_API, "/content/v2/get/cards/list",
+                                   self.content_token,
+                                   json={"settings": {"cursor": cursor, "filter": {"withPhoto": -1}}})
+            cards = payload.get("cards") or []
+            all_cards.extend(cards)
+            next_data = payload.get("cursor") or {}
+            pair = (str(next_data.get("updatedAt") or ""), str(next_data.get("nmID") or ""))
+            if len(cards) < 100 or not all(pair) or pair in seen:
+                break
+            seen.add(pair)
+            cursor = {"limit": 100, "updatedAt": pair[0], "nmID": next_data.get("nmID")}
+        return all_cards
 
     def new_orders(self):
         return self.request("GET", MARKETPLACE_API, "/api/v3/orders/new",
