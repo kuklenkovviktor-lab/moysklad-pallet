@@ -1626,7 +1626,7 @@ function queuedFbsScan(){
 async function sendFbsScan(payload){
  const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const d=await r.json();
- if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);showTsdError(d.error||'Ошибка ШК WB');return false}
+ if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB');return false}
  localStorage.removeItem(FBS_OUTBOX_KEY);
  pendingProduct=null;updateScanStage();beep(true);
  document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
@@ -4358,7 +4358,10 @@ def fbs_scan():
         log_verification(account, employee["id"], shift_id,
                          product_barcode, barcode, verdict)
         if verdict["result"] != "MATCH":
-            return jsonify(error="WB FBS: " + verdict["result"], reason=verdict["result"]), 409
+            from fbs_skip_authorization import complete_pending_item
+            complete_pending_item(shift_id, employee["id"], product_barcode)
+            return jsonify(error="WB FBS: " + verdict["result"], reason=verdict["result"],
+                           reset_pending=True), 409
         try:
             replayed = commit_scan(
                 shift_id, employee["id"], barcode, product_barcode,
