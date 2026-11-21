@@ -4,6 +4,7 @@ Feature is intentionally opt-in. No WB requests are made on barcode scans.
 The caller must supply the already-scanned product barcode before the WB sticker.
 """
 import json
+import hashlib
 import os
 import random
 import secrets
@@ -11,6 +12,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 import requests
 
@@ -20,6 +22,44 @@ MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
 CONTENT_API = "https://content-api.wildberries.ru"
 PICKABLE_STATUSES = frozenset({"confirm", "complete"})
 _SYNC_LOCK = threading.Lock()
+
+
+@contextmanager
+def _exclusive_sync(account_id):
+    """No overlapping sync in this process or across PostgreSQL app/worker processes."""
+    if not _SYNC_LOCK.acquire(blocking=False):
+        raise RuntimeError("WB sync already running in this process")
+    lock_conn = None
+    lock_cur = None
+    locked = False
+    try:
+        from wms import DATABASE_URL
+        if DATABASE_URL:
+            # Session-level advisory lock, held by one dedicated pooled connection.
+            # All sync paths MUST go through this guard.
+            lock_id = int.from_bytes(
+                hashlib.sha256(("grit-wb-fbs-v11:" + account_id).encode("utf-8")).digest()[:8],
+                byteorder="big", signed=True)
+            context = db_connect()
+            lock_conn = context.__enter__()
+            lock_cur = lock_conn.cursor()
+            lock_cur.execute("SELECT pg_try_advisory_lock(%s)", (lock_id,))
+            locked = bool(lock_cur.fetchone()[0])
+            if not locked:
+                raise RuntimeError("WB sync already running in another process")
+        yield
+    finally:
+        if lock_cur is not None:
+            try:
+                if locked:
+                    lock_cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                    lock_cur.fetchone()
+                lock_cur.close()
+            finally:
+                context.__exit__(None, None, None)
+        elif lock_conn is not None:
+            context.__exit__(None, None, None)
+        _SYNC_LOCK.release()
 
 
 def utcnow():
@@ -78,7 +118,6 @@ def _clean(value):
 
 def ingest_orders(account_id, orders, statuses=None):
     """UPSERT order snapshot. Never guess status or replace known SKUs with empties."""
-    statuses = statuses or {}
     now = utcnow()
     updated = 0
     with db_connect() as conn:
@@ -96,7 +135,10 @@ def ingest_orders(account_id, orders, statuses=None):
                         WHERE account_id=? AND nm_id=? AND chrt_id=?"""),
                         (account_id, nm, chrt))
                     skus = sorted(x[0] for x in cur.fetchall())
-                status = _clean(statuses.get(oid) or item.get("wbStatus") or item.get("status") or "unknown")
+                # When a status response was requested, missing order statuses
+                # must NEVER fall back to stale snapshot flags.
+                status = _clean(statuses.get(oid, "unknown") if statuses is not None
+                                else (item.get("wbStatus") or item.get("status") or "unknown"))
                 if status not in PICKABLE_STATUSES:
                     if status not in {"new", "cancel", "canceled", "cancelled", "decline", "unknown"}:
                         status = "unknown"
@@ -358,17 +400,15 @@ class WBClient:
 
 
 def sync_once(account_id, client, date_from=None):
-    """One synchronous read-only run; caller schedules; no concurrent workers in this process."""
-    if not _SYNC_LOCK.acquire(blocking=False):
-        raise RuntimeError("WB sync already running")
-    run_id = str(uuid.uuid4())
-    received = updated = 0
-    try:
+    """One complete read-only synchronization under a per-account distributed lock."""
+    with _exclusive_sync(account_id):
+        run_id = str(uuid.uuid4())
+        received = updated = 0
         init_schema()
         from wms import execute
         execute("""INSERT INTO wb_fbs_sync_runs
             (run_id,account_id,started_at,sync_type,status)
-            VALUES(?,?,?,?,?)""", (run_id, account_id, utcnow(), "incremental", "running"))
+            VALUES(?,?,?,?,?)""", (run_id, account_id, utcnow(), "full", "running"))
         try:
             rows = {str(x["id"]): x for x in client.orders(date_from) if x.get("id") is not None}
             for item in client.new_orders():
@@ -378,7 +418,7 @@ def sync_once(account_id, client, date_from=None):
             statuses = client.statuses(list(rows)) if rows else {}
             updated = ingest_orders(account_id, rows.values(), statuses)
             wanted = [int(oid) for oid, status in statuses.items()
-                      if status in PICKABLE_STATUSES]
+                      if status in PICKABLE_STATUSES and oid in rows]
             if wanted:
                 ingest_stickers(account_id, client.stickers(wanted))
             execute("""UPDATE wb_fbs_sync_runs SET finished_at=?,status='ok',
@@ -391,8 +431,6 @@ def sync_once(account_id, client, date_from=None):
                 (utcnow(), received, updated, type(exc).__name__, run_id))
             raise
         return {"run_id": run_id, "received": received, "updated": updated}
-    finally:
-        _SYNC_LOCK.release()
 
 
 # Manager-facing control is explicitly disabled until the opt-in flag is set.
