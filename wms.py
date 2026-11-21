@@ -4337,6 +4337,40 @@ def fbs_scan():
     if request_id or pdf_picking_active(shift_id, employee["id"]):
         from wb_qr_codec import canonical_wb_sticker
         barcode = canonical_wb_sticker(barcode)
+
+    # WB FBS v1.1 is opt-in. The product is already pending on this terminal;
+    # the *second* scan identifies the WB order. No legacy article fallback.
+    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+        from wb_fbs_sync_v11 import verify_pair, log_verification
+        from fbs_skip_authorization import pending_for_shift
+        from wb_qr_codec import canonical_wb_sticker
+        barcode = canonical_wb_sticker(barcode)
+        account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+        try:
+            if replay(request_id, shift_id, employee["id"], barcode, product_barcode):
+                return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 409
+        pending = pending_for_shift(shift_id, employee["id"])
+        if not pending or pending["barcode"] != product_barcode:
+            return jsonify(error="Сначала отсканируй товар. Товар не подтверждён текущей сменой."), 409
+        verdict = verify_pair(account, product_barcode, barcode)
+        log_verification(account, employee["id"], shift_id,
+                         product_barcode, barcode, verdict)
+        if verdict["result"] != "MATCH":
+            return jsonify(error="WB FBS: " + verdict["result"], reason=verdict["result"]), 409
+        try:
+            replayed = commit_scan(
+                shift_id, employee["id"], barcode, product_barcode,
+                article, product_name, verdict["order_id"], scan_type,
+                request_id, True)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 409
+        except Exception:
+            if query_one("SELECT id FROM scans WHERE barcode=?", (barcode,)):
+                return jsonify(error="Этот заказ уже был засчитан"), 409
+            raise
+        return jsonify(ok=True, replayed=replayed, **shift_stats(shift_id))
     try:
         if replay(request_id, shift_id, employee["id"], barcode, product_barcode):
             return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
