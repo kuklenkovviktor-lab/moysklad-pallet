@@ -74,7 +74,7 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
         if v11:
             from wb_fbs_sync_v11 import verify_pair
             account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
-            verdict = verify_pair(account, product_barcode, barcode)
+            verdict = verify_pair(account, product_barcode, barcode, cursor=cur)
             if verdict["result"] != "MATCH":
                 raise ValueError("WB FBS: " + verdict["result"])
             wb_order_id = verdict["order_id"]
