@@ -204,7 +204,7 @@ def verify_pair(account_id, product_barcode, sticker_barcode):
         return {"result": "STICKER_REQUIRED", "order_id": None, "expected_skus": []}
     with db_connect() as conn:
         cur = conn.cursor()
-        cur.execute(sql("""SELECT o.order_id,o.wb_status,o.local_status
+        cur.execute(sql("""SELECT o.order_id,o.wb_status,o.local_status,o.synced_at
             FROM wb_fbs_stickers s JOIN wb_fbs_orders o
             ON o.account_id=s.account_id AND o.order_id=s.order_id
             WHERE s.account_id=? AND s.barcode=?"""), (account_id, sticker))
@@ -213,13 +213,21 @@ def verify_pair(account_id, product_barcode, sticker_barcode):
             cur.close()
             return {"result": "AMBIGUOUS_STICKER" if matches else "UNKNOWN_STICKER",
                     "order_id": None, "expected_skus": []}
-        oid, status, local_status = matches[0]
+        oid, status, local_status, synced_at = matches[0]
         cur.execute(sql("""SELECT sku FROM wb_fbs_order_skus
             WHERE account_id=? AND order_id=?"""), (account_id, oid))
         allowed = sorted(x[0] for x in cur.fetchall())
         cur.close()
+    try:
+        updated_at = datetime.fromisoformat(synced_at)
+        stale = (datetime.now(timezone.utc) - updated_at.astimezone(timezone.utc)).total_seconds() > int(
+            os.getenv("WB_FBS_MAX_STALE_SECONDS", "1800"))
+    except (ValueError, TypeError, AttributeError):
+        stale = True
     if local_status == "complete":
         result = "ALREADY_COMPLETE"
+    elif stale:
+        result = "STALE_CACHE"
     elif status not in PICKABLE_STATUSES:
         result = "BLOCKED_STATUS"
     elif not allowed:
@@ -505,4 +513,80 @@ def manager_wb_page_v11():
     session["wb_fbs_v11_csrf"] = token
     return Response(MANAGER_PAGE.replace("CSRF_VALUE", json.dumps(token)),
                     mimetype="text/html", headers={"Cache-Control": "no-store"})
+
+
+def sync_new_once(account_id, client):
+    """Fast 30-second discovery; only newly eligible sticker IDs are fetched."""
+    init_schema()
+    orders = client.new_orders()
+    if not orders:
+        return {"received": 0, "updated": 0}
+    ids = [_clean(x.get("id")) for x in orders if x.get("id") is not None]
+    statuses = client.statuses(ids)
+    updated = ingest_orders(account_id, orders, statuses)
+    eligible = [int(oid) for oid in ids if statuses.get(oid) in PICKABLE_STATUSES]
+    if eligible:
+        ingest_stickers(account_id, client.stickers(eligible))
+    return {"received": len(orders), "updated": updated}
+
+
+def sync_status_once(account_id, client):
+    """Refresh active cached orders without touching WB statuses remotely."""
+    from wms import execute, query_all
+    init_schema()
+    ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
+        WHERE account_id=? AND local_status<>'complete'""", (account_id,))]
+    statuses = client.statuses(ids) if ids else {}
+    for oid, status in statuses.items():
+        if status not in PICKABLE_STATUSES and status not in {
+            "new", "cancel", "canceled", "cancelled", "decline"}:
+            status = "unknown"
+        execute("""UPDATE wb_fbs_orders SET wb_status=?,synced_at=?
+            WHERE account_id=? AND order_id=?""",
+            (status, utcnow(), account_id, oid))
+    return len(statuses)
+
+
+def sync_catalog_once(account_id, client):
+    """Six-hour read-only SKU catalog refresh."""
+    init_schema()
+    return ingest_catalog(account_id, client.cards())
+
+
+def worker_loop(account_id, client, stop=None):
+    """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
+        raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
+    intervals = {"new": 30, "status": 60, "catalog": 21600, "full": 86400}
+    last = {key: -float("inf") for key in intervals}
+    while stop is None or not stop.is_set():
+        now = time.monotonic()
+        for name, interval in intervals.items():
+            if now - last[name] < interval:
+                continue
+            last[name] = now
+            try:
+                if name == "new":
+                    sync_new_once(account_id, client)
+                elif name == "status":
+                    sync_status_once(account_id, client)
+                elif name == "catalog" and client.content_token:
+                    sync_catalog_once(account_id, client)
+                elif name == "full":
+                    sync_once(account_id, client, int(time.time()) - 86400 * 14)
+            except Exception as exc:
+                # Avoid leaking WB token or personal data in the log.
+                print(f"WB FBS v1.1 {name} failed: {type(exc).__name__}", flush=True)
+        if stop is not None and stop.wait(1):
+            break
+        if stop is None:
+            time.sleep(1)
+
+
+if __name__ == "__main__":
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
+        raise SystemExit("WB FBS v1.1 worker disabled")
+    worker_loop(os.getenv("WB_FBS_V11_ACCOUNT_ID", "default"),
+                WBClient(os.getenv("WB_API_TOKEN", "").strip(),
+                         os.getenv("WB_CONTENT_TOKEN", "").strip() or None))
 
