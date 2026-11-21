@@ -214,8 +214,14 @@ def ingest_stickers(account_id, stickers, fmt="png"):
                 barcode = _clean(sticker.get("barcode"))
                 if not order_id or not barcode:
                     continue
-                cur.execute(sql("""SELECT 1 FROM wb_fbs_orders
-                        WHERE account_id=? AND order_id=?"""), (account_id, order_id))
+                # Serialize sticker changes with concurrent order verification
+                # and scanning by locking the parent order row first.
+                from wms import DATABASE_URL
+                stmt = """SELECT 1 FROM wb_fbs_orders
+                        WHERE account_id=? AND order_id=?"""
+                if DATABASE_URL:
+                    stmt += " FOR UPDATE"
+                cur.execute(sql(stmt), (account_id, order_id))
                 if not cur.fetchone():
                     continue
                 cur.execute(sql("""INSERT INTO wb_fbs_stickers
@@ -593,6 +599,10 @@ def _sync_status_once_unlocked(account_id, client):
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
         WHERE account_id=? AND local_status<>'complete'""", (account_id,))]
     statuses = client.statuses(ids) if ids else {}
+    # Missing order entries in the WB response cannot silently retain an old
+    # pickable status. Fail closed until a complete status response is obtained.
+    for oid in ids:
+        statuses.setdefault(str(oid), "unknown")
     # Persist authoritative WB status changes before fetching stickers. Even
     # when the sticker endpoint fails, cancellations must already be enforced.
     for oid, status in statuses.items():
