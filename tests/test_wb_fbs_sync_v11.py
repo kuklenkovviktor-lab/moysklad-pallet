@@ -187,18 +187,18 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         with client.session_transaction() as ss:
             ss["employee_id"] = emp
             ss["employee_shift_id"] = shift
-        self.seed()
+        self.seed(barcode="59997040711")
         with patch.dict(os.environ, {"WB_FBS_V11_ENABLED":"1","WB_FBS_V11_ACCOUNT_ID":"a"}):
             record_pending_item(shift,emp,"WRONG","test","test")
             response=client.post("/api/fbs/scan",json={
-                "shift_id":shift,"barcode":"WB-QR-123","product_barcode":"WRONG",
+                "shift_id":shift,"barcode":"*DfgaMEc2","product_barcode":"WRONG",
                 "request_id":str(uuid.uuid4())})
             self.assertEqual(response.status_code,409,response.json)
             self.assertEqual(response.json["reason"],"MISMATCH")
             self.assertTrue(response.json["reset_pending"])
             self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],0)
             record_pending_item(shift,emp,"4601234567890","test","test")
-            payload={"shift_id":shift,"barcode":"WB-QR-123",
+            payload={"shift_id":shift,"barcode":"*DfgaMEc2",
                      "product_barcode":"4601234567890","request_id":str(uuid.uuid4())}
             ok=client.post("/api/fbs/scan",json=payload)
             self.assertEqual(ok.status_code,200,ok.json)
