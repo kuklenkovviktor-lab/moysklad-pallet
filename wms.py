@@ -1457,7 +1457,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
           <a href="/fbs-diagnostics">📶 Тест скорости</a>
           <a href="/ozon-fbo">📦 Ozon FBO</a>
         </div>
-        <a class="exit-btn" href="/attendance/out">🚪 Завершить смену</a>
+        <a class="exit-btn" href="/attendance/exit-scan">🚪 Завершить смену</a>
       </div>
     </div>
   </div>
@@ -4120,7 +4120,7 @@ body .nav a{color:#e0f0ff!important}
   </script>
   <div id="topbar">
     <div class="who"><span id="identity"></span></div>
-    <a href="/attendance/out">🚪 Завершить смену</a>
+    <a href="/attendance/exit-scan">🚪 Завершить смену</a>
   </div>
   <div class="card">
     <div class="stage">

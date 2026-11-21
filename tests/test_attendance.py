@@ -75,8 +75,9 @@ class AttendanceTests(unittest.TestCase):
             "SELECT COUNT(*) FROM attendance_visits WHERE employee_id=?",
             (self.employee_id,))[0],1)
         departure_page=self.client.get("/attendance/out")
-        self.assertIn(b'requestSubmit()',departure_page.data)
-        exit_response=self.client.post("/attendance/out",data={"csrf":csrf})
+        self.assertNotIn(b'requestSubmit()',departure_page.data)
+        self.assertIn('Отсканируй QR ВЫХОД'.encode(), departure_page.data)
+        exit_response=self.client.post("/attendance/out",data={"csrf":csrf,"exit_qr":self.attendance.exit_qr_value()})
         self.assertEqual(exit_response.status_code,303)
         self.assertEqual(exit_response.headers["Location"],"/login?attendance_out=1")
         self.assertEqual(self.client.get("/api/auth/me").status_code,401)
@@ -101,8 +102,9 @@ class AttendanceTests(unittest.TestCase):
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
         csrf=self.token("/attendance/in")
         self.assertEqual(self.client.post("/attendance/in",data={"csrf":csrf}).status_code,303)
+        self.client.get("/attendance/exit-scan")
         with patch("fbs_transactions.event",side_effect=RuntimeError("synthetic failure")):
-            response=self.client.post("/attendance/out",data={"csrf":csrf})
+            response=self.client.post("/attendance/out",data={"csrf":csrf,"exit_qr":self.attendance.exit_qr_value()})
         self.assertEqual(response.status_code,409)
         self.assertIn(b'href="/attendance/out"',response.data)
         self.assertIn(b'href="/"',response.data)
@@ -115,8 +117,8 @@ class AttendanceTests(unittest.TestCase):
         self.login()
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
         csrf=self.token("/attendance/out")
-        response=self.client.post("/attendance/out",data={"csrf":csrf})
-        self.assertEqual(response.status_code,409)
+        response=self.client.post("/attendance/out",data={"csrf":csrf,"exit_qr":self.attendance.exit_qr_value()})
+        self.assertEqual(response.status_code,403)
         self.assertIsNotNone(self.wms.query_one("SELECT id FROM shifts WHERE id=? AND ended_at IS NULL",(shift,)))
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
         with self.client.session_transaction() as sess:
@@ -139,7 +141,7 @@ class AttendanceTests(unittest.TestCase):
         html=next(node.value.value for node in wms_ast.body
                   if isinstance(node,Assign) and any(getattr(t,"id",None)=="FBS_PAGE" for t in node.targets)
                   and isinstance(node.value,Constant))
-        self.assertIn('href="/attendance/out"',html)
+        self.assertIn('href="/attendance/exit-scan"',html)
         self.assertNotIn('href="/exit"',html)
         manager_html=next(node.value.value for node in wms_ast.body
                           if isinstance(node,Assign) and any(getattr(t,"id",None)=="STATS_PAGE" for t in node.targets)
@@ -271,6 +273,34 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(page.status_code,200)
         self.assertEqual(page.data.count(b"data:image/png;base64,"),2)
         self.assertIn(b"#09121e",page.data)
+
+
+    def test_exit_get_and_unproven_posts_preserve_terminal(self):
+        self.login()
+        csrf = self.token("/attendance/in")
+        self.client.post("/attendance/in", data={"csrf": csrf})
+        before = self.wms.query_one("SELECT left_at FROM attendance_visits")
+        for path in ("/attendance/out", "/attendance/exit-scan"):
+            result = self.client.get(path)
+            self.assertEqual(result.status_code, 200)
+            self.assertNotIn(self.attendance.exit_qr_value().encode(), result.data)
+        for code in ("", "https://gritwms.space/attendance/out", "WRONG"):
+            response = self.client.post("/attendance/out", data={"csrf":csrf, "exit_qr":code})
+            self.assertEqual(response.status_code,403)
+        self.assertEqual(self.wms.query_one("SELECT left_at FROM attendance_visits"), before)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess["employee_id"], self.employee_id)
+
+    def test_double_exit_has_one_end_event(self):
+        self.login()
+        csrf = self.token("/attendance/in")
+        self.client.post("/attendance/in", data={"csrf":csrf})
+        self.client.get("/attendance/exit-scan")
+        payload = {"csrf":csrf, "exit_qr":self.attendance.exit_qr_value()}
+        self.assertEqual(self.client.post("/attendance/out", data=payload).status_code,303)
+        self.client.post("/attendance/out", data=payload)
+        self.assertEqual(self.wms.query_one(
+            "SELECT COUNT(*) FROM operation_events WHERE operation_type='shift' AND event_type='end'")[0],1)
 
 if __name__=="__main__":
     unittest.main()

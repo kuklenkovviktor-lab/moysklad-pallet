@@ -1,8 +1,11 @@
 """Attendance journal with two static action QR codes and existing employee badges.
 
-Attendance never starts or closes a production picking shift.
+A validated departure closes the current production shift atomically.
 All data changes are designed for isolated synthetic tests first.
 """
+import hashlib
+import hmac
+import json
 import base64
 import io
 import secrets
@@ -142,6 +145,63 @@ def _format_time(raw):
         return "—"
     return datetime.fromisoformat(raw.replace("Z","+00:00")).astimezone(MSK).strftime("%d.%m %H:%M")
 
+def exit_qr_value():
+    # Bearer capability printed only for a desktop manager. Copying the label
+    # permits reuse; this is the explicitly accepted printed-QR threat model.
+    from wms import WMS_TERMINAL_SECRET
+    digest = hmac.new(WMS_TERMINAL_SECRET, b"attendance-exit-label-v1", hashlib.sha256).hexdigest()
+    return "GRIT-EXIT-V1-" + digest
+
+
+def exit_scan_page():
+    with db_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(sql("SELECT id FROM attendance_visits WHERE employee_id=? AND left_at IS NULL"),
+                    (session["employee_id"],))
+        visit = cur.fetchone()
+        cur.close()
+    session["attendance_exit_visit"] = visit[0] if visit else ""
+    body = """<section class="panel"><h1>Завершение смены</h1>
+<p>Отсканируй QR ВЫХОД</p><p id="result" role="status">Ожидание сканирования</p>
+<input id="scan" aria-label="QR ВЫХОД" autocomplete="off" autofocus>
+<button id="camera" type="button">Камера</button><div id="reader"></div>
+<p><a href="/fbs">Вернуться к работе</a></p></section>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const csrf=CSRF_VALUE,input=document.getElementById('scan'),result=document.getElementById('result');
+let busy=false,scanner=null;
+async function submitExit(code){
+ if(busy||!code.trim())return;
+ busy=true;
+ result.textContent='Проверка QR…';
+ try{
+  const body=new URLSearchParams({csrf,exit_qr:code.trim()});
+  const r=await fetch('/attendance/out',{method:'POST',body,redirect:'follow'});
+  if(r.redirected&&new URL(r.url).pathname==='/login'){
+   try{['onix_employee_id','fbs_shift_id','receipt_id','receipt_name','onix_fbo_pending_scan_v1','onix_fbo_pending_undo_v1'].forEach(k=>localStorage.removeItem(k));sessionStorage.removeItem('openExitQr')}catch(_){}
+   location.replace('/login');return;
+  }
+  result.textContent=r.status===403?'Неверный QR ВЫХОД. Повтори сканирование.':'Выход не записан. Повтори сканирование или вернись к работе.';
+ }catch(_){result.textContent='Нет ответа сервера. Повтори сканирование.'}
+ finally{busy=false;input.value='';input.focus()}
+}
+input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitExit(input.value)}});
+document.getElementById('camera').onclick=async()=>{
+ try{
+  if(scanner)return;
+  scanner=new Html5Qrcode('reader');
+  await scanner.start({facingMode:'environment'},{fps:10,qrbox:220},code=>submitExit(code));
+ }catch(_){scanner=null;result.textContent='Камера недоступна. Разреши доступ или используй сканер.'}
+};
+</script>"""
+    return page("Завершение смены", body.replace("CSRF_VALUE", json.dumps(_token())))
+
+
+@attendance_bp.get("/attendance/exit-scan")
+def exit_scan():
+    return worker_page("out")
+
+
 @attendance_bp.get("/attendance/<action>")
 def worker_page(action):
     if action not in ("in", "out"):
@@ -153,6 +213,8 @@ def worker_page(action):
     person=_staff(emp["id"])
     if not person or not person[5]:
         return page("Отметка недоступна", '<section class="panel"><h1>Учёт посещаемости отключён</h1></section>',403)
+    if action == "out":
+        return exit_scan_page()
     label = "ВХОД" if action=="in" else "ВЫХОД"
     # QR destinations remain GET-safe: the actual attendance write is a
     # same-origin CSRF-protected POST. Do not display an intermediate status page.
@@ -176,6 +238,9 @@ def worker_mark(action):
         return redirect("/login?next=/attendance/"+action)
     if not _csrf_ok(request.form.get("csrf")):
         return Response("Недействительная форма",403)
+    if action == "out" and (not session.get("attendance_exit_visit") or
+            not secrets.compare_digest(request.form.get("exit_qr", ""), exit_qr_value())):
+        return Response("Отсканируй действующий QR ВЫХОД", 403)
     init_attendance_db()
     person=_staff(emp["id"])
     if not person or not person[5]:
@@ -194,6 +259,9 @@ def worker_mark(action):
             cur.execute(sql("""SELECT id FROM attendance_visits WHERE employee_id=?
                 AND left_at IS NULL LIMIT 1"""), (emp["id"],))
             open_visit=cur.fetchone()
+            if action == "out" and open_visit and open_visit[0] != session.get("attendance_exit_visit"):
+                conn.rollback()
+                return Response("Сессия выхода устарела. Открой сканер снова.", 409)
             if action=="in" and open_visit:
                 # Idempotent arrival: never overwrite the original arrival time
                 # or strand a worker on a confirmation/error page after rescan.
@@ -325,7 +393,7 @@ def print_qr():
     sections=[]
     # The action URL is constant; existing badge session identifies the person.
     for action,label in (("in","ВХОД"),("out","ВЫХОД")):
-        qr=qrcode.make("https://gritwms.space/attendance/"+action)
+        qr=qrcode.make(exit_qr_value() if action == "out" else "https://gritwms.space/attendance/in")
         output=io.BytesIO();qr.save(output,format="PNG")
         image="data:image/png;base64,"+base64.b64encode(output.getvalue()).decode("ascii")
         sections.append('<section class="panel attendance-label" style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;margin:12px;padding:12px">'
