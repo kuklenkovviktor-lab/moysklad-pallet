@@ -323,3 +323,115 @@ def sync_once(account_id, client, date_from=None):
         return {"run_id": run_id, "received": received, "updated": updated}
     finally:
         _SYNC_LOCK.release()
+
+
+# Manager-facing control is explicitly disabled until the opt-in flag is set.
+from flask import Blueprint, Response, jsonify, request
+from wms import manager_access, query_one
+
+wb_fbs_v11_bp = Blueprint("wb_fbs_v11", __name__)
+_UI_STATE = {"running": False, "last_error": "", "last_result": None}
+
+
+def _allowed():
+    return os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
+
+
+def _account():
+    return os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+
+
+def _manual_sync():
+    _UI_STATE["running"] = True
+    try:
+        client = WBClient(os.getenv("WB_API_TOKEN", "").strip(),
+                          os.getenv("WB_CONTENT_TOKEN", "").strip() or None)
+        _UI_STATE["last_result"] = sync_once(_account(), client, int(time.time()) - 86400 * 14)
+        _UI_STATE["last_error"] = ""
+    except Exception as exc:
+        # Do not leak token-bearing URLs or WB response bodies to a dashboard.
+        _UI_STATE["last_error"] = type(exc).__name__
+    finally:
+        _UI_STATE["running"] = False
+
+
+@wb_fbs_v11_bp.get("/api/wb-v11/status")
+def manager_wb_status_v11():
+    if not manager_access():
+        return jsonify(error="Только для руководителя"), 403
+    if not _allowed():
+        return jsonify(configured=False, enabled=False), 200
+    init_schema()
+    account = _account()
+    orders = query_one("SELECT COUNT(*) FROM wb_fbs_orders WHERE account_id=?", (account,))[0]
+    missing = query_one("""SELECT COUNT(*) FROM wb_fbs_orders o WHERE o.account_id=?
+        AND NOT EXISTS (SELECT 1 FROM wb_fbs_order_skus s WHERE
+        s.account_id=o.account_id AND s.order_id=o.order_id)""", (account,))[0]
+    stickers = query_one("SELECT COUNT(*) FROM wb_fbs_stickers WHERE account_id=?", (account,))[0]
+    errors = query_one("""SELECT COUNT(*) FROM wb_fbs_scan_events
+        WHERE account_id=? AND result<>'MATCH'""", (account,))[0]
+    last = query_one("""SELECT finished_at,status FROM wb_fbs_sync_runs
+        WHERE account_id=? ORDER BY started_at DESC LIMIT 1""", (account,))
+    return jsonify(enabled=True, configured=bool(os.getenv("WB_API_TOKEN", "").strip()),
+                   orders=orders, missing_skus=missing, stickers=stickers,
+                   rejected_scans=errors, last_sync=(last[0] if last else None),
+                   last_status=(last[1] if last else None),
+                   **dict(_UI_STATE))
+
+
+@wb_fbs_v11_bp.post("/api/wb-v11/sync")
+def manager_wb_sync_v11():
+    if not manager_access():
+        return jsonify(error="Только для руководителя"), 403
+    if not _allowed() or not os.getenv("WB_API_TOKEN", "").strip():
+        return jsonify(error="WB FBS v1.1 отключён или нет API-ключа"), 503
+    if _UI_STATE["running"] or _SYNC_LOCK.locked():
+        return jsonify(running=True), 202
+    threading.Thread(target=_manual_sync, daemon=True, name="wb-fbs-v11-manual").start()
+    return jsonify(running=True), 202
+
+
+MANAGER_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRIT WMS · Wildberries FBS</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#09121e;color:#edf6ff;font-family:system-ui,Segoe UI,sans-serif;padding:30px 16px}
+main{max-width:900px;margin:auto}a{color:#9bcfff;text-decoration:none}
+.card{background:#142337;border:1px solid #2d445a;border-radius:13px;padding:20px;margin:18px 0}
+h1{font-size:25px;margin:20px 0}.metric{display:inline-block;margin:12px 20px 12px 0}
+.metric b{font-size:24px;display:block;color:#e58a34}.muted{color:#a5bacd}
+button{background:#e58a34;border:0;border-radius:8px;padding:12px 18px;font-weight:750;cursor:pointer}
+</style></head><body><main><a href="/manager">← Панель руководителя</a>
+<h1>Интеграции · Wildberries · FBS</h1>
+<div class="card"><p class="muted">Только чтение из WB API. Сканирование: товар → QR WB.</p>
+<div id="stats">Загрузка статуса…</div>
+<button onclick="syncNow()">Синхронизировать сейчас</button>
+<p class="muted" id="message">Никакие WB-статусы и поставки не изменяются.</p></div>
+<script>
+async function refresh(){
+ const r=await fetch('/api/wb-v11/status',{cache:'no-store'});const d=await r.json();
+ if(!r.ok){document.getElementById('stats').textContent=d.error||'Ошибка доступа';return}
+ if(!d.enabled){document.getElementById('stats').textContent='Модуль отключён. Требуется явное разрешение администратора.';return}
+ document.getElementById('stats').innerHTML=
+ ['Заказов','Без SKU','Стикеров','Отклонено сканов'].map((title,i)=>
+ '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
+ '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
+ '; статус: '+(d.last_status||'нет')+'</p>';
+ document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
+}
+async function syncNow(){
+ const r=await fetch('/api/wb-v11/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ const d=await r.json();document.getElementById('message').textContent=d.error||'Синхронизация запущена';
+ refresh();
+}
+refresh();setInterval(refresh,10000);
+</script></main></body></html>"""
+
+
+@wb_fbs_v11_bp.get("/manager/wb-fbs-v11")
+def manager_wb_page_v11():
+    if not manager_access():
+        from flask import redirect
+        return redirect("/manager-login")
+    return Response(MANAGER_PAGE, mimetype="text/html", headers={"Cache-Control": "no-store"})
+
