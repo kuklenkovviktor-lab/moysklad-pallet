@@ -524,7 +524,11 @@ def sync_new_once(account_id, client):
     ids = [_clean(x.get("id")) for x in orders if x.get("id") is not None]
     statuses = client.statuses(ids)
     updated = ingest_orders(account_id, orders, statuses)
-    eligible = [int(oid) for oid in ids if statuses.get(oid) in PICKABLE_STATUSES]
+    from wms import query_all
+    existing = {row[0] for row in query_all(
+        "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
+    eligible = [int(oid) for oid in ids
+                if statuses.get(oid) in PICKABLE_STATUSES and oid not in existing]
     if eligible:
         ingest_stickers(account_id, client.stickers(eligible))
     return {"received": len(orders), "updated": updated}
@@ -537,6 +541,12 @@ def sync_status_once(account_id, client):
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
         WHERE account_id=? AND local_status<>'complete'""", (account_id,))]
     statuses = client.statuses(ids) if ids else {}
+    existing = {row[0] for row in query_all(
+        "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
+    eligible = [int(oid) for oid, status in statuses.items()
+                if status in PICKABLE_STATUSES and oid not in existing]
+    if eligible:
+        ingest_stickers(account_id, client.stickers(eligible))
     for oid, status in statuses.items():
         if status not in PICKABLE_STATUSES and status not in {
             "new", "cancel", "canceled", "cancelled", "decline"}:
