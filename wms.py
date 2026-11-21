@@ -4334,7 +4334,7 @@ def fbs_scan():
         except ValueError:
             return jsonify(error="Неверный номер операции"), 400
     from fbs_transactions import replay, commit_scan
-    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1" or request_id or pdf_picking_active(shift_id, employee["id"]):
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1" and (request_id or pdf_picking_active(shift_id, employee["id"])):
         from wb_qr_codec import canonical_wb_sticker
         barcode = canonical_wb_sticker(barcode)
 
