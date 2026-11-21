@@ -1,5 +1,6 @@
 """Atomic FBS transitions. PostgreSQL serializes per shift; SQLite uses a write transaction."""
 import json
+import os
 from contextlib import contextmanager
 import uuid
 
@@ -69,15 +70,31 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
             raise ValueError('Повторный ШК товара вместо этикетки WB')
         if pending:
             article, name = pending[1] or article, pending[2] or name
-        cur.execute('SELECT 1 FROM pdf_fbs_orders LIMIT 1')
-        if cur.fetchone():
+        v11 = os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
+        if v11:
+            from wb_fbs_sync_v11 import verify_pair
+            account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+            verdict = verify_pair(account, product_barcode, barcode, cursor=cur)
+            if verdict["result"] != "MATCH":
+                raise ValueError("WB FBS: " + verdict["result"])
+            wb_order_id = verdict["order_id"]
+            # Re-read the sticker on the locked order inside this transaction.
+            # Reject a sticker mapping that changed during the first lookup.
+            cur.execute(sql("""SELECT COUNT(*) FROM wb_fbs_stickers
+                WHERE account_id=? AND order_id=? AND barcode=?"""),
+                (account, wb_order_id, barcode))
+            if cur.fetchone()[0] != 1:
+                raise ValueError("WB-стикер изменился во время проверки")
+        else:
+            cur.execute('SELECT 1 FROM pdf_fbs_orders LIMIT 1')
+        if not v11 and cur.fetchone():
             cur.execute(sql('SELECT article,product_barcode FROM pdf_fbs_orders WHERE wb_barcode=?'), (barcode,))
             expected = cur.fetchone()
             if not pending or not expected or expected[1] != product_barcode:
                 raise ValueError('Стикер или товар не соответствует загруженному PDF')
             wb_order_id = 'pdf:' + barcode
             article = expected[0]
-        else:
+        elif not v11:
             from wms import WB_STRICT_MATCHING
             cur.execute(sql('SELECT order_id,article,skus_json FROM wb_orders WHERE wb_barcode=? LIMIT 1'), (barcode,))
             expected = cur.fetchone()
@@ -101,6 +118,12 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
             cur.execute(sql('INSERT INTO fbs_scan_requests (request_id,scan_id,shift_id,employee_id,barcode,product_barcode) VALUES (?,?,?,?,?,?)'),
                         (request_id, scan_id, shift_id, employee_id, barcode, product_barcode))
         cur.execute(sql('DELETE FROM fbs_pending_products WHERE shift_id=? AND employee_id=? AND product_barcode=?'), (shift_id, employee_id, product_barcode))
+        if v11:
+            cur.execute(sql("""UPDATE wb_fbs_orders SET local_status='complete'
+                WHERE account_id=? AND order_id=? AND local_status<>'complete'"""),
+                (account, wb_order_id))
+            if cur.rowcount != 1:
+                raise ValueError("WB-заказ уже подтверждён или изменился")
         event(cur, employee_id, shift_id, 'fbs', 'scan', barcode, 1, (article or product_barcode) + '|' + scan_type, article or None, name or None)
     return False
 
