@@ -256,8 +256,8 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     update cannot slip between verification and completed-scan commit.
     """
     product = _clean(product_barcode)
-    from wb_qr_codec import canonical_wb_sticker
-    sticker = canonical_wb_sticker(sticker_barcode)
+    # API returns the exact 9-character QR value; match raw scanned bytes.
+    sticker = _clean(sticker_barcode)
     if not product:
         return {"result": "PRODUCT_REQUIRED", "order_id": None, "expected_skus": []}
     if not sticker:
