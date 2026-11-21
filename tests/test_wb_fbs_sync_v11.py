@@ -62,6 +62,14 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", "*DfgaMEc2")["result"], "MISMATCH")
         self.assertEqual(self.mod.verify_pair("a", "4601234567890", "59997040711")["result"], "UNKNOWN_STICKER")
 
+    def test_russian_hid_qr_matches_api_raw_qr(self):
+        self.seed(barcode="*DfgaMEc2")
+        raw = "*ВапфЬУс2"
+        self.assertEqual(self.mod.normalize_api_sticker(raw), "*DfgaMEc2")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", raw)["result"], "MATCH")
+        self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
+        self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
+
     def test_product_only_never_completes(self):
         self.seed()
         self.assertEqual(self.mod.verify_pair("a", "4601234567890", "")["result"], "STICKER_REQUIRED")
@@ -189,14 +197,14 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         with patch.dict(os.environ, {"WB_FBS_V11_ENABLED":"1","WB_FBS_V11_ACCOUNT_ID":"a"}):
             record_pending_item(shift,emp,"WRONG","test","test")
             response=client.post("/api/fbs/scan",json={
-                "shift_id":shift,"barcode":"*DfgaMEc2","product_barcode":"WRONG",
+                "shift_id":shift,"barcode":"*ВапфЬУс2","product_barcode":"WRONG",
                 "request_id":str(uuid.uuid4())})
             self.assertEqual(response.status_code,409,response.json)
             self.assertEqual(response.json["reason"],"MISMATCH")
             self.assertTrue(response.json["reset_pending"])
             self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],0)
             record_pending_item(shift,emp,"4601234567890","test","test")
-            payload={"shift_id":shift,"barcode":"*DfgaMEc2",
+            payload={"shift_id":shift,"barcode":"*ВапфЬУс2",
                      "product_barcode":"4601234567890","request_id":str(uuid.uuid4())}
             ok=client.post("/api/fbs/scan",json=payload)
             self.assertEqual(ok.status_code,200,ok.json)
