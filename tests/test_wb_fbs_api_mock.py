@@ -413,6 +413,48 @@ class WBApiMockTests(unittest.TestCase):
         http.assert_consumed(self)
 
 
+    def test_postgres_advisory_lock_is_released_after_success(self):
+        from contextlib import contextmanager
+        from unittest.mock import Mock
+        cur = Mock()
+        cur.fetchone.side_effect = [(True,), (True,)]
+        conn = Mock()
+        conn.cursor.return_value = cur
+        @contextmanager
+        def fake_db():
+            yield conn
+        with patch.object(self.wms, "DATABASE_URL", "postgresql://synthetic-do-not-connect"):
+            with patch.object(self.sync, "db_connect", fake_db):
+                with self.sync._exclusive_sync(ACCOUNT):
+                    pass
+        calls = [x.args[0] for x in cur.execute.call_args_list]
+        self.assertTrue(any("pg_try_advisory_lock" in x for x in calls))
+        self.assertTrue(any("pg_advisory_unlock" in x for x in calls))
+        self.assertFalse(self.sync._SYNC_LOCK.locked())
+
+    def test_status_api_contract_posts_numeric_order_ids_and_raw_token(self):
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": [
+                {"id": 84500123, "supplierStatus": "confirm", "wbStatus": "waiting"}]})),
+        ])
+        self.assertEqual(client.statuses(["84500123"]), {"84500123": "confirm"})
+        method, url, opts = http.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(opts["json"]["orders"], [84500123])
+        self.assertEqual(opts["headers"]["Authorization"], "synthetic-token")
+        http.assert_consumed(self)
+
+    def test_sticker_api_contract_uses_58_by_40_and_barcode_field(self):
+        client, http = self.client([
+            ("POST", "/api/v3/orders/stickers", response(payload={"stickers": [sticker()]})),
+        ])
+        rows = client.stickers(["84500123"])
+        self.assertEqual(rows[0]["barcode"], STICKER)
+        opts = http.calls[0][2]
+        self.assertEqual(opts["params"], {"type": "png", "width": 58, "height": 40})
+        self.assertEqual(opts["json"], {"orders": [84500123]})
+        http.assert_consumed(self)
+
 
 if __name__ == "__main__":
     unittest.main()
