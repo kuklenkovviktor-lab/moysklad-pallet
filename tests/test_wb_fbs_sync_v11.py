@@ -35,6 +35,9 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         spec2.loader.exec_module(self.mod)
         self.wms = wms
         self.mod.init_schema()
+        module_ref = patch.dict(sys.modules, {"wb_fbs_sync_v11": self.mod})
+        module_ref.start()
+        self.addCleanup(module_ref.stop)
 
     def order(self, oid="123", skus=None, chrt="700", status="confirm"):
         return {"id": int(oid), "nmId": 400, "chrtId": int(chrt),
@@ -131,6 +134,71 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.seed()
         self.assertEqual(self.wms.query_one("SELECT count(*) FROM wb_fbs_orders")[0], 1)
         self.assertEqual(self.wms.query_one("SELECT count(*) FROM wb_fbs_stickers")[0], 1)
+
+
+    def test_catalog_fallback_exact_nm_and_chrt(self):
+        self.mod.ingest_catalog("a", [{
+            "nmID": 400,
+            "sizes": [
+                {"chrtID": 700, "skus": ["4601234567890"]},
+                {"chrtID": 701, "skus": ["9999999999999"]},
+            ]}])
+        self.seed(order=self.order(skus=[]))
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "WB-QR-123")["result"], "MATCH")
+        self.assertEqual(self.mod.verify_pair("a", "9999999999999", "WB-QR-123")["result"], "MISMATCH")
+
+    def test_catalog_missing_variant_never_falls_back_to_nm_only(self):
+        self.mod.ingest_catalog("a", [{"nmID":400,"sizes":[{"chrtID":701,"skus":["4601234567890"]}]}])
+        self.seed(order=self.order(skus=[],chrt="700"))
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "WB-QR-123")["result"], "MAPPING_ERROR")
+
+    def test_local_state_complete_prevents_repeat(self):
+        self.seed()
+        self.wms.execute("""UPDATE wb_fbs_orders SET local_status='complete'
+            WHERE account_id=? AND order_id=?""", ("a","123"))
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "WB-QR-123")["result"], "ALREADY_COMPLETE")
+
+    def test_existing_fbs_route_rejects_wrong_product_then_accepts_new_pair(self):
+        from flask import Flask
+        from fbs_skip_authorization import record_pending_item
+        self.wms.init_wms_db()
+        emp = self.wms.query_one("SELECT id FROM employees WHERE active=1 AND role!='manager' LIMIT 1")[0]
+        shift = str(uuid.uuid4())
+        stamp = self.wms.now_iso()
+        self.wms.execute("INSERT INTO shifts (id,employee_id,started_at) VALUES(?,?,?)", (shift,emp,stamp))
+        self.wms.execute("""INSERT INTO activities
+            (id,shift_id,employee_id,activity_type,started_at) VALUES(?,?,?,?,?)""",
+            (str(uuid.uuid4()),shift,emp,"picking",stamp))
+        app = Flask(__name__)
+        app.secret_key = "synthetic-session"
+        app.testing = True
+        app.register_blueprint(self.wms.wms_bp)
+        client = app.test_client()
+        with client.session_transaction() as ss:
+            ss["employee_id"] = emp
+            ss["employee_shift_id"] = shift
+        self.seed()
+        with patch.dict(os.environ, {"WB_FBS_V11_ENABLED":"1","WB_FBS_V11_ACCOUNT_ID":"a"}):
+            record_pending_item(shift,emp,"WRONG","test","test")
+            response=client.post("/api/fbs/scan",json={
+                "shift_id":shift,"barcode":"WB-QR-123","product_barcode":"WRONG",
+                "request_id":str(uuid.uuid4())})
+            self.assertEqual(response.status_code,409,response.json)
+            self.assertEqual(response.json["reason"],"MISMATCH")
+            self.assertTrue(response.json["reset_pending"])
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],0)
+            record_pending_item(shift,emp,"4601234567890","test","test")
+            payload={"shift_id":shift,"barcode":"WB-QR-123",
+                     "product_barcode":"4601234567890","request_id":str(uuid.uuid4())}
+            ok=client.post("/api/fbs/scan",json=payload)
+            self.assertEqual(ok.status_code,200,ok.json)
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],1)
+            self.assertEqual(self.wms.query_one(
+                "SELECT local_status FROM wb_fbs_orders WHERE order_id='123'")[0],"complete")
+            retry=client.post("/api/fbs/scan",json=payload)
+            self.assertEqual(retry.status_code,200,retry.json)
+            self.assertTrue(retry.json["replayed"])
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],1)
 
     def test_statuses_reject_failed_auth_without_retry(self):
         class Fake:
