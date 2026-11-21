@@ -298,5 +298,121 @@ class WBApiMockTests(unittest.TestCase):
         http.assert_consumed(self)
 
 
+    def test_missing_status_is_fail_closed_in_full_sync(self):
+        """A partial WB statuses response must not inherit confirm from order snapshot."""
+        self.seed()
+        client, http = self.client([
+            ("GET", "/api/v3/orders", response(payload={"orders": [
+                {**order(), "status": "confirm"}], "next": 0})),
+            ("GET", "/api/v3/orders/new", response(payload={"orders": []})),
+            ("POST", "/api/v3/orders/status", response(payload={"orders": []})),
+        ])
+        self.sync.sync_once(ACCOUNT, client)
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+        self.assertEqual(self.wms.query_one(
+            "SELECT wb_status FROM wb_fbs_orders"), ("unknown",))
+        http.assert_consumed(self)
+
+    def test_missing_status_is_fail_closed_in_incremental_sync(self):
+        self.seed()
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": []})),
+        ])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+        http.assert_consumed(self)
+
+    def test_expired_cache_rejects_even_correct_item_and_sticker(self):
+        self.seed()
+        self.wms.execute("UPDATE wb_fbs_orders SET synced_at=? WHERE account_id=?",
+                         ("2020-01-01T00:00:00+00:00", ACCOUNT))
+        self.assertEqual(self.verdict(), "STALE_CACHE")
+        self.assertEqual(self.wms.query_one(
+            "SELECT local_status FROM wb_fbs_orders"), ("pending",))
+
+    def test_bad_cache_timestamp_is_not_treated_as_fresh(self):
+        self.seed()
+        self.wms.execute("UPDATE wb_fbs_orders SET synced_at=? WHERE account_id=?",
+                         ("not-a-timestamp", ACCOUNT))
+        self.assertEqual(self.verdict(), "STALE_CACHE")
+
+    def test_account_cannot_reuse_another_accounts_sticker(self):
+        self.seed()
+        self.assertEqual(self.sync.verify_pair("another-seller", SKU, STICKER)["result"],
+                         "UNKNOWN_STICKER")
+
+    def test_wrong_product_with_matching_article_is_still_rejected(self):
+        self.seed()
+        self.assertEqual(
+            self.sync.verify_pair(ACCOUNT, "9999999999999", STICKER)["result"], "MISMATCH")
+
+    def test_without_scanned_product_fails_before_sticker(self):
+        self.seed()
+        self.assertEqual(
+            self.sync.verify_pair(ACCOUNT, "", STICKER)["result"], "PRODUCT_REQUIRED")
+
+    def test_without_scanned_sticker_fails_before_confirmation(self):
+        self.seed()
+        self.assertEqual(
+            self.sync.verify_pair(ACCOUNT, SKU, "")["result"], "STICKER_REQUIRED")
+
+    def test_same_process_lock_rejects_second_sync(self):
+        from unittest.mock import Mock
+        self.seed()
+        assert self.sync._SYNC_LOCK.acquire(blocking=False)
+        try:
+            client = Mock()
+            with self.assertRaises(RuntimeError):
+                self.sync.sync_status_once(ACCOUNT, client)
+            client.statuses.assert_not_called()
+        finally:
+            self.sync._SYNC_LOCK.release()
+
+    def test_postgres_lock_conflict_prevents_http_work(self):
+        """Simulate pg_try_advisory_lock(False) with a fake pooled connection."""
+        from contextlib import contextmanager
+        from unittest.mock import Mock
+        self.seed()
+        cursor = Mock()
+        cursor.fetchone.return_value = (False,)
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        @contextmanager
+        def db():
+            yield connection
+        client = Mock()
+        with patch.object(self.wms, "DATABASE_URL", "postgresql://synthetic-do-not-connect"):
+            with patch.object(self.sync, "db_connect", db):
+                with self.assertRaises(RuntimeError):
+                    self.sync.sync_status_once(ACCOUNT, client)
+        client.statuses.assert_not_called()
+        self.assertTrue(cursor.close.called)
+        self.assertTrue(cursor.execute.called)
+        self.assertIn("pg_try_advisory_lock", cursor.execute.call_args_list[0].args[0])
+
+    def test_verify_pair_uses_caller_transaction_cursor(self):
+        self.seed()
+        with self.wms.db_connect() as conn:
+            cur = conn.cursor()
+            self.assertEqual(
+                self.sync.verify_pair(ACCOUNT, SKU, STICKER, cursor=cur)["result"],
+                "MATCH")
+            cur.execute("SELECT 1")
+            self.assertEqual(cur.fetchone()[0], 1)
+            cur.close()
+
+    def test_concurrent_status_cancellation_blocks_later_scan(self):
+        self.seed()
+        self.assertEqual(self.verdict(), "MATCH")
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(
+                payload={"orders": [{"id": 84500123, "supplierStatus": "cancel"}]}))
+        ])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+        http.assert_consumed(self)
+
+
+
 if __name__ == "__main__":
     unittest.main()
