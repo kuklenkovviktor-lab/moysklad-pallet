@@ -195,7 +195,9 @@ def worker_mark(action):
                 AND left_at IS NULL LIMIT 1"""), (emp["id"],))
             open_visit=cur.fetchone()
             if action=="in" and open_visit:
-                message,status="Приход уже отмечен",409
+                # Idempotent arrival: never overwrite the original arrival time
+                # or strand a worker on a confirmation/error page after rescan.
+                message,status="Приход уже отмечен",200
             elif action=="out" and not open_visit:
                 message,status="Нет открытого прихода, обратитесь к руководителю",409
             elif action=="in":
@@ -235,8 +237,12 @@ def worker_mark(action):
         # Entry is already persisted at this point. Go straight to GRIT home.
         return redirect("/", code=303)
     # Errors must remain visible: never pretend that a failed scan succeeded.
+    # A genuine failure must not be silently acknowledged. Make the page
+    # recoverable so a terminal never becomes a dead end.
+    fallback = ('<a class="grit-nav-pill" href="/attendance/'+action+'">Повторить</a> '
+                '<a class="grit-nav-pill" href="/">На главную</a>')
     return page("Посещаемость",'<section class="panel"><h1>'+escape(message)
-                +'</h1><p>'+escape(person[1])+'</p></section>',status)
+                +'</h1><p>'+escape(person[1])+'</p>'+fallback+'</section>',status)
 
 @attendance_bp.get("/manager/attendance")
 def journal():
