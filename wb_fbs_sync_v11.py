@@ -541,12 +541,8 @@ def sync_status_once(account_id, client):
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
         WHERE account_id=? AND local_status<>'complete'""", (account_id,))]
     statuses = client.statuses(ids) if ids else {}
-    existing = {row[0] for row in query_all(
-        "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
-    eligible = [int(oid) for oid, status in statuses.items()
-                if status in PICKABLE_STATUSES and oid not in existing]
-    if eligible:
-        ingest_stickers(account_id, client.stickers(eligible))
+    # Persist authoritative WB status changes before fetching stickers. Even
+    # when the sticker endpoint fails, cancellations must already be enforced.
     for oid, status in statuses.items():
         if status not in PICKABLE_STATUSES and status not in {
             "new", "cancel", "canceled", "cancelled", "decline"}:
@@ -554,6 +550,12 @@ def sync_status_once(account_id, client):
         execute("""UPDATE wb_fbs_orders SET wb_status=?,synced_at=?
             WHERE account_id=? AND order_id=?""",
             (status, utcnow(), account_id, oid))
+    existing = {row[0] for row in query_all(
+        "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
+    eligible = [int(oid) for oid, status in statuses.items()
+                if status in PICKABLE_STATUSES and oid not in existing]
+    if eligible:
+        ingest_stickers(account_id, client.stickers(eligible))
     return len(statuses)
 
 
