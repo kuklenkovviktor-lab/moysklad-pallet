@@ -71,3 +71,21 @@ No changes to live PostgreSQL schema or warehouse data should occur during testi
 New HTTP mock cases cover cancellation, status changes, sticker replacement, 401/403, 429, 5xx, timeout, cache retention, missing status and lock contention.
 
 **Test gate not yet confirmed after these audit changes.** Run isolated Docker verification before merging. Physical scanner/QR identity is an explicit remaining release gate.
+
+## Disposable PostgreSQL concurrency and QR gates
+
+Use only an isolated checkout of PR 168 on HOSTKEY. The script refuses inherited DATABASE_URL and WB tokens, creates an internal Docker network and a fresh PostgreSQL 17 container. No production networks or database volumes are attached. Resources are removed by an EXIT trap.
+
+    cd /root/grit-wb-v11-check
+    git pull --ff-only origin feature/wb-fbs-sync-v11-20261121
+    env -u DATABASE_URL -u WB_API_TOKEN -u WB_CONTENT_TOKEN bash deploy/verify_wb_fbs_pg_isolated.sh
+
+The test creates 10,000 fake WB orders, 10 synthetic terminal shifts and 1,000 successful atomic commits. It measures elapsed/average/P95 latency, rejects concurrent double-counting, rejects wrong SKU and canceled orders, checks real PostgreSQL advisory locks between Python processes and asserts local lookup sends zero WB network traffic. This is a real PostgreSQL database test, but not a full mobile-device HTTP test.
+
+Offline QR equality comparator test:
+
+    python deploy/verify_wb_fbs_qr_contract.py --synthetic
+
+The QR synthetic test proves only that our comparison rejects altered, empty or mismatched strings. A real QR/API match is NOT proved without authorized, non-employer paired samples of the machine-read sticker QR payload and the same order's API barcode field. Optional fixture JSON: samples array of {api_barcode, scanner_value}; run with --fixture <path> locally. The script never calls WB or prints actual order IDs.
+
+Do not enable WB_FBS_V11_ENABLED=1 or declare real QR integration PASS until the authorized QR sample is independently verified.
