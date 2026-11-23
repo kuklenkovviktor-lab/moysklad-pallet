@@ -86,7 +86,7 @@ class WBFBSSyncV11Tests(unittest.TestCase):
     def test_aim_prefix_with_russian_hid_matches_api_qr(self):
         self.seed(barcode="*DfgaMEc2")
         self.assertEqual(
-            self.mod.normalize_api_sticker("  ]Q3;ВапфЬУс2\\n"), "*DfgaMEc2"
+            self.mod.normalize_api_sticker("  ]Q3;ВапфЬУс2\n"), "*DfgaMEc2"
         )
         self.assertEqual(
             self.mod.verify_pair("a", "4601234567890", "]Q3;ВапфЬУс2")["result"], "MATCH"
