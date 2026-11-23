@@ -104,6 +104,11 @@ class UnpickedManagerTests(unittest.TestCase):
                 self.assertEqual(module._read_groups("default","complete","",1)[1],
                                  sum(1 for i in range(125) if i%7==0))
                 self.assertEqual(module._read_groups("default","all","GRAFIT",1)[1],20)
+                self.assertEqual(module._read_groups("default","all","952_OTVODKA",1)[1],105)
+                self.assertEqual(module._read_groups("default","all","952%OTVODKA",1)[1],0)
+                self.assertEqual(module._read_page("default","all","952_OTVODKA",1)[0],105)
+                self.assertEqual(module._read_page("default","all","952%OTVODKA",1)[0],0)
+                self.assertEqual(module._search_pattern("a_b%c!d"), "%a!_b!%c!!d%")
                 self.assertEqual(module._read_groups("default","all","nothing",1)[1],0)
 
     def test_groups_api_manager_access(self):
