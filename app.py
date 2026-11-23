@@ -466,6 +466,7 @@ def require_employee_login():
         "/api/manager/integrations/moysklad/check",
         "/api/manager/integrations/wildberries/check",
         "/api/manager/integrations/wildberries/assembly-plan",
+        "/api/manager/wb-fbs/picking-queue",
         "/api/manager/integrations/wildberries/history",
         "/manager/integrations/wildberries/history",
         "/manager/integrations/lab",
