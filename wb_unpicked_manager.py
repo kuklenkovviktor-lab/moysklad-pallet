@@ -43,7 +43,7 @@ def _read_page(account, status, search, page):
         condition += " AND o.wb_status=?"
         terms.append(status)
     if search:
-        condition += """ AND (LOWER(o.seller_article) LIKE ?
+        condition += """ AND (LOWER(o.nm_id) LIKE ? OR LOWER(o.seller_article) LIKE ?
             OR o.order_id LIKE ?
             OR EXISTS (SELECT 1 FROM wb_fbs_order_skus ss
               WHERE ss.account_id=o.account_id AND ss.order_id=o.order_id
@@ -51,7 +51,7 @@ def _read_page(account, status, search, page):
         term = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         # Escaped wildcards for predictable literal search across SQLite / PG.
         condition = condition.replace("LIKE ?", "LIKE ? ESCAPE '\\'")
-        terms.extend([term, term, term])
+        terms.extend([term, term, term, term])
     count = query_one("SELECT COUNT(*) " + _orders_sql(condition), tuple(terms))
     total = int(count[0] or 0)
     ids = query_all("""SELECT o.order_id """ + _orders_sql(condition) +
@@ -239,8 +239,8 @@ th{color:#adc4d7;font-size:12px}tr:hover td{background:#1b3147}
 <button id="print" disabled>Печать WB 58×40 (0)</button>
 <span class="muted" id="message" role="status"></span>
 </div>
-<div class="scroll"><table><thead><tr><th></th><th>Артикул WB</th><th>ШК товара</th><th>Заказ WB</th><th>Статус</th><th>Стикер</th></tr></thead>
-<tbody id="rows"><tr><td colspan="6">Загрузка…</td></tr></tbody></table></div>
+<div class="scroll"><table><thead><tr><th></th><th>Артикул WB (nmID)</th><th>Артикул продавца</th><th>ШК товара</th><th>Заказ WB</th><th>Статус</th><th>Стикер</th></tr></thead>
+<tbody id="rows"><tr><td colspan="7">Загрузка…</td></tr></tbody></table></div>
 <div class="pages"><button class="secondary" id="prev">← Назад</button><span id="page">1</span><button class="secondary" id="next">Далее →</button></div>
 <p class="hint">Печать не закрывает заказы, не меняет их статус в WB и не увеличивает выработку сборщиков. Доступность оригинальных стикеров зависит от WB API.</p>
 </div></main>
@@ -257,7 +257,7 @@ function updateButtons(){
 }
 async function load(){
  const call=++serial;selected.clear();updateButtons();
- $('rows').innerHTML='<tr><td colspan="6">Загрузка…</td></tr>';
+ $('rows').innerHTML='<tr><td colspan="7">Загрузка…</td></tr>';
  const p=new URLSearchParams({page:String(page),status:$('status').value,q:$('query').value.trim()});
  try{
   const r=await fetch('/api/manager/wb-fbs/unpicked?'+p.toString(),{cache:'no-store'});
@@ -268,10 +268,10 @@ async function load(){
   $('summary').textContent='Найдено заказов: '+total+' · На странице: '+rows.length;
   $('page').textContent=page+' / '+Math.max(1,Math.ceil(total/100));
   $('prev').disabled=page===1;$('next').disabled=page*100>=total;
-  $('rows').innerHTML=rows.length?rows.map(x=>'<tr><td><input type="checkbox" class="pick" data-id="'+esc(x.order_id)+'" aria-label="Выбрать заказ '+esc(x.order_id)+'"></td><td><b>'+esc(x.seller_article||'—')+'</b></td><td class="code">'+esc(x.product_barcodes.join(', ')||'Нет ШК')+'</td><td class="code">'+esc(x.order_id)+'</td><td class="'+(x.wb_status==='complete'?'status':'ok')+'">'+(x.wb_status==='complete'?'В доставке':'На сборке')+'</td><td>'+(x.sticker_available?'Код получен':'Запросим у WB')+'</td></tr>').join('')
-   :'<tr><td colspan="6">Несобранных заказов по фильтру нет</td></tr>';
+  $('rows').innerHTML=rows.length?rows.map(x=>'<tr><td><input type="checkbox" class="pick" data-id="'+esc(x.order_id)+'" aria-label="Выбрать заказ '+esc(x.order_id)+'"></td><td><b>'+esc(x.nm_id||'—')+'</b></td><td class="code">'+esc(x.seller_article||'—')+'</td><td class="code">'+esc(x.product_barcodes.join(', ')||'Нет ШК')+'</td><td class="code">'+esc(x.order_id)+'</td><td class="'+(x.wb_status==='complete'?'status':'ok')+'">'+(x.wb_status==='complete'?'В доставке':'На сборке')+'</td><td>'+(x.sticker_available?'Код получен':'Запросим у WB')+'</td></tr>').join('')
+   :'<tr><td colspan="7">Несобранных заказов по фильтру нет</td></tr>';
   $('message').textContent='';
- }catch(e){if(call===serial){$('rows').innerHTML='<tr><td colspan="6" class="error">'+esc(e.message)+'</td></tr>';$('summary').textContent='Ошибка';}}
+ }catch(e){if(call===serial){$('rows').innerHTML='<tr><td colspan="7" class="error">'+esc(e.message)+'</td></tr>';$('summary').textContent='Ошибка';}}
  updateButtons();
 }
 $('rows').addEventListener('change',e=>{
