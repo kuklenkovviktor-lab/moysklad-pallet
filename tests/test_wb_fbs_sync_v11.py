@@ -70,6 +70,40 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
         self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
 
+    def test_scanner_aim_prefix_matches_exact_api_qr(self):
+        self.seed(barcode="*DfgaMEc2")
+        for suffix in ("0", "3", "9"):
+            with self.subTest(aim=suffix):
+                raw = "]Q" + suffix + "*DfgaMEc2"
+                self.assertEqual(self.mod.normalize_api_sticker(raw), "*DfgaMEc2")
+                self.assertEqual(
+                    self.mod.verify_pair("a", "4601234567890", raw)["result"], "MATCH"
+                )
+        self.assertEqual(
+            self.mod.verify_pair("a", "WRONG", "]Q3*DfgaMEc2")["result"], "MISMATCH"
+        )
+
+    def test_aim_prefix_with_russian_hid_matches_api_qr(self):
+        self.seed(barcode="*DfgaMEc2")
+        self.assertEqual(
+            self.mod.normalize_api_sticker("  ]Q3;ВапфЬУс2\n"), "*DfgaMEc2"
+        )
+        self.assertEqual(
+            self.mod.verify_pair("a", "4601234567890", "]Q3;ВапфЬУс2")["result"], "MATCH"
+        )
+
+    def test_invalid_aim_prefix_does_not_fabricate_sticker(self):
+        self.seed(barcode="*DfgaMEc2")
+        invalid = ("]Q3BAD", "]Q3*bad!", "]Q3*DfgaMEc2junk",
+                   "]Qx*DfgaMEc2", "]Q3WB-QR-123", "4601234567890")
+        for raw in invalid:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.mod.normalize_api_sticker(raw), raw)
+                self.assertEqual(
+                    self.mod.verify_pair("a", "4601234567890", raw)["result"],
+                    "UNKNOWN_STICKER",
+                )
+
     def test_confirmed_order_stays_pickable_after_delivery(self):
         self.seed()
         self.assertIsNotNone(self.mod.accepted_product("a", "4601234567890"))
@@ -257,6 +291,52 @@ class WBFBSSyncV11Tests(unittest.TestCase):
             self.assertEqual(retry.status_code,200,retry.json)
             self.assertTrue(retry.json["replayed"])
             self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],1)
+
+    def test_fbs_scan_route_accepts_aim_prefixed_api_qr(self):
+        from flask import Flask
+        from fbs_skip_authorization import record_pending_item
+        self.wms.init_wms_db()
+        emp = self.wms.query_one(
+            "SELECT id FROM employees WHERE active=1 AND role!='manager' LIMIT 1"
+        )[0]
+        shift = str(uuid.uuid4())
+        stamp = self.wms.now_iso()
+        self.wms.execute(
+            "INSERT INTO shifts (id,employee_id,started_at) VALUES(?,?,?)",
+            (shift, emp, stamp),
+        )
+        self.wms.execute(
+            """INSERT INTO activities
+            (id,shift_id,employee_id,activity_type,started_at)
+            VALUES(?,?,?,?,?)""",
+            (str(uuid.uuid4()), shift, emp, "picking", stamp),
+        )
+        app = __import__("flask").Flask(__name__)
+        app.secret_key = "synthetic-session"
+        app.testing = True
+        app.register_blueprint(self.wms.wms_bp)
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess["employee_id"] = emp
+            sess["employee_shift_id"] = shift
+        self.seed(barcode="*DfgaMEc2")
+        with patch.dict(os.environ, {
+            "WB_FBS_V11_ENABLED": "1", "WB_FBS_V11_ACCOUNT_ID": "a"
+        }):
+            record_pending_item(shift, emp, "4601234567890", "test", "test")
+            response = client.post("/api/fbs/scan", json={
+                "shift_id": shift,
+                "barcode": "]Q3*DfgaMEc2",
+                "product_barcode": "4601234567890",
+                "request_id": str(uuid.uuid4()),
+            })
+            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(self.wms.query_one(
+                "SELECT COUNT(*) FROM scans"
+            )[0], 1)
+            self.assertEqual(self.wms.query_one(
+                "SELECT local_status FROM wb_fbs_orders WHERE order_id='123'"
+            )[0], "complete")
 
     def test_statuses_reject_failed_auth_without_retry(self):
         class Fake:
