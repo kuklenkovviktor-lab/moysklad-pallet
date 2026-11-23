@@ -20,8 +20,8 @@ from wms import db_connect, sql
 
 MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
 CONTENT_API = "https://content-api.wildberries.ru"
-# A WB sticker may be available for a shipped order. That does NOT make the
-# order eligible for a new picking scan.
+# WB delivery alone does not finish GRIT picking. Orders must have been
+# observed in confirm and must not be complete locally or cancelled.
 PICKABLE_STATUSES = frozenset({"confirm", "complete"})
 STICKER_AVAILABLE_STATUSES = frozenset({"confirm", "complete"})
 BLOCKED_WB_STATUSES = frozenset({
@@ -655,10 +655,9 @@ def _sync_status_once_unlocked(account_id, client):
     """Refresh active cached orders without touching WB statuses remotely."""
     from wms import execute, query_all
     init_schema()
-    # Keep each 30-second cycle bounded: refresh all known NEW/CONFIRM orders
-    # (including those created earlier), plus other recently created orders.
-    # Previously this scanned all 14-day history, making 30-second updates
-    # impossible on a busy FBS account.
+    # Refresh NEW/CONFIRM orders, admitted unassembled deliveries even after
+    # the recent window, plus other recently created orders. Do not sync the
+    # entire 14-day history every 30 seconds.
     recent_cutoff = datetime.fromtimestamp(
         time.time() - 2 * 86400, timezone.utc).isoformat()
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
