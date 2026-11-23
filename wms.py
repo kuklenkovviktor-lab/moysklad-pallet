@@ -2162,7 +2162,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 
  <div class="kpis">
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-package"></use></svg><div class="l">WB FBS собрано сегодня</div></div><div class="v" id="todayOrders">0</div></div>
-  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-target"></use></svg><div class="l">Осталось по плану</div></div><div class="v" id="remaining">—</div></div>
+  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-target"></use></svg><div class="l">Осталось собрать</div></div><div class="v" id="remaining">—</div></div>
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-download"></use></svg><div class="l">Приёмка сегодня, шт.</div></div><div class="v" id="receivingUnits">0</div></div>
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-alert"></use></svg><div class="l">Отклонения сегодня</div></div><div class="v" id="deviationCount">0</div></div>
  </div>
@@ -2290,41 +2290,35 @@ function renderProgress(done){
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
+ const editor=document.querySelector('.plan-edit');
  try{
-  const response=await fetchWithTimeout('/api/manager/integrations/wildberries/assembly-plan',{cache:'no-store'},5000);
+  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
+  if(response.status===403){location.href='/manager-login';return}
   if(!response.ok)throw Error('HTTP '+response.status);
   const result=await response.json();
-  if(result.state==='connected'&&Number.isInteger(result.total_units)&&
-     Number.isInteger(result.grit_picked_on_assembly)&&Number.isInteger(result.remaining_units)){
-   wbAssemblyCount=result.total_units;
-   const total=result.total_units,done=result.grit_picked_on_assembly,remaining=result.remaining_units;
-   const percent=total?Math.min(100,100*done/total):100;
-   document.getElementById('remaining').textContent=remaining;
-   document.getElementById('progressDone').textContent=done;
-   document.getElementById('progressPlan').textContent='/ '+total+' ед. WB на сборке';
-   document.getElementById('progressBar').style.width=percent.toFixed(1)+'%';
-   document.getElementById('progressText').textContent='WB · осталось '+remaining+' товаров · подтверждено в GRIT '+done+
-    ' · '+percent.toFixed(1)+'%';
-   info.textContent='WB · На сборке: '+total+' товарных единиц · обновлено '+
-     new Date(result.checked_at).toLocaleTimeString('ru-RU')+
-     '. Считаются только совпавшие ID заказов и ШК.';
-  }else{
-   wbAssemblyCount=null;
-   currentPlan=Number(document.getElementById('planInput').value||0);
-   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-   info.textContent='WB · На сборке: '+(result.state==='disabled'?'автоподсчёт выключен':
-     result.state==='unconfigured'?'ключ не настроен':
-     result.state==='syncing'?'синхронизация WB, проверяем заказы…':
-     result.state==='error'?'ошибка WB: '+String(result.details||'неизвестная ошибка'):'данные недоступны');
+  if(result.state!=='connected'||!Number.isInteger(result.remaining_orders)||
+     !Number.isInteger(result.confirm_orders)||!Number.isInteger(result.delivery_orders)){
+   throw Error('Очередь WB недоступна');
   }
+  wbAssemblyCount=result.remaining_orders;
+  const remaining=result.remaining_orders;
+  const done=Number(document.getElementById('todayOrders').textContent||0);
+  document.getElementById('remaining').textContent=remaining;
+  document.getElementById('progressDone').textContent=done;
+  document.getElementById('progressPlan').textContent='/ очередь GRIT';
+  document.getElementById('progressBar').style.width='0%';
+  document.getElementById('progressText').textContent='Собрано сегодня: '+done+' заказов · осталось собрать: '+remaining+' заказов';
+  info.textContent='WB · На сборке: '+result.confirm_orders+' заказов · принятые в доставке: '+
+    result.delivery_orders+' · очередь GRIT обновляется автоматически';
+  if(editor)editor.style.display='none';
  }catch(e){
   wbAssemblyCount=null;
+  if(editor)editor.style.display='';
   currentPlan=Number(document.getElementById('planInput').value||0);
   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='WB · На сборке: ошибка связи, показан ручной план';
+  info.textContent='WB · Очередь GRIT недоступна, показан ручной план';
  }
 }
-
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -3706,6 +3700,41 @@ def stats_employees():
             "avg_speed": round(orders / hours, 1) if hours > 0 else 0.0,
         })
     return jsonify(employees=out)
+
+
+@wms_bp.get("/api/manager/wb-fbs/picking-queue")
+def manager_wb_fbs_picking_queue():
+    """Live remaining WB orders from GRIT's admitted, unassembled queue."""
+    ensure_db()
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
+        return jsonify(state="disabled"), 503
+    account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+    try:
+        row = query_one(
+            """SELECT
+                COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
+                COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
+                COUNT(*)
+            FROM wb_fbs_picking_queue q
+            JOIN wb_fbs_orders o
+              ON o.account_id=q.account_id AND o.order_id=q.order_id
+            WHERE q.account_id=?
+              AND o.local_status='pending'
+              AND o.wb_status IN ('confirm','complete')""",
+            (account,),
+        )
+    except Exception:
+        # Never return a fabricated zero when the data source is unavailable.
+        return jsonify(state="error", error="Очередь WB недоступна"), 503
+    confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
+    response = jsonify(
+        state="connected", remaining_orders=remaining,
+        confirm_orders=confirm, delivery_orders=delivery,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @wms_bp.get("/api/manager/daily-plan")
