@@ -89,3 +89,34 @@ Offline QR equality comparator test:
 The QR synthetic test proves only that our comparison rejects altered, empty or mismatched strings. A real QR/API match is NOT proved without authorized, non-employer paired samples of the machine-read sticker QR payload and the same order's API barcode field. Optional fixture JSON: samples array of {api_barcode, scanner_value}; run with --fixture <path> locally. The script never calls WB or prints actual order IDs.
 
 Do not enable WB_FBS_V11_ENABLED=1 or declare real QR integration PASS until the authorized QR sample is independently verified.
+
+## GRIT queue after WB changes from "На сборке" to "Доставка"
+
+For the warehouse's workflow, moving the order from WB `supplierStatus=confirm`
+to `supplierStatus=complete` does **not** mean that warehouse picking is finished.
+GRIT keeps a durable `wb_fbs_picking_queue` entry, set only when an order was
+actually observed as `confirm`, and a separate `wb_fbs_orders.local_status`
+(`pending` or `complete`). New orders are appended without resetting previous
+unassembled entries.
+
+A merchandise barcode is accepted only if at least one matching SKU belongs to
+an order already admitted to that queue, the order's current supplier status is
+`confirm` or `complete`, and its local status is not `complete`. The second
+scan still requires that the specific order's WB QR matches that exact SKU,
+that the cached WB status is fresh, and that the order has not already been
+completed in GRIT. Cancellations and other non-eligible statuses remain blocked.
+The status worker keeps syncing accepted `complete` orders rather than aging
+them out after 48 hours.
+
+**Migration caveat:** pre-existing shipments for which no evidence of a previous
+`confirm` status was retained cannot be automatically enrolled. The additive
+queue starts empty and is populated as new `confirm` snapshots arrive. Do not
+guess eligibility from an existing sticker or the fact that a record appears
+in a 14-day historical WB import. Legacy delivery orders require a separately
+authorized, audited reconciliation of actual picking eligibility.
+
+Both **the app and the dedicated status worker** must run the updated
+`wb_fbs_sync_v11.py`. Updating only the app would leave the old worker
+coercing `complete` to `unknown` and not refreshing accepted deliveries.
+Run isolated synthetic tests before releasing; do not change the live DB
+or remove worker rollback bind mounts as part of a test.

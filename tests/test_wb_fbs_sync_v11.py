@@ -70,6 +70,48 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
         self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
 
+    def test_confirmed_order_stays_pickable_after_delivery(self):
+        self.seed()
+        self.assertIsNotNone(self.mod.accepted_product("a", "4601234567890"))
+        self.mod.ingest_orders("a", [self.order(status="complete")])
+        self.assertEqual(self.wms.query_one(
+            "SELECT wb_status FROM wb_fbs_orders WHERE order_id='123'")[0], "complete")
+        self.assertIsNotNone(self.mod.accepted_product("a", "4601234567890"))
+        self.assertEqual(self.mod.verify_pair(
+            "a", "4601234567890", "WB-QR-123")["result"], "MATCH")
+
+    def test_delivery_import_without_prior_confirmation_is_blocked(self):
+        self.seed(order=self.order(status="complete"))
+        self.assertIsNone(self.mod.accepted_product("a", "4601234567890"))
+        self.assertEqual(self.mod.verify_pair(
+            "a", "4601234567890", "WB-QR-123")["result"], "BLOCKED_STATUS")
+
+    def test_cancelled_after_confirm_is_blocked_and_queue_preserved(self):
+        self.seed()
+        self.mod.ingest_orders("a", [self.order(status="cancel")])
+        self.assertEqual(self.wms.query_one(
+            "SELECT COUNT(*) FROM wb_fbs_picking_queue")[0], 1)
+        self.assertIsNone(self.mod.accepted_product("a", "4601234567890"))
+        self.assertEqual(self.mod.verify_pair(
+            "a", "4601234567890", "WB-QR-123")["result"], "BLOCKED_STATUS")
+
+    def test_completed_in_grit_stays_blocked_after_delivery(self):
+        self.seed()
+        self.wms.execute("""UPDATE wb_fbs_orders SET local_status='complete'
+            WHERE account_id=? AND order_id=?""", ("a", "123"))
+        self.mod.ingest_orders("a", [self.order(status="complete")])
+        self.assertIsNone(self.mod.accepted_product("a", "4601234567890"))
+        self.assertEqual(self.mod.verify_pair(
+            "a", "4601234567890", "WB-QR-123")["result"], "ALREADY_COMPLETE")
+
+    def test_new_orders_add_without_clearing_unassembled_delivery_queue(self):
+        self.seed()
+        self.mod.ingest_orders("a", [self.order(status="complete")])
+        self.mod.ingest_orders("a", [self.order(oid="124",status="confirm")])
+        self.assertEqual(self.wms.query_one(
+            "SELECT COUNT(*) FROM wb_fbs_picking_queue WHERE account_id='a'")[0], 2)
+        self.assertIsNotNone(self.mod.accepted_product("a", "4601234567890"))
+
     def test_product_only_never_completes(self):
         self.seed()
         self.assertEqual(self.mod.verify_pair("a", "4601234567890", "")["result"], "STICKER_REQUIRED")

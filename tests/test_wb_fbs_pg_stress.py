@@ -88,6 +88,9 @@ class PGStress(unittest.TestCase):
             SELECT %s, (900000000+g)::text, '1000', '2000','SYNTHETIC',
                    'confirm','pending',%s FROM generate_series(1,%s) g""",
                 (ACCOUNT, STAMP, N_ORDERS))
+        db_exec("""INSERT INTO wb_fbs_picking_queue(account_id,order_id,accepted_at)
+            SELECT %s,(900000000+g)::text,%s
+            FROM generate_series(1,%s) g""", (ACCOUNT, STAMP, N_ORDERS))
         db_exec("""INSERT INTO wb_fbs_order_skus(account_id,order_id,sku)
             SELECT %s,(900000000+g)::text,'SYNTH-SKU-'||g::text
             FROM generate_series(1,%s) g""", (ACCOUNT, N_ORDERS))
