@@ -66,13 +66,16 @@ class DurableFbsTests(unittest.TestCase):
     def payload(self):
         return dict(shift_id=self.shift, product_barcode=self.product, barcode=self.barcode, request_id=self.request)
 
-    def test_lost_ack_retry_counts_once_and_closed_shift_can_replay(self):
+    def test_lost_ack_retry_counts_once_but_closed_shift_revokes_api_session(self):
         first = self.client.post('/api/fbs/scan', json=self.payload())
         self.assertEqual(first.status_code, 200, first.json)
         tx.close_shift(self.shift, self.employee)
+        # A previously accepted request remains idempotent at the ledger.
+        self.assertTrue(self.commit())
+        # The remote manager close must NOT keep an employee cookie valid,
+        # even for a replay; reconciliation is possible through the ledger.
         retry = self.client.post('/api/fbs/scan', json=self.payload())
-        self.assertEqual(retry.status_code, 200, retry.json)
-        self.assertTrue(retry.json['replayed'])
+        self.assertEqual(retry.status_code, 401, retry.json)
         self.assertEqual(self.count('scans'), 1)
         self.assertEqual(wms.query_one("SELECT count(*) FROM operation_events WHERE shift_id=? AND event_type='scan'", (self.shift,))[0], 1)
 

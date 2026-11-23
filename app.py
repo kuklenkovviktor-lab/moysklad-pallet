@@ -162,6 +162,49 @@ def add_employee_shift_recheck(response):
         response.set_data(html.replace('</body>', _TERMINAL_RECHECK_JS+'</body>',1))
     return response
 
+# The employee terminal must react to a manager closing its shift remotely.
+# API authorization is enforced server-side by get_session_employee; this
+# small client poll only makes the logout visible without needing a reload.
+_TERMINAL_RECHECK_JS = """<script>
+(function(){
+  let checking=false, left=false;
+  async function verifyShift(){
+    if(checking||left||document.hidden)return;
+    checking=true;
+    try{
+      const r=await fetch('/api/auth/me',{cache:'no-store',credentials:'same-origin'});
+      if(r.status===401){
+        left=true;
+        for(const key of ['fbs_shift_id','receipt_id','receipt_name','onix_employee_id'])
+          localStorage.removeItem(key);
+        // DO NOT remove the receiving pending operation UUID. It is needed
+        // for reconciliation and must never be blindly replayed.
+        location.replace('/login?shift_closed=1');
+      }
+    }catch(_error){/* Offline is NOT proof that the shift was closed. */}
+    finally{checking=false;}
+  }
+  setInterval(verifyShift,15000);
+  window.addEventListener('pageshow',verifyShift);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)verifyShift()});
+})();
+</script>"""
+
+@app.after_request
+def add_employee_shift_recheck(response):
+    # Explicit terminal pages only. Never inject into manager, partner or
+    # printable documents. Authorization on APIs is a separate server check.
+    if (request.path not in ('/', '/fbs', '/replenishment', '/move',
+                             '/ozon-fbo', '/exit')
+            or response.status_code != 200 or
+            not response.mimetype.startswith('text/html')):
+        return response
+    html=response.get_data(as_text=True)
+    if '</body>' in html and '_TERMINAL_RECHECK' not in html:
+        response.set_data(html.replace('</body>', _TERMINAL_RECHECK_JS+'</body>',1))
+    return response
+
+
 _WMS_READY = threading.Event()
 _WMS_INITIALIZER_STARTED = False
 _WMS_STARTUP_LOCK = threading.Lock()
