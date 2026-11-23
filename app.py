@@ -471,6 +471,7 @@ def require_employee_login():
         "/api/manager/wb-fbs/picking-queue",
         "/manager/wb-fbs/unpicked",
         "/api/manager/wb-fbs/unpicked",
+        "/api/manager/wb-fbs/unpicked/groups",
         "/api/manager/wb-fbs/unpicked/print",
         "/api/manager/integrations/wildberries/history",
         "/manager/integrations/wildberries/history",
