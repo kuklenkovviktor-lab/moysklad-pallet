@@ -344,7 +344,7 @@ function updateButtons(){
 }
 async function loadGroups(){
  const call=++serial;article=null;rows=[];selected.clear();updateButtons();
- $('groupsPanel').style.display='';$('detailPanel').style.display='none';
+ $('groupsPanel').style.display='block';$('detailPanel').style.display='none';
  $('groups').innerHTML='<tr><td colspan="5">Загрузка…</td></tr>';
  try{
   const r=await fetch('/api/manager/wb-fbs/unpicked/groups?'+queryParams(groupPage),{cache:'no-store'});
@@ -383,7 +383,7 @@ $('groups').addEventListener('click',e=>{
  const group=window.groupData[Number(target.dataset.index)];if(!group)return;
  article=group.article;detailPage=1;selected.clear();
  $('articleTitle').textContent=article||'Без артикула';
- $('groupsPanel').style.display='none';$('detailPanel').style.display='';loadOrders();
+ $('groupsPanel').style.display='none';$('detailPanel').style.display='block';loadOrders();
 });
 $('back').addEventListener('click',()=>{loadGroups()});
 $('rows').addEventListener('change',e=>{
