@@ -28,6 +28,11 @@ def _enabled():
     return os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
 
 
+def _search_pattern(search):
+    """Literal substring for SQL LIKE on SQLite and PostgreSQL."""
+    return "%" + search.lower().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
 def _orders_sql(extra=""):
     return """FROM wb_fbs_picking_queue q
       JOIN wb_fbs_orders o
@@ -47,15 +52,13 @@ def _read_page(account, status, search, page, article=None):
         condition += " AND COALESCE(o.seller_article,'')=?"
         terms.append(article)
     if search:
-        condition += """ AND (LOWER(o.nm_id) LIKE ? OR LOWER(o.seller_article) LIKE ?
-            OR o.order_id LIKE ?
+        condition += """ AND (LOWER(o.nm_id) LIKE ? ESCAPE '!'
+            OR LOWER(o.seller_article) LIKE ? ESCAPE '!'
+            OR o.order_id LIKE ? ESCAPE '!'
             OR EXISTS (SELECT 1 FROM wb_fbs_order_skus ss
               WHERE ss.account_id=o.account_id AND ss.order_id=o.order_id
-                AND LOWER(ss.sku) LIKE ?))"""
-        term = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        # Escaped wildcards for predictable literal search across SQLite / PG.
-        condition = condition.replace("LIKE ?", "LIKE ? ESCAPE '\\'")
-        terms.extend([term, term, term, term])
+                AND LOWER(ss.sku) LIKE ? ESCAPE '!'))"""
+        terms.extend([_search_pattern(search)] * 4)
     count = query_one("SELECT COUNT(*) " + _orders_sql(condition), tuple(terms))
     total = int(count[0] or 0)
     ids = query_all("""SELECT o.order_id """ + _orders_sql(condition) +
@@ -133,14 +136,13 @@ def _read_groups(account, status, search, page):
         condition += " AND o.wb_status=?"
         terms.append(status)
     if search:
-        condition += """ AND (LOWER(o.nm_id) LIKE ? ESCAPE '\'
-          OR LOWER(o.seller_article) LIKE ? ESCAPE '\'
-          OR o.order_id LIKE ? ESCAPE '\'
+        condition += """ AND (LOWER(o.nm_id) LIKE ? ESCAPE '!'
+          OR LOWER(o.seller_article) LIKE ? ESCAPE '!'
+          OR o.order_id LIKE ? ESCAPE '!'
           OR EXISTS (SELECT 1 FROM wb_fbs_order_skus ss
              WHERE ss.account_id=o.account_id AND ss.order_id=o.order_id
-               AND LOWER(ss.sku) LIKE ? ESCAPE '\'))"""
-        term = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        terms.extend([term] * 4)
+               AND LOWER(ss.sku) LIKE ? ESCAPE '!'))"""
+        terms.extend([_search_pattern(search)] * 4)
     base = _orders_sql(condition)
     count = query_one("SELECT COUNT(DISTINCT COALESCE(o.seller_article,'')) " + base, tuple(terms))
     total_groups = int((count or (0,))[0] or 0)
