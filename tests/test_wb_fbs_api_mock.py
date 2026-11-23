@@ -133,7 +133,34 @@ class WBApiMockTests(unittest.TestCase):
 
     def test_status_confirm_to_new_to_complete(self):
         self.seed()
-        for status, expected in [("new", "BLOCKED_STATUS"), ("complete", "BLOCKED_STATUS")]:
+        for status, expected in [("new", "BLOCKED_STATUS"), ("complete", "MATCH")]:
+            client, http = self.client([
+                ("POST", "/api/v3/orders/status", response(
+                    payload={"orders": [{"id": 84500123, "supplierStatus": status}]})),
+            ])
+            self.sync.sync_status_once(ACCOUNT, client)
+            self.assertEqual(self.verdict(), expected)
+            http.assert_consumed(self)
+        self.assertEqual(self.wms.query_one(
+            "SELECT wb_status FROM wb_fbs_orders")[0], "complete")
+
+    def test_status_new_to_confirm_to_delivery_enrolls_queue(self):
+        self.seed(status="new")
+        self.assertEqual(self.verdict(), "BLOCKED_STATUS")
+        for status, expected in [("confirm", "MATCH"), ("complete", "MATCH")]:
+            client, http = self.client([
+                ("POST", "/api/v3/orders/status", response(
+                    payload={"orders": [{"id": 84500123, "supplierStatus": status}]})),
+            ])
+            self.sync.sync_status_once(ACCOUNT, client)
+            self.assertEqual(self.verdict(), expected)
+            http.assert_consumed(self)
+        self.assertEqual(self.wms.query_one(
+            "SELECT COUNT(*) FROM wb_fbs_picking_queue")[0], 1)
+
+    def test_cancellation_after_delivery_blocks_unassembled_order(self):
+        self.seed()
+        for status, expected in [("complete", "MATCH"), ("cancel", "BLOCKED_STATUS")]:
             client, http = self.client([
                 ("POST", "/api/v3/orders/status", response(
                     payload={"orders": [{"id": 84500123, "supplierStatus": status}]})),
