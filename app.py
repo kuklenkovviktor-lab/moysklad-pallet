@@ -39,6 +39,7 @@ from integrations import integrations_bp
 from grit_theme import GRIT_CSS
 from fbs_pdf_import import fbs_pdf_bp
 from wb_fbs_sync_v11 import wb_fbs_v11_bp, init_schema as init_wb_fbs_v11_schema
+from wb_unpicked_manager import wb_unpicked_bp
 from onix_print_bridge import print_bridge_bp
 from ozon_fbo import ozon_fbo_bp
 from ozon_fbo_picking import fbo_picking_bp
@@ -116,6 +117,7 @@ app.register_blueprint(shift_history_bp)
 app.register_blueprint(attendance_bp)
 app.register_blueprint(fbs_pdf_bp)
 app.register_blueprint(wb_fbs_v11_bp)
+app.register_blueprint(wb_unpicked_bp)
 app.register_blueprint(print_bridge_bp)
 app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
@@ -467,6 +469,9 @@ def require_employee_login():
         "/api/manager/integrations/wildberries/check",
         "/api/manager/integrations/wildberries/assembly-plan",
         "/api/manager/wb-fbs/picking-queue",
+        "/manager/wb-fbs/unpicked",
+        "/api/manager/wb-fbs/unpicked",
+        "/api/manager/wb-fbs/unpicked/print",
         "/api/manager/integrations/wildberries/history",
         "/manager/integrations/wildberries/history",
         "/manager/integrations/lab",
