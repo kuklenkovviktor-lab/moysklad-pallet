@@ -70,6 +70,40 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
         self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
 
+    def test_scanner_aim_prefix_matches_exact_api_qr(self):
+        self.seed(barcode="*DfgaMEc2")
+        for suffix in ("0", "3", "9"):
+            with self.subTest(aim=suffix):
+                raw = "]Q" + suffix + "*DfgaMEc2"
+                self.assertEqual(self.mod.normalize_api_sticker(raw), "*DfgaMEc2")
+                self.assertEqual(
+                    self.mod.verify_pair("a", "4601234567890", raw)["result"], "MATCH"
+                )
+        self.assertEqual(
+            self.mod.verify_pair("a", "WRONG", "]Q3*DfgaMEc2")["result"], "MISMATCH"
+        )
+
+    def test_aim_prefix_with_russian_hid_matches_api_qr(self):
+        self.seed(barcode="*DfgaMEc2")
+        self.assertEqual(
+            self.mod.normalize_api_sticker("  ]Q3;ВапфЬУс2\\n"), "*DfgaMEc2"
+        )
+        self.assertEqual(
+            self.mod.verify_pair("a", "4601234567890", "]Q3;ВапфЬУс2")["result"], "MATCH"
+        )
+
+    def test_invalid_aim_prefix_does_not_fabricate_sticker(self):
+        self.seed(barcode="*DfgaMEc2")
+        invalid = ("]Q3BAD", "]Q3*bad!", "]Q3*DfgaMEc2junk",
+                   "]Qx*DfgaMEc2", "]Q3WB-QR-123", "4601234567890")
+        for raw in invalid:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.mod.normalize_api_sticker(raw), raw)
+                self.assertEqual(
+                    self.mod.verify_pair("a", "4601234567890", raw)["result"],
+                    "UNKNOWN_STICKER",
+                )
+
     def test_confirmed_order_stays_pickable_after_delivery(self):
         self.seed()
         self.assertIsNotNone(self.mod.accepted_product("a", "4601234567890"))
