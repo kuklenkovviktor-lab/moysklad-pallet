@@ -2116,6 +2116,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 @media(max-width:780px){.app{grid-template-columns:1fr}.sidebar{position:static;height:auto}.side-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.side-nav a{min-height:40px}.content{padding:12px}.head h1{font-size:23px}.card{padding:15px}.process-grid,.quick-grid{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:27px}.kpi{min-height:95px}.grid2{grid-template-columns:1fr}.worker{grid-template-columns:repeat(2,1fr)}.worker>div:first-child{grid-column:1/-1}}
 @media(max-width:480px){.process-grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.kpi{padding:12px}.kpi .v{margin-left:0}.kpi-heading{align-items:flex-start}.section-title{flex-wrap:wrap}.receiving-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.mini{padding:8px}.mini .n{font-size:22px}}
 
+.kpi-unpicked-link{display:flex;flex-direction:column;justify-content:center;color:inherit;text-decoration:none;cursor:pointer;transition:border-color .14s,background .14s}.kpi-unpicked-link:hover{border-color:#45a5ef;background:#1a3047}.kpi-unpicked-link:focus-visible{outline:2px solid #ff9230;outline-offset:3px}.kpi-unpicked-link .l span{color:#75c5ff;margin-left:4px}
 /* GRIT branding: decorative warehouse artwork below logout, never covering controls. */
 .sidebar{display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#30445a transparent}
 .sidebar .side-nav{flex:0 0 auto}
@@ -2162,7 +2163,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 
  <div class="kpis">
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-package"></use></svg><div class="l">WB FBS собрано сегодня</div></div><div class="v" id="todayOrders">0</div></div>
-  <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-target"></use></svg><div class="l">Осталось собрать</div></div><div class="v" id="remaining">—</div></div>
+  <a class="kpi kpi-unpicked-link" href="/manager/wb-fbs/unpicked" aria-label="Открыть список несобранных заказов WB"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-target"></use></svg><div class="l">Осталось собрать <span aria-hidden="true">↗</span></div></div><div class="v" id="remaining">—</div></a>
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-download"></use></svg><div class="l">Приёмка сегодня, шт.</div></div><div class="v" id="receivingUnits">0</div></div>
   <div class="kpi"><div class="kpi-heading"><svg class="kpi-icon" aria-hidden="true"><use href="#ic-alert"></use></svg><div class="l">Отклонения сегодня</div></div><div class="v" id="deviationCount">0</div></div>
  </div>
