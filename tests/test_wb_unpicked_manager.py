@@ -59,6 +59,67 @@ class UnpickedManagerTests(unittest.TestCase):
                 self.assertEqual(module._read_page("default", "all", "1863266481", 1)[0], 2)
                 self.assertEqual(module._read_page("default", "all", "nonexistent", 1)[0], 0)
 
+    def test_article_groups_use_entire_queue_not_first_50_orders(self):
+        import tempfile
+        from pathlib import Path
+        import wms
+        from wb_fbs_sync_v11 import init_schema
+        with tempfile.TemporaryDirectory(prefix="pr178-grouped-") as tmp:
+            with patch.object(wms, "DB_PATH", str(Path(tmp) / "synthetic.db")):
+                init_schema()
+                for i in range(125):
+                    oid = str(10000 + i)
+                    article = "952_OTVODKA" if i < 105 else "2346_GRAFIT"
+                    status = "complete" if i % 7 == 0 else "confirm"
+                    wms.execute("""INSERT INTO wb_fbs_orders
+                      (account_id,order_id,nm_id,seller_article,wb_status,local_status,synced_at)
+                      VALUES(?,?,?,?,?,?,?)""",
+                      ("default", oid, "123456", article, status, "pending", "synthetic"))
+                    wms.execute("""INSERT INTO wb_fbs_picking_queue
+                      (account_id,order_id,accepted_at) VALUES(?,?,?)""",
+                      ("default", oid, "synthetic"))
+                wms.execute("""INSERT INTO wb_fbs_orders
+                  (account_id,order_id,seller_article,wb_status,local_status,synced_at)
+                  VALUES(?,?,?,?,?,?)""",
+                  ("default", "20001", "952_OTVODKA", "complete", "complete", "synthetic"))
+                wms.execute("""INSERT INTO wb_fbs_orders
+                  (account_id,order_id,seller_article,wb_status,local_status,synced_at)
+                  VALUES(?,?,?,?,?,?)""",
+                  ("other", "20002", "952_OTVODKA", "confirm", "pending", "synthetic"))
+                for oid, acc in (("20001","default"),("20002","other")):
+                    wms.execute("""INSERT INTO wb_fbs_picking_queue
+                      (account_id,order_id,accepted_at) VALUES(?,?,?)""",
+                      (acc, oid, "synthetic"))
+                group_count, order_count, groups = module._read_groups("default", "all", "", 1)
+                self.assertEqual(group_count, 2)
+                self.assertEqual(order_count, 125)
+                self.assertEqual([(x["article"], x["count"]) for x in groups],
+                                 [("952_OTVODKA", 105), ("2346_GRAFIT", 20)])
+                self.assertEqual(groups[0]["confirm"] + groups[0]["delivery"], 105)
+                for pg, expected in ((1,50),(2,50),(3,5)):
+                    total, items = module._read_page("default","all","",pg,"952_OTVODKA")
+                    self.assertEqual(total, 105)
+                    self.assertEqual(len(items), expected)
+                    self.assertTrue(all(x["seller_article"]=="952_OTVODKA" for x in items))
+                self.assertEqual(module._read_groups("default","complete","",1)[1],
+                                 sum(1 for i in range(125) if i%7==0))
+                self.assertEqual(module._read_groups("default","all","GRAFIT",1)[1],20)
+                self.assertEqual(module._read_groups("default","all","nothing",1)[1],0)
+
+    def test_groups_api_manager_access(self):
+        with patch.object(module, "manager_access", return_value=False):
+            self.assertEqual(
+                self.client.get("/api/manager/wb-fbs/unpicked/groups").status_code,403)
+        with patch.object(module, "manager_access", return_value=True), \
+             patch.object(module, "_enabled", return_value=True), \
+             patch.object(module, "_read_groups", return_value=(1,3,[
+                 {"article":"952_OTVODKA","count":3,"confirm":2,"delivery":1}
+             ])):
+            response=self.client.get("/api/manager/wb-fbs/unpicked/groups")
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json["groups"][0]["count"],3)
+            self.assertEqual(response.json["orders"],3)
+
     def test_manager_gate(self):
         with patch.object(module, "manager_access", return_value=False):
             self.assertEqual(self.client.get("/manager/wb-fbs/unpicked").status_code, 403)
