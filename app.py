@@ -2636,18 +2636,11 @@ def fbs_product_info():
         shift_id = str(data.get("shift_id") or "").strip()
         if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
             account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
-            row = query_one(
-                """SELECT o.seller_article FROM wb_fbs_order_skus s
-                   JOIN wb_fbs_orders o ON o.account_id=s.account_id
-                     AND o.order_id=s.order_id
-                   WHERE s.account_id=? AND s.sku=?
-                     AND o.wb_status='confirm' AND o.local_status<>'complete'
-                   LIMIT 1""",
-                (account, barcode),
-            )
+            from wb_fbs_sync_v11 import accepted_product
+            row = accepted_product(account, barcode)
             if not row:
                 return jsonify(
-                    error="ШК товара не найден среди заказов WB «На сборке»",
+                    error="ШК товара не найден среди принятых и несобранных заказов GRIT",
                     reason="wb_sku_not_in_confirm_orders",
                 ), 404
             article = row[0] or ""
