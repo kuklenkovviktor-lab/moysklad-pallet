@@ -264,11 +264,15 @@ def ingest_stickers(account_id, stickers, fmt="png"):
 
 
 def normalize_api_sticker(value):
-    """Preserve WB's API QR; repair Russian HID keyboard substitution only."""
+    """Preserve WB's API QR; repair Russian HID and scanner AIM QR prefixes."""
     code = _clean(value)
-    if len(code) == 9 and code[0] in ("*", ";"):
+    # Strip scanner AIM ID only when the remaining value is a valid WB QR.
+    # An invalid prefixed value must remain unknown, not silently rewritten.
+    has_aim = len(code) > 3 and code.startswith("]Q") and code[2] in "0123456789"
+    candidate_code = code[3:] if has_aim else code
+    if len(candidate_code) == 9 and candidate_code[0] in ("*", ";"):
         from wb_qr_codec import QR_DATA_RE, RU_HID_TO_EN
-        candidate = ("*" if code[0] == ";" else "*") + code[1:]
+        candidate = "*" + candidate_code[1:]
         candidate = candidate.translate(RU_HID_TO_EN)
         if QR_DATA_RE.fullmatch(candidate):
             return candidate
