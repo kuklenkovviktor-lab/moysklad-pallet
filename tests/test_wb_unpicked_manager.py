@@ -20,6 +20,45 @@ class UnpickedManagerTests(unittest.TestCase):
         self.app.register_blueprint(module.wb_unpicked_bp)
         self.client = self.app.test_client()
 
+    def test_real_sqlite_queue_listing_and_filters(self):
+        """Run actual list SQL against an isolated synthetic SQLite file."""
+        import tempfile
+        from pathlib import Path
+        import wms
+        from wb_fbs_sync_v11 import init_schema
+        with tempfile.TemporaryDirectory(prefix="pr177-synthetic-") as tmp:
+            with patch.object(wms, "DB_PATH", str(Path(tmp) / "synthetic.db")):
+                init_schema()
+                def add(oid, account, wb, local, queued, article):
+                    wms.execute("""INSERT INTO wb_fbs_orders
+                      (account_id,order_id,nm_id,seller_article,wb_status,local_status,synced_at)
+                      VALUES(?,?,?,?,?,?,?)""",
+                      (account, oid, "1863266481", article, wb, local, "synthetic"))
+                    if queued:
+                        wms.execute("""INSERT INTO wb_fbs_picking_queue
+                          (account_id,order_id,accepted_at) VALUES(?,?,?)""",
+                          (account, oid, "synthetic"))
+                add("101", "default", "confirm", "pending", True, "ART-101")
+                add("102", "default", "complete", "pending", True, "ART-102")
+                add("103", "default", "complete", "complete", True, "ART-103")
+                add("104", "default", "cancel", "pending", True, "ART-104")
+                add("105", "other", "confirm", "pending", True, "ART-105")
+                add("106", "default", "complete", "pending", False, "ART-106")
+                for sku in ("4600000000001", "4600000000002"):
+                    wms.execute("""INSERT INTO wb_fbs_order_skus
+                      (account_id,order_id,sku) VALUES(?,?,?)""",
+                      ("default", "101", sku))
+                total, rows = module._read_page("default", "all", "", 1)
+                self.assertEqual(total, 2)
+                self.assertEqual({r["order_id"] for r in rows}, {"101", "102"})
+                self.assertEqual(len(next(r for r in rows if r["order_id"] == "101")["product_barcodes"]), 2)
+                self.assertEqual(module._read_page("default", "confirm", "", 1)[0], 1)
+                self.assertEqual(module._read_page("default", "complete", "", 1)[0], 1)
+                self.assertEqual(module._read_page("default", "all", "ART-101", 1)[0], 1)
+                self.assertEqual(module._read_page("default", "all", "4600000000002", 1)[0], 1)
+                self.assertEqual(module._read_page("default", "all", "1863266481", 1)[0], 2)
+                self.assertEqual(module._read_page("default", "all", "nonexistent", 1)[0], 0)
+
     def test_manager_gate(self):
         with patch.object(module, "manager_access", return_value=False):
             self.assertEqual(self.client.get("/manager/wb-fbs/unpicked").status_code, 403)
