@@ -22,7 +22,7 @@ MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
 CONTENT_API = "https://content-api.wildberries.ru"
 # A WB sticker may be available for a shipped order. That does NOT make the
 # order eligible for a new picking scan.
-PICKABLE_STATUSES = frozenset({"confirm"})
+PICKABLE_STATUSES = frozenset({"confirm", "complete"})
 STICKER_AVAILABLE_STATUSES = frozenset({"confirm", "complete"})
 BLOCKED_WB_STATUSES = frozenset({
     "sold", "canceled", "canceled_by_client", "declined_by_client",
@@ -83,6 +83,10 @@ def init_schema():
             local_status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT, synced_at TEXT NOT NULL,
             PRIMARY KEY(account_id, order_id))""",
+        """CREATE TABLE IF NOT EXISTS wb_fbs_picking_queue (
+            account_id TEXT NOT NULL, order_id TEXT NOT NULL,
+            accepted_at TEXT NOT NULL,
+            PRIMARY KEY(account_id,order_id))""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_order_skus (
             account_id TEXT NOT NULL, order_id TEXT NOT NULL, sku TEXT NOT NULL,
             PRIMARY KEY(account_id, order_id, sku))""",
@@ -96,6 +100,8 @@ def init_schema():
             barcode TEXT NOT NULL, part_a TEXT, part_b TEXT,
             format TEXT, fetched_at TEXT NOT NULL,
             PRIMARY KEY(account_id, order_id))""",
+        """CREATE INDEX IF NOT EXISTS idx_wb_fbs_picking_queue
+            ON wb_fbs_picking_queue(account_id,accepted_at)""",
         """CREATE INDEX IF NOT EXISTS idx_wb_fbs_sticker_lookup
             ON wb_fbs_stickers(account_id, barcode)""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_scan_events (
@@ -161,6 +167,14 @@ def ingest_orders(account_id, orders, statuses=None):
                     (account_id, oid, _clean(item.get("rid")),
                      nm, chrt, _clean(item.get("article")), _clean(item.get("warehouseId")),
                      status, "pending", _clean(item.get("createdAt")), now))
+                # Remember a confirmed order once, independent of subsequent
+                # supplierStatus=complete ("delivery"). Never enroll new
+                # historical/delivery orders without confirmed evidence.
+                if status == "confirm":
+                    cur.execute(sql("""INSERT INTO wb_fbs_picking_queue
+                        (account_id,order_id,accepted_at) VALUES(?,?,?)
+                        ON CONFLICT(account_id,order_id) DO NOTHING"""),
+                        (account_id, oid, now))
                 if skus:
                     cur.execute(sql("DELETE FROM wb_fbs_order_skus WHERE account_id=? AND order_id=?"),
                                 (account_id, oid))
@@ -261,6 +275,23 @@ def normalize_api_sticker(value):
     return code
 
 
+def accepted_product(account_id, barcode):
+    """Get the article for a scanned SKU from an unassembled accepted order.
+    Verification of the exact order against its sticker happens at scan two.
+    """
+    from wms import query_one
+    return query_one("""SELECT o.seller_article
+        FROM wb_fbs_order_skus s
+        JOIN wb_fbs_orders o
+          ON o.account_id=s.account_id AND o.order_id=s.order_id
+        JOIN wb_fbs_picking_queue q
+          ON q.account_id=o.account_id AND q.order_id=o.order_id
+        WHERE s.account_id=? AND s.sku=?
+          AND o.wb_status IN ('confirm','complete')
+          AND o.local_status<>'complete'
+        LIMIT 1""", (account_id, _clean(barcode)))
+
+
 def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     """Local DB verification; optionally read using the FBS commit transaction.
 
@@ -279,7 +310,9 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
     context = db_connect() if cursor is None else nullcontext(None)
     with context as conn:
         cur = cursor if cursor is not None else conn.cursor()
-        statement = """SELECT o.order_id,o.wb_status,o.local_status,o.synced_at
+        statement = """SELECT o.order_id,o.wb_status,o.local_status,o.synced_at,
+            EXISTS(SELECT 1 FROM wb_fbs_picking_queue q
+               WHERE q.account_id=o.account_id AND q.order_id=o.order_id)
             FROM wb_fbs_stickers s JOIN wb_fbs_orders o
             ON o.account_id=s.account_id AND o.order_id=s.order_id
             WHERE s.account_id=? AND s.barcode=?"""
@@ -294,7 +327,7 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
                 cur.close()
             return {"result": "AMBIGUOUS_STICKER" if matches else "UNKNOWN_STICKER",
                     "order_id": None, "expected_skus": []}
-        oid, status, local_status, synced_at = matches[0]
+        oid, status, local_status, synced_at, accepted = matches[0]
         cur.execute(sql("""SELECT sku FROM wb_fbs_order_skus
             WHERE account_id=? AND order_id=?"""), (account_id, oid))
         allowed = sorted(x[0] for x in cur.fetchall())
@@ -310,7 +343,7 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
         result = "ALREADY_COMPLETE"
     elif stale:
         result = "STALE_CACHE"
-    elif status not in PICKABLE_STATUSES:
+    elif status not in PICKABLE_STATUSES or not accepted:
         result = "BLOCKED_STATUS"
     elif not allowed:
         result = "MAPPING_ERROR"
@@ -630,7 +663,12 @@ def _sync_status_once_unlocked(account_id, client):
         time.time() - 2 * 86400, timezone.utc).isoformat()
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
         WHERE account_id=? AND local_status<>'complete'
-          AND (wb_status IN ('new','confirm') OR created_at>=?)""",
+          AND (wb_status IN ('new','confirm')
+               OR (wb_status='complete' AND EXISTS(
+                    SELECT 1 FROM wb_fbs_picking_queue q
+                    WHERE q.account_id=wb_fbs_orders.account_id
+                      AND q.order_id=wb_fbs_orders.order_id))
+               OR created_at>=?)""",
         (account_id, recent_cutoff))]
     statuses = client.statuses(ids) if ids else {}
     # Missing order entries in the WB response cannot silently retain an old
@@ -646,6 +684,13 @@ def _sync_status_once_unlocked(account_id, client):
         execute("""UPDATE wb_fbs_orders SET wb_status=?,synced_at=?
             WHERE account_id=? AND order_id=?""",
             (status, utcnow(), account_id, oid))
+        if status == "confirm":
+            execute("""INSERT INTO wb_fbs_picking_queue
+                (account_id,order_id,accepted_at)
+                SELECT account_id,order_id,? FROM wb_fbs_orders
+                WHERE account_id=? AND order_id=?
+                ON CONFLICT(account_id,order_id) DO NOTHING""",
+                (utcnow(), account_id, oid))
     existing = {row[0] for row in query_all(
         "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
     eligible = [int(oid) for oid, status in statuses.items()
