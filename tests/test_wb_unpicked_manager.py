@@ -126,9 +126,11 @@ class UnpickedManagerTests(unittest.TestCase):
             self.assertEqual(response.json["orders"],3)
 
     def test_panels_explicitly_show_active_table(self):
-        # An empty display string does not override style rules hiding a panel.
         html = module.PAGE
-        self.assertIn("$('groupsPanel').style.display='block';$('detailPanel').style.display='none';".replace('\
+        self.assertIn("""$('groupsPanel').style.display='block';$('detailPanel').style.display='none';""", html)
+        self.assertIn("""$('groupsPanel').style.display='none';$('detailPanel').style.display='block';loadOrders();""", html)
+
+    def test_manager_gate(self):
         with patch.object(module, "manager_access", return_value=False):
             self.assertEqual(self.client.get("/manager/wb-fbs/unpicked").status_code, 403)
             self.assertEqual(self.client.get("/api/manager/wb-fbs/unpicked").status_code, 403)
