@@ -1617,14 +1617,17 @@ async function refreshWbUnscannedHint(barcode, warnPrevious=false){
  try{
   const url='/api/fbs/wb-unscanned-hints?'+new URLSearchParams({shift_id:shiftId,barcode});
   const r=await fetch(url,{cache:'no-store'});
-  if(!r.ok)return;
+  if(!r.ok)throw Error('status');
   const d=await r.json();
-  if(serial!==(warnPrevious?wbPreviousSerial:wbHintRequestSerial)||!d.available)return;
-  const msg='Общий остаток WB по товару: '+d.remaining+(d.truncated?'+':'')+
-    (d.sticker_suffixes.length?' · окончания WB-стикеров: '+d.sticker_suffixes.join(', '):'');
-  container.textContent=(warnPrevious&&d.remaining>0?'⚠ Предыдущий товар не закрыт по общей очереди. ':'')+msg+
-    ' · это не личное задание';
- }catch(e){if(serial===(warnPrevious?wbPreviousSerial:wbHintRequestSerial))container.textContent='Подсказка WB временно недоступна';}
+  if(serial!==(warnPrevious?wbPreviousSerial:wbHintRequestSerial))return;
+  if(!d.available){container.textContent='';return}
+  if(warnPrevious&&d.remaining===0){container.textContent='';return}
+  const article=d.article||barcode;
+  const labels=(d.stickers||[]).map(x=>x.part_a+' / '+x.part_b).join(', ');
+  container.textContent=(warnPrevious?'⚠ Осталось от предыдущего товара сегодня':'Сегодня · товар')+
+   ': '+article+' · не отсканировано: '+d.remaining+(d.truncated?'+':'')+
+   (labels?' · WB № '+labels:' · номера наклеек недоступны');
+ }catch(e){if(serial===(warnPrevious?wbPreviousSerial:wbHintRequestSerial))container.textContent='Подсказка WB недоступна';}
 }
 async function acceptProduct(code){
  const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
@@ -1634,7 +1637,7 @@ async function acceptProduct(code){
  if(previous&&previous!==d.barcode){
   // Warning is informational: never block the product-first WB scan flow.
   refreshWbUnscannedHint(previous,true);
- }else if(!previous){document.getElementById('wbPreviousHint').textContent='';}
+ }else{document.getElementById('wbPreviousHint').textContent='';}
  wbHintLastBarcode=d.barcode;
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
  updateScanStage();beep(true);
@@ -2317,14 +2320,14 @@ function renderProgress(done){
  document.getElementById('remaining').textContent=rest;
  document.getElementById('progressPlan').textContent=' / '+total+' под контролем';
  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
- document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · текущий остаток: '+rest+
-  ' · '+pct.toFixed(1)+'% условного объёма. Остаток может включать прошлые дни; это не дневной план.';
+ document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · остаток заказов WB за сегодня: '+rest+
+  ' · '+pct.toFixed(1)+'% условного объёма. Факт по дате сканирования, остаток по дате заказа; это не дневной план.';
 }
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
  try{
-  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
+  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue?day='+encodeURIComponent(dayKey()),{cache:'no-store'},5000);
   if(response.status===403){location.href='/manager-login';return}
   if(!response.ok)throw Error('HTTP '+response.status);
   const result=await response.json();
@@ -2334,7 +2337,7 @@ async function loadWbAssemblyPlan(){
   }
   wbAssemblyCount=result.remaining_orders;
   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB: на сборке '+result.confirm_orders+
+  info.textContent='Очередь WB за сегодня: на сборке '+result.confirm_orders+
     ' · в доставке WB '+result.delivery_orders+' · обновляется автоматически';
  }catch(e){
   wbAssemblyCount=null;
@@ -3710,6 +3713,12 @@ def stats_employees():
     return jsonify(employees=out)
 
 
+def _wb_hint_today():
+    """WB order day for worker hints; Moscow midnight is the boundary."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+
+
 @wms_bp.get("/api/fbs/wb-unscanned-hints")
 def fbs_wb_unscanned_hints():
     """Read-only, shared WB queue hints for the authenticated employee shift.
@@ -3732,7 +3741,11 @@ def fbs_wb_unscanned_hints():
     if not shift or shift[0] != employee["id"] or shift[1] is not None:
         return jsonify(error="Нет активной смены сотрудника"), 403
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
-    rows = query_all("""SELECT o.order_id,t.barcode,o.seller_article
+    # Reuse the exact Moscow WB order creation-day rule from the manager's
+    # existing unpicked-by-day page; no new ledger or date assumptions.
+    from wb_unpicked_manager import _order_day
+    today = _wb_hint_today()
+    rows = query_all("""SELECT o.order_id,t.part_a,t.part_b,o.seller_article,o.created_at
         FROM wb_fbs_picking_queue q
         JOIN wb_fbs_orders o
           ON o.account_id=q.account_id AND o.order_id=q.order_id
@@ -3744,16 +3757,24 @@ def fbs_wb_unscanned_hints():
           AND s.sku=?
           AND o.local_status='pending'
           AND o.wb_status IN ('confirm','complete')
-        ORDER BY q.accepted_at DESC,o.order_id DESC LIMIT 101""",
+        ORDER BY q.accepted_at DESC,o.order_id DESC""",
         (account, barcode))
-    # Never claim a complete list when the cap is reached.
+    # Filter BEFORE limiting the returned hints: yesterday's queued orders
+    # must not occupy today's first 100 rows. Unknown dates are excluded.
+    rows = [row for row in rows if _order_day(row[4]) == today]
     total = len(rows)
-    hints = [str(row[1])[-4:] for row in rows[:100] if row[1]]
+    stickers = [
+        {"part_a": str(row[1]).strip(), "part_b": str(row[2]).strip()}
+        for row in rows[:100]
+        if row[1] is not None and row[2] is not None
+        and str(row[1]).strip().isdigit()
+        and len(str(row[2]).strip()) == 4 and str(row[2]).strip().isdigit()
+    ]
     return jsonify(available=True, shared=True, barcode=barcode,
-                   remaining=total, truncated=total>100,
-                   sticker_suffixes=hints[:12],
-                   article=next((row[2] for row in rows if row[2]), ""),
-                   note="Общий остаток WB, не личный план. Подсказки не подтверждают сборку.")
+                   day=today, remaining=total, truncated=total>100,
+                   stickers=stickers[:12],
+                   article=next((str(row[3]).strip() for row in rows if row[3]), ""),
+                   note="Только заказы с датой создания WB сегодня по Москве. Старые дни в истории руководителя.")
 
 
 @wms_bp.get("/api/manager/wb-fbs/picking-queue")
@@ -3765,27 +3786,44 @@ def manager_wb_fbs_picking_queue():
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         return jsonify(state="disabled"), 503
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+    day = (request.args.get("day") or "").strip()
+    if day and day != _wb_hint_today():
+        return jsonify(error="Доступна текущая дата по Москве"), 400
     try:
-        row = query_one(
-            """SELECT
-                COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
-                COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
-                COUNT(*)
-            FROM wb_fbs_picking_queue q
-            JOIN wb_fbs_orders o
-              ON o.account_id=q.account_id AND o.order_id=q.order_id
-            WHERE q.account_id=?
-              AND o.local_status='pending'
-              AND o.wb_status IN ('confirm','complete')""",
-            (account,),
-        )
+        if day:
+            from wb_unpicked_manager import _order_day
+            rows = query_all("""SELECT o.wb_status,o.created_at
+                FROM wb_fbs_picking_queue q
+                JOIN wb_fbs_orders o
+                  ON o.account_id=q.account_id AND o.order_id=q.order_id
+                WHERE q.account_id=?
+                  AND o.local_status='pending'
+                  AND o.wb_status IN ('confirm','complete')""", (account,))
+            today_rows = [row for row in rows if _order_day(row[1]) == day]
+            confirm = sum(1 for row in today_rows if row[0] == "confirm")
+            delivery = sum(1 for row in today_rows if row[0] == "complete")
+            remaining = len(today_rows)
+        else:
+            row = query_one(
+                """SELECT
+                    COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
+                    COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
+                    COUNT(*)
+                FROM wb_fbs_picking_queue q
+                JOIN wb_fbs_orders o
+                  ON o.account_id=q.account_id AND o.order_id=q.order_id
+                WHERE q.account_id=?
+                  AND o.local_status='pending'
+                  AND o.wb_status IN ('confirm','complete')""",
+                (account,),
+            )
+            confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
     except Exception:
-        # Never return a fabricated zero when the data source is unavailable.
         return jsonify(state="error", error="Очередь WB недоступна"), 503
-    confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
     response = jsonify(
         state="connected", remaining_orders=remaining,
         confirm_orders=confirm, delivery_orders=delivery,
+        **({"day": day} if day else {}),
     )
     response.headers["Cache-Control"] = "no-store"
     return response
