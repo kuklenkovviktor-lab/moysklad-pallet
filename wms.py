@@ -2337,11 +2337,11 @@ async function load(){
   fetchWithTimeout('/api/manager/daily-plan?date='+encodeURIComponent(date)),
   fetchWithTimeout('/api/operations/deviations?'+p.toString()),
   fetchWithTimeout('/api/fbs/hourly?'+p.toString()),
-  fetchWithTimeout('/api/manager/integrations/wildberries/history?date='+encodeURIComponent(date))
+  fetchWithTimeout('/api/manager/integrations/wildberries/history?date='+encodeURIComponent(date)).catch(()=>null)
  ]);
  if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
  const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
- const hist=histR.ok?await histR.json():null;
+ const hist=histR&&histR.ok?await histR.json():null;
  const picked=hist&&Number.isInteger(hist.picked_in_grit)?hist.picked_in_grit:null;
 
  currentPlan=Number(plan.wb_fbs_plan||0);
