@@ -1625,10 +1625,10 @@ async function refreshWbUnscannedHint(barcode, warnPrevious=false, scannedArticl
   // Product-info supplies the article even when today's queue is empty.
   // Never substitute a product EAN for the seller's article.
   const article=scannedArticle||d.article||'Артикул не указан в WB';
-  const labels=(d.stickers||[]).map(x=>x.part_a+' / '+x.part_b).join(', ');
+  const labels=(d.stickers||[]).map(x=>String(x.part_b||'')).filter(x=>/^\d{4}$/.test(x)).join(', ');
   container.textContent=(warnPrevious?'⚠ Осталось от предыдущего товара сегодня':'Сегодня · товар')+
    ': '+article+' · не отсканировано: '+d.remaining+(d.truncated?'+':'')+
-   (labels?' · WB № '+labels:' · номера наклеек недоступны');
+   (labels?' · WB последние 4 цифры: '+labels:' · номера WB недоступны');
  }catch(e){if(serial===(warnPrevious?wbPreviousSerial:wbHintRequestSerial))container.textContent='Подсказка WB недоступна';}
 }
 async function acceptProduct(code){
