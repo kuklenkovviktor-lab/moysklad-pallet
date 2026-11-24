@@ -1624,7 +1624,7 @@ async function refreshWbUnscannedHint(barcode, warnPrevious=false){
   if(warnPrevious&&d.remaining===0){container.textContent='';return}
   const article=d.article||barcode;
   const labels=(d.stickers||[]).map(x=>x.part_a+' / '+x.part_b).join(', ');
-  container.textContent=(warnPrevious?'⚠ Осталось от предыдущего товара':'Товар')+
+  container.textContent=(warnPrevious?'⚠ Осталось от предыдущего товара сегодня':'Сегодня · товар')+
    ': '+article+' · не отсканировано: '+d.remaining+(d.truncated?'+':'')+
    (labels?' · WB № '+labels:' · номера наклеек недоступны');
  }catch(e){if(serial===(warnPrevious?wbPreviousSerial:wbHintRequestSerial))container.textContent='Подсказка WB недоступна';}
@@ -3713,6 +3713,12 @@ def stats_employees():
     return jsonify(employees=out)
 
 
+def _wb_hint_today():
+    """WB order day for worker hints; Moscow midnight is the boundary."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+
+
 @wms_bp.get("/api/fbs/wb-unscanned-hints")
 def fbs_wb_unscanned_hints():
     """Read-only, shared WB queue hints for the authenticated employee shift.
@@ -3735,7 +3741,11 @@ def fbs_wb_unscanned_hints():
     if not shift or shift[0] != employee["id"] or shift[1] is not None:
         return jsonify(error="Нет активной смены сотрудника"), 403
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
-    rows = query_all("""SELECT o.order_id,t.part_a,t.part_b,o.seller_article
+    # Reuse the exact Moscow WB order creation-day rule from the manager's
+    # existing unpicked-by-day page; no new ledger or date assumptions.
+    from wb_unpicked_manager import _order_day
+    today = _wb_hint_today()
+    rows = query_all("""SELECT o.order_id,t.part_a,t.part_b,o.seller_article,o.created_at
         FROM wb_fbs_picking_queue q
         JOIN wb_fbs_orders o
           ON o.account_id=q.account_id AND o.order_id=q.order_id
@@ -3747,9 +3757,11 @@ def fbs_wb_unscanned_hints():
           AND s.sku=?
           AND o.local_status='pending'
           AND o.wb_status IN ('confirm','complete')
-        ORDER BY q.accepted_at DESC,o.order_id DESC LIMIT 101""",
+        ORDER BY q.accepted_at DESC,o.order_id DESC""",
         (account, barcode))
-    # Never claim a complete list when the cap is reached.
+    # Filter BEFORE limiting the returned hints: yesterday's queued orders
+    # must not occupy today's first 100 rows. Unknown dates are excluded.
+    rows = [row for row in rows if _order_day(row[4]) == today]
     total = len(rows)
     stickers = [
         {"part_a": str(row[1]).strip(), "part_b": str(row[2]).strip()}
@@ -3759,10 +3771,10 @@ def fbs_wb_unscanned_hints():
         and len(str(row[2]).strip()) == 4 and str(row[2]).strip().isdigit()
     ]
     return jsonify(available=True, shared=True, barcode=barcode,
-                   remaining=total, truncated=total>100,
+                   day=today, remaining=total, truncated=total>100,
                    stickers=stickers[:12],
                    article=next((str(row[3]).strip() for row in rows if row[3]), ""),
-                   note="Общий остаток WB, не личный план. Подтверждение только полным сканом.")
+                   note="Только заказы с датой создания WB сегодня по Москве. Старые дни в истории руководителя.")
 
 
 @wms_bp.get("/api/manager/wb-fbs/picking-queue")
