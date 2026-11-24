@@ -138,8 +138,10 @@ def create_entry_intent():
     if not _valid_entry_qr(data.get("qr")):
         return jsonify(error="Сначала отсканируй QR ВХОД"), 403
     origin = request.headers.get("Origin")
-    if origin and origin != request.host_url.rstrip("/"):
-        return jsonify(error="Недопустимый источник"), 403
+    if origin:
+        p = urlparse(origin)
+        if p.scheme != "https" or p.netloc != request.host:
+            return jsonify(error="Недопустимый источник"), 403
     session["attendance_entry_intent_at"] = time.time()
     return jsonify(ok=True)
 
