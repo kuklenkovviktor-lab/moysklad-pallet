@@ -32,6 +32,8 @@ class AttendanceTests(unittest.TestCase):
         spec2=importlib.util.spec_from_file_location("attendance_fixture_"+uuid.uuid4().hex,ROOT/"attendance.py")
         self.attendance=importlib.util.module_from_spec(spec2)
         spec2.loader.exec_module(self.attendance)
+        attendance_modules=patch.dict(sys.modules,{"attendance":self.attendance})
+        attendance_modules.start();self.addCleanup(attendance_modules.stop)
         self.wms.init_wms_db()
         self.app=Flask(__name__)
         self.app.secret_key="synthetic-session"
