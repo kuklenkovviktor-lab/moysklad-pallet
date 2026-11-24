@@ -949,6 +949,7 @@ const ZEBRA_SERVICE_CODE='ONIX-ZEBRA-READY';
 // Attendance QR is an action URL, NOT an employee badge.
 // Keep the selected action until a real badge is scanned.
 let pendingAttendanceAction=null;
+let entryIntentReady=Promise.resolve();
 function attendanceActionFromQr(value){
  const raw=String(value||'').trim();
  if(!raw)return null;
@@ -959,9 +960,15 @@ function attendanceActionFromQr(value){
     ? parsed.pathname : null;
  }catch(_){return null}
 }
-function setAttendanceAction(action){
+function setAttendanceAction(action,rawQr){
  if(action!=='/attendance/in'&&action!=='/attendance/out')return false;
  pendingAttendanceAction=action;
+ if(action==='/attendance/in'){
+  entryIntentReady=fetch('/api/attendance/entry-intent',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({qr:rawQr}),cache:'no-store'
+  }).then(r=>{if(!r.ok)throw Error('QR ВХОД не подтверждён сервером');return r.json()});
+ }
  document.getElementById('result').innerHTML='<div class="ok">QR '+(action.endsWith('/in')?'ВХОД':'ВЫХОД')+' считан. Теперь сканируй личный бейдж.</div>';
  return true;
 }
@@ -1022,7 +1029,7 @@ function submitHidValue(){
   return;
  }
  if(code){
-  if(setAttendanceAction(attendanceActionFromQr(code)))return;
+  if(setAttendanceAction(attendanceActionFromQr(code),code))return;
   if(!zebraReady){
    document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
    setTimeout(focusHid,80);
@@ -1035,11 +1042,12 @@ function submitHidValue(){
 
 async function login(code){
  code=normalizeHidCode(code); if(!code||busy)return;
- if(setAttendanceAction(attendanceActionFromQr(code)))return;
+ if(setAttendanceAction(attendanceActionFromQr(code),code))return;
  busy=true;
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),8000);
  try{
+  if(pendingAttendanceAction==='/attendance/in')await entryIntentReady;
   document.getElementById('result').innerHTML='<div class="ok">Бейдж считан · выполняю вход…</div>';
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({badge_code:code}),signal:controller.signal});
   const d=await r.json();
@@ -1125,7 +1133,7 @@ document.addEventListener('keydown',e=>{
   const code=normalizeHidCode(hidBuffer); hidBuffer=''; clearTimeout(hidTimer);
   if(code===ZEBRA_SERVICE_CODE){setScannerReady();return}
   if(code){
-   if(setAttendanceAction(attendanceActionFromQr(code)))return;
+   if(setAttendanceAction(attendanceActionFromQr(code),code))return;
    if(!zebraReady){
     document.getElementById('result').innerHTML='<div class="err">Сначала подключи Zebra нижним штрихкодом</div>';
     return;
@@ -1230,7 +1238,7 @@ async function toggleCamera(){
      const found=jsQR(frame.data,w,h,{inversionAttempts:'dontInvert'});
      const code=normalizeHidCode(found&&found.data);
      if(code){
-      if(!setAttendanceAction(attendanceActionFromQr(code))){
+      if(!setAttendanceAction(attendanceActionFromQr(code),code)){
        result.innerHTML='<div class="ok">Бейдж считан · проверяю…</div>';
        await stopBadgeCamera();
        await login(code);
@@ -2983,10 +2991,21 @@ def auth_login():
     if not row:
         return jsonify(error="Бейдж не найден"), 404
 
+    # A badge (including legacy formats) is identity, not proof of arrival.
+    from attendance import entry_intent_valid, record_badge_entry
+    if not entry_intent_valid():
+        return jsonify(error="Сначала отсканируй QR ВХОД, затем личный бейдж",
+                       reason="attendance_entry_required"), 403
+    try:
+        record_badge_entry(row[0])
+        shift_id, _ = ensure_active_shift(row[0], "other")
+    except Exception:
+        return jsonify(error="Приход не зафиксирован. Вход в GRIT запрещён."), 409
+
     session.clear()
     session["employee_id"] = row[0]
+    session["attendance_verified"] = True
     session.permanent = True
-    shift_id, _ = ensure_active_shift(row[0], "other")
     session["employee_shift_id"] = shift_id
     log_event(row[0], "auth", "login", shift_id=shift_id, object_code=badge_code, result="ok")
     return jsonify(ok=True, shift_id=shift_id, employee={"id": row[0], "name": row[1], "role": row[2], "badge_number": row[3]})
