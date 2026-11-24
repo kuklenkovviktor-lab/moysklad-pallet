@@ -168,8 +168,8 @@ class UnpickedManagerTests(unittest.TestCase):
     def test_days_api_requires_manager_and_validates_day_filter(self):
         with patch.object(module, "manager_access", return_value=False):
             self.assertEqual(self.client.get("/api/manager/wb-fbs/unpicked/days").status_code,403)
-        with patch.object(module, "manager_access", return_value=True), \\
-             patch.object(module, "_enabled", return_value=True), \\
+        with patch.object(module, "manager_access", return_value=True), \
+             patch.object(module, "_enabled", return_value=True), \
              patch.object(module, "_read_days", return_value=[
                  {"day":"2026-11-24","count":2,"confirm":1,"delivery":1}]):
             r=self.client.get("/api/manager/wb-fbs/unpicked/days")
