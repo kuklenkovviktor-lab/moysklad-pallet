@@ -143,7 +143,8 @@ class WBProgressSourceContractTests(unittest.TestCase):
     def test_auto_workload_keeps_queue_and_fact_separate(self):
         self.assertIn("const total=n+rest;",self.ui)
         self.assertIn("const pct=total>0?n/total*100:0;",self.ui)
-        self.assertIn("Остаток может включать прошлые дни; это не дневной план.",self.ui)
+        self.assertIn("остаток по дате заказа; это не дневной план.",self.ui)
+        self.assertIn("/api/manager/wb-fbs/picking-queue?day=",self.ui)
         self.assertIn("renderProgress(fact);",self.ui)
         self.assertNotIn('id="planInput"',self.ui)
         self.assertNotIn('onclick="savePlan()"',self.ui)
