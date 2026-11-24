@@ -431,6 +431,7 @@ def require_employee_login():
     public_paths = {
         "/login",
         "/api/auth/login",
+        "/api/attendance/entry-intent",
         "/api/health",
         # PWA assets are public; an expired mobile cookie must not cause the
         # browser's background service-worker refresh to download /login HTML.
@@ -559,8 +560,29 @@ def require_employee_login():
             return jsonify(error="Требуется вход в ПК-панель"), 403
         return redirect("/manager-login")
 
+    # Opening the printed QR IN URL also starts a short-lived intent when
+    # the browser navigates directly instead of using the embedded scanner.
+    if path == "/attendance/in" and not session.get("employee_id"):
+        session["attendance_entry_intent_at"] = time.time()
+        return redirect("/login?next=/attendance/in")
+
     employee = get_session_employee()
     if employee:
+        if path.startswith("/attendance/"):
+            return None
+        if session.get("attendance_verified") is not True:
+            # Existing cookies from older releases must never bypass the journal.
+            from attendance import init_attendance_db
+            init_attendance_db()
+            recorded = query_one(
+                "SELECT id FROM attendance_visits WHERE employee_id=? AND left_at IS NULL LIMIT 1",
+                (employee["id"],))
+            if not recorded:
+                session.clear()
+                if path.startswith("/api/"):
+                    return jsonify(error="Сначала отсканируй QR ВХОД и личный бейдж"), 401
+                return redirect("/login")
+            session["attendance_verified"] = True
         return None
     if path.startswith("/api/"):
         return jsonify(error="Требуется вход по бейджу"), 401
