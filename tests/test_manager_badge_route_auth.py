@@ -39,3 +39,11 @@ def test_badge_print_still_explicitly_checks_manager_access():
         assert "if not manager_access():" in block
         assert 'redirect("/manager-login")' in block
     assert "@page {size:58mm 40mm; margin:0}" in WMS
+
+
+def test_wb_unpicked_days_api_uses_manager_pc_auth_not_employee_badge():
+    """New manager endpoints must be registered in the central auth dispatch."""
+    assert '"/api/manager/wb-fbs/unpicked/days"' in SECTION
+    assert '"/api/manager/wb-fbs/unpicked/groups"' in SECTION
+    assert 'if session.get("manager_web") is True:' in DISPATCH
+    assert 'return jsonify(error="Требуется вход в ПК-панель"), 403' in DISPATCH
