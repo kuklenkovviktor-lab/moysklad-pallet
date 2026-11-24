@@ -1433,6 +1433,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
       <button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
     </div>
     <div id="result" role="status" aria-live="polite"></div>
+    <div id="wbPreviousHint" role="status" aria-live="polite" style="font-size:12px;padding:6px 12px;color:#ffca83"></div>
     <div id="wbUnscannedHint" role="status" aria-live="polite" class="muted" style="font-size:12px;padding:6px 12px"></div>
   </div>
   <div id="side">
@@ -1608,22 +1609,22 @@ async function acceptSkipQr(code){
   '<div class="ok">Пропуск товара разрешён руководителем. Заказ НЕ засчитан. Сканируй следующий товар.</div>';
  await refresh();return true;
 }
-let wbHintLastBarcode='',wbHintRequestSerial=0;
+let wbHintLastBarcode='',wbHintRequestSerial=0,wbPreviousSerial=0;
 async function refreshWbUnscannedHint(barcode, warnPrevious=false){
- const container=document.getElementById('wbUnscannedHint');
+ const container=document.getElementById(warnPrevious?'wbPreviousHint':'wbUnscannedHint');
  if(!container||!shiftId||!barcode)return;
- const serial=++wbHintRequestSerial;
+ const serial=warnPrevious?++wbPreviousSerial:++wbHintRequestSerial;
  try{
   const url='/api/fbs/wb-unscanned-hints?'+new URLSearchParams({shift_id:shiftId,barcode});
   const r=await fetch(url,{cache:'no-store'});
   if(!r.ok)return;
   const d=await r.json();
-  if(serial!==wbHintRequestSerial||!d.available)return;
+  if(serial!==(warnPrevious?wbPreviousSerial:wbHintRequestSerial)||!d.available)return;
   const msg='Общий остаток WB по товару: '+d.remaining+(d.truncated?'+':'')+
     (d.sticker_suffixes.length?' · окончания WB-стикеров: '+d.sticker_suffixes.join(', '):'');
   container.textContent=(warnPrevious&&d.remaining>0?'⚠ Предыдущий товар не закрыт по общей очереди. ':'')+msg+
     ' · это не личное задание';
- }catch(e){if(serial===wbHintRequestSerial)container.textContent='Подсказка WB временно недоступна';}
+ }catch(e){if(serial===(warnPrevious?wbPreviousSerial:wbHintRequestSerial))container.textContent='Подсказка WB временно недоступна';}
 }
 async function acceptProduct(code){
  const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
@@ -1633,7 +1634,7 @@ async function acceptProduct(code){
  if(previous&&previous!==d.barcode){
   // Warning is informational: never block the product-first WB scan flow.
   refreshWbUnscannedHint(previous,true);
- }
+ }else if(!previous){document.getElementById('wbPreviousHint').textContent='';}
  wbHintLastBarcode=d.barcode;
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
  updateScanStage();beep(true);
