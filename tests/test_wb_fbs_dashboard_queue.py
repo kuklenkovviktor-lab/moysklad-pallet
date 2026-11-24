@@ -22,6 +22,9 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.app = Flask(__name__)
         self.ctx = self.app.app_context()
         self.ctx.push()
+        # Production route reads request.args; direct handler tests need a request context.
+        self.req = self.app.test_request_context("/api/manager/wb-fbs/picking-queue")
+        self.req.push()
         self.access = patch.object(wms, "manager_access", return_value=True)
         self.access.start()
         self.ensure = patch.object(wms, "ensure_db", return_value=None)
@@ -42,6 +45,7 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.enabled.stop()
         self.ensure.stop()
         self.access.stop()
+        self.req.pop()
         self.ctx.pop()
         self.db_patch.stop()
         self.tmp.cleanup()
