@@ -2997,10 +2997,17 @@ def auth_login():
         return jsonify(error="Сначала отсканируй QR ВХОД, затем личный бейдж",
                        reason="attendance_entry_required"), 403
     try:
-        # The attendance register intentionally excludes manager-role badges.
-        # They still require QR IN to enter the mobile terminal.
+        # Keep the manager-controlled "Учитывать" switch meaningful:
+        # an explicitly excluded profile may work without a journal row.
+        # Every badge still requires QR IN first, including old badges.
         if row[2] != "manager":
-            record_badge_entry(row[0])
+            from attendance import init_attendance_db
+            init_attendance_db()
+            profile = query_one(
+                "SELECT enabled FROM attendance_profiles WHERE employee_id=?",
+                (row[0],))
+            if not profile or int(profile[0]) != 0:
+                record_badge_entry(row[0])
         shift_id, _ = ensure_active_shift(row[0], "other")
     except Exception:
         return jsonify(error="Приход не зафиксирован. Вход в GRIT запрещён."), 409
