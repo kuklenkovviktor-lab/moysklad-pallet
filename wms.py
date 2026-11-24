@@ -2235,8 +2235,12 @@ let currentPlan=0;
 let wbAssemblyCount=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
-function dayBounds(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),n.getDate()),e=new Date(s);e.setDate(e.getDate()+1);return {from:s.toISOString(),to:e.toISOString()}}
-function dayKey(){const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),x=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+x}
+function dayKey(){return new Date(Date.now()+3*3600000).toISOString().slice(0,10)}
+function dayBounds(){
+ const start=new Date(dayKey()+'T00:00:00+03:00');
+ const end=new Date(start.getTime()+86400000);
+ return {from:start.toISOString(),to:end.toISOString()};
+}
 function activityName(v){return ({picking:'Сборка',replenishment:'Пополнение',receiving:'Приёмка',shipping:'Отгрузка',pallets:'Палеты',kgt:'КГТ',downtime:'Простой',other:'Другое'})[v]||v||'—'}
 function activityMinutes(ts){if(!ts)return 0;return Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/60000))}
 function formatDuration(seconds){
@@ -2275,17 +2279,19 @@ function renderHourly(rows){
 
 function renderProgress(done){
  document.getElementById('progressDone').textContent=done;
+ // WB queue remainder is not a daily plan and must not be overwritten.
+ if(wbAssemblyCount!==null)document.getElementById('remaining').textContent=wbAssemblyCount;
  if(currentPlan>0){
   const rem=Math.max(currentPlan-done,0),pct=Math.min(done/currentPlan*100,100);
-  document.getElementById('remaining').textContent=rem;
+  if(wbAssemblyCount===null)document.getElementById('remaining').textContent=rem;
   document.getElementById('progressPlan').textContent='/ '+currentPlan;
   document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
-  document.getElementById('progressText').textContent='Выполнено '+pct.toFixed(1)+'% · осталось '+rem+' заказов';
+  document.getElementById('progressText').textContent='Выполнено '+pct.toFixed(1)+'% плана · осталось по плану: '+rem+' заказов';
  }else{
-  document.getElementById('remaining').textContent='—';
+  if(wbAssemblyCount===null)document.getElementById('remaining').textContent='—';
   document.getElementById('progressPlan').textContent='/ план не задан';
   document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='Задай план на день, чтобы видеть остаток и процент выполнения.';
+  document.getElementById('progressText').textContent='План на сегодня не задан · процент не рассчитывается';
  }
 }
 
@@ -2305,19 +2311,15 @@ async function loadWbAssemblyPlan(){
   const remaining=result.remaining_orders;
   const done=Number(document.getElementById('todayOrders').textContent||0);
   document.getElementById('remaining').textContent=remaining;
-  document.getElementById('progressDone').textContent=done;
-  document.getElementById('progressPlan').textContent='/ очередь GRIT';
-  document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='Собрано сегодня: '+done+' заказов · осталось собрать: '+remaining+' заказов';
-  info.textContent='WB · На сборке: '+result.confirm_orders+' заказов · принятые в доставке: '+
-    result.delivery_orders+' · очередь GRIT обновляется автоматически';
-  if(editor)editor.style.display='none';
+  renderProgress(done);
+  info.textContent='Текущий остаток GRIT: '+remaining+' · на сборке WB: '+result.confirm_orders+
+    ' · в доставке WB: '+result.delivery_orders+' (это не дневной план)';
+  if(editor)editor.style.display='';
  }catch(e){
   wbAssemblyCount=null;
   if(editor)editor.style.display='';
-  currentPlan=Number(document.getElementById('planInput').value||0);
   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='WB · Очередь GRIT недоступна, показан ручной план';
+  info.textContent='Очередь WB недоступна · показан только дневной план';
  }
 }
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
@@ -2328,24 +2330,32 @@ async function fetchWithTimeout(url,options={},timeoutMs=5000){
 }
 async function load(){
  const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
- const [dashR,fbsR,recR,planR,devR,hourR]=await Promise.all([
+ const [dashR,fbsR,recR,planR,devR,hourR,histR]=await Promise.all([
   fetchWithTimeout('/api/fbs/dashboard?'+p.toString()),
   fetchWithTimeout('/api/fbs/overview?'+p.toString()),
   fetchWithTimeout('/api/receiving/overview?'+p.toString()),
   fetchWithTimeout('/api/manager/daily-plan?date='+encodeURIComponent(date)),
   fetchWithTimeout('/api/operations/deviations?'+p.toString()),
-  fetchWithTimeout('/api/fbs/hourly?'+p.toString())
+  fetchWithTimeout('/api/fbs/hourly?'+p.toString()),
+  fetchWithTimeout('/api/manager/integrations/wildberries/history?date='+encodeURIComponent(date))
  ]);
  if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
  const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
+ const hist=histR.ok?await histR.json():null;
+ const picked=hist&&Number.isInteger(hist.picked_in_grit)?hist.picked_in_grit:null;
 
  currentPlan=Number(plan.wb_fbs_plan||0);
  document.getElementById('planInput').value=currentPlan||'';
- document.getElementById('todayOrders').textContent=f.orders||0;
+ const fact=picked!==null?picked:Number(f.orders||0);
+ document.getElementById('todayOrders').textContent=fact;
+ document.getElementById('wbDailyFlow').textContent=picked!==null
+  ?'За сегодня · поступило на сборку '+hist.new_on_assembly_observed+
+    ' · собрано '+picked+' · замечено переходов в доставку '+hist.moved_to_delivery_observed
+  :'История WB недоступна · факт показан по журналу FBS';
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
  document.getElementById('active').textContent=d.workers.length;
- if(wbAssemblyCount===null)renderProgress(Number(f.orders||0));
+ renderProgress(fact);
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
@@ -2398,19 +2408,7 @@ async function runWbStatus(){
 async function dashboardLoop(){await runDashboardLoad();setTimeout(dashboardLoop,10000)}
 async function wbStatusLoop(){await runWbStatus();setTimeout(wbStatusLoop,15000)}
 dashboardLoop();wbStatusLoop();
-async function loadWbDailyHistory(){
- try{
-  const r=await fetchWithTimeout('/api/manager/integrations/wildberries/history',{cache:'no-store'},5000);
-  if(!r.ok)throw Error('status');
-  const d=await r.json(),today=(d.days||[])[0];
-  if(!today)throw Error('missing');
-  document.getElementById('wbDailyFlow').textContent=
-    'За сегодня · поступило на сборку '+today.new_on_assembly_observed+
-    ' · собрано '+today.picked_in_grit+
-    ' · передано в доставку '+today.moved_to_delivery_observed;
- }catch(e){document.getElementById('wbDailyFlow').textContent='История WB временно недоступна';}
-}
-async function wbAssemblyLoop(){if(!document.hidden){await loadWbAssemblyPlan();await loadWbDailyHistory()}setTimeout(wbAssemblyLoop,15000)}
+async function wbAssemblyLoop(){if(!document.hidden)await loadWbAssemblyPlan();setTimeout(wbAssemblyLoop,15000)}
 wbAssemblyLoop();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){runDashboardLoad();runWbStatus()}});
 if(sessionStorage.getItem('openExitQr')==='1'){sessionStorage.removeItem('openExitQr');setTimeout(openExitQr,250)}
