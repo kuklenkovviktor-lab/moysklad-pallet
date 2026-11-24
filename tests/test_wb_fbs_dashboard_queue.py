@@ -93,3 +93,37 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WBProgressSourceContractTests(unittest.TestCase):
+    """Manager UI only: same Moscow day, separate plan and pending WB queue."""
+
+    @classmethod
+    def setUpClass(cls):
+        from pathlib import Path
+        source = Path("wms.py").read_text(encoding="utf-8")
+        cls.ui = source.split("STATS_PAGE = ", 1)[1].split('SHIFT_ADMIN_PAGE = ', 1)[0]
+
+    def test_moscow_day_boundaries_not_browser_local_date(self):
+        self.assertIn("new Date(Date.now()+3*3600000).toISOString().slice(0,10)",self.ui)
+        self.assertIn("dayKey()+'T00:00:00+03:00'",self.ui)
+        self.assertIn("start.getTime()+86400000",self.ui)
+        self.assertNotIn("new Date(n.getFullYear(),n.getMonth(),n.getDate())",self.ui)
+
+    def test_history_fact_feeds_dashboard_and_progress(self):
+        self.assertIn("/api/manager/integrations/wildberries/history?date=",self.ui)
+        self.assertIn("const fact=picked!==null?picked:Number(f.orders||0);",self.ui)
+        self.assertIn("document.getElementById('todayOrders').textContent=fact;",self.ui)
+        self.assertIn("renderProgress(fact);",self.ui)
+
+    def test_pending_queue_never_replaces_daily_plan(self):
+        self.assertIn("renderProgress(done);",self.ui)
+        self.assertNotIn("'/ очередь GRIT'",self.ui)
+        self.assertIn("if(wbAssemblyCount===null)document.getElementById('remaining').textContent=rem;",self.ui)
+        self.assertIn("if(editor)editor.style.display='';",self.ui)
+        self.assertIn("это не дневной план",self.ui)
+
+    def test_zero_percent_only_for_missing_plan(self):
+        self.assertIn("const rem=Math.max(currentPlan-done,0),pct=",self.ui)
+        self.assertIn("План на сегодня не задан · процент не рассчитывается",self.ui)
+        self.assertNotIn("document.getElementById('progressPlan').textContent='/ очередь GRIT';",self.ui)
