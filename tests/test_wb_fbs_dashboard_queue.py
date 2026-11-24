@@ -102,7 +102,7 @@ class WBProgressSourceContractTests(unittest.TestCase):
     def setUpClass(cls):
         from pathlib import Path
         source = Path("wms.py").read_text(encoding="utf-8")
-        cls.ui = source.split("MANAGER_PAGE = ", 1)[1].split('SHIFT_ADMIN_PAGE = ', 1)[0]
+        cls.ui = source.split("STATS_PAGE = ", 1)[1].split('SHIFT_ADMIN_PAGE = ', 1)[0]
 
     def test_moscow_day_boundaries_not_browser_local_date(self):
         self.assertIn("new Date(Date.now()+3*3600000).toISOString().slice(0,10)",self.ui)
