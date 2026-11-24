@@ -3,6 +3,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import time
 import tempfile
 import unittest
 import uuid
@@ -29,6 +30,11 @@ class BadgeManagementTests(unittest.TestCase):
         spec.loader.exec_module(self.wms)
         modules=patch.dict(sys.modules,{"wms":self.wms})
         modules.start();self.addCleanup(modules.stop)
+        spec_att=importlib.util.spec_from_file_location("synthetic_badge_att_"+uuid.uuid4().hex,ROOT/"attendance.py")
+        att=importlib.util.module_from_spec(spec_att)
+        spec_att.loader.exec_module(att)
+        att_mod=patch.dict(sys.modules,{"attendance":att})
+        att_mod.start();self.addCleanup(att_mod.stop)
         self.wms.init_wms_db()
         self.app=Flask(__name__)
         self.app.secret_key="synthetic-manager-cookie"
@@ -36,6 +42,12 @@ class BadgeManagementTests(unittest.TestCase):
         self.client=self.app.test_client()
         with self.client.session_transaction() as ses:
             ses["manager_web"]=True
+
+    def badge_login(self, code):
+        client=self.app.test_client()
+        with client.session_transaction() as sess:
+            sess["attendance_entry_intent_at"]=time.time()
+        return client.post("/api/auth/login",json={"badge_code":code})
 
     def create(self,name="Новый сборщик"):
         return self.client.post("/api/admin/badges",json={"name":name})
@@ -50,7 +62,7 @@ class BadgeManagementTests(unittest.TestCase):
         self.assertEqual(renamed.status_code,200,renamed.json)
         details=self.wms.query_one("SELECT name,badge_code,active FROM employees WHERE id=?",(eid,))
         self.assertEqual(details,("Сборщик Пётр",original,1))
-        login=self.app.test_client().post("/api/auth/login",json={"badge_code":original})
+        login=self.badge_login(original)
         self.assertEqual(login.status_code,200,login.json)
         self.assertEqual(login.json["employee"]["name"],"Сборщик Пётр")
         badges=self.client.get("/api/admin/badges")
@@ -68,7 +80,7 @@ class BadgeManagementTests(unittest.TestCase):
         archived=self.client.post("/api/admin/badges/"+eid+"/archive",json={})
         self.assertEqual(archived.status_code,200,archived.json)
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts WHERE employee_id=?",(eid,))[0],1)
-        self.assertEqual(self.app.test_client().post("/api/auth/login",json={"badge_code":original}).status_code,404)
+        self.assertEqual(self.badge_login(original).status_code,404)
         self.assertTrue(any(x["id"]==eid for x in self.client.get("/api/admin/badges").json["archived"]))
         # An init/deploy does not resurrect an archived account.
         self.wms.init_wms_db()

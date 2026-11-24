@@ -9,12 +9,13 @@ import json
 import base64
 import io
 import secrets
+import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from html import escape
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, request, session, redirect
+from flask import Blueprint, Response, request, session, redirect, jsonify
 
 from wms import db_connect, get_session_employee, sql
 
@@ -107,6 +108,74 @@ def init_attendance_db():
         )""")
         conn.commit()
         c.close()
+
+# QR IN is a static, publicly printed action URL. It starts a short-lived
+# browser-specific entry flow; possessing a badge alone must not authorize work.
+ENTRY_INTENT_SECONDS = 120
+
+
+def _valid_entry_qr(raw):
+    try:
+        p = urlparse(str(raw or "").strip())
+        return (p.scheme == "https" and p.netloc == request.host
+                and p.path == "/attendance/in"
+                and not (p.params or p.query or p.fragment or p.username or p.password))
+    except ValueError:
+        return False
+
+
+def entry_intent_valid():
+    try:
+        age = time.time() - float(session.get("attendance_entry_intent_at", 0))
+        return 0 <= age <= ENTRY_INTENT_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
+@attendance_bp.post("/api/attendance/entry-intent")
+def create_entry_intent():
+    data = request.get_json(silent=True) or {}
+    if not _valid_entry_qr(data.get("qr")):
+        return jsonify(error="Сначала отсканируй QR ВХОД"), 403
+    origin = request.headers.get("Origin")
+    if origin:
+        p = urlparse(origin)
+        if p.scheme != "https" or p.netloc != request.host:
+            return jsonify(error="Недопустимый источник"), 403
+    session["attendance_entry_intent_at"] = time.time()
+    return jsonify(ok=True)
+
+
+def record_badge_entry(employee_id):
+    """Persist verified badge entry before granting a working employee session."""
+    init_attendance_db()
+    person = _staff(employee_id)
+    if not person or not person[5]:
+        raise ValueError("Учёт посещаемости для сотрудника отключён")
+    from wms import DATABASE_URL
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            if not DATABASE_URL:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute(sql("SELECT id FROM employees WHERE id=?" +
+                            (" FOR NO KEY UPDATE" if DATABASE_URL else "")),
+                        (employee_id,))
+            if not cur.fetchone():
+                raise ValueError("Сотрудник не найден")
+            cur.execute(sql("SELECT id FROM attendance_visits WHERE employee_id=? AND left_at IS NULL LIMIT 1"),
+                        (employee_id,))
+            if not cur.fetchone():
+                cur.execute(sql("""INSERT INTO attendance_visits
+                    (id,employee_id,arrived_at,source) VALUES(?,?,?,'qr')"""),
+                            (str(uuid.uuid4()), employee_id, _stamp()))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+
 
 def _token():
     if "attendance_csrf" not in session:
