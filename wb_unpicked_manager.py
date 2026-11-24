@@ -8,6 +8,8 @@ import io
 import json
 import os
 import secrets
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, Response, jsonify, request, session
 
@@ -42,7 +44,72 @@ def _orders_sql(extra=""):
         AND o.wb_status IN ('confirm','complete') """ + extra
 
 
-def _read_page(account, status, search, page, article=None):
+
+MSK = timezone(timedelta(hours=3))
+UNKNOWN_DAY = "unknown"
+
+
+def _order_day(created_at):
+    """Order creation date in Moscow, never the last sync/queue admission date."""
+    try:
+        moment = datetime.fromisoformat(str(created_at).strip().replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            return UNKNOWN_DAY
+        return moment.astimezone(MSK).strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OverflowError):
+        return UNKNOWN_DAY
+
+
+def _requested_day():
+    day = (request.args.get("day") or "").strip()
+    if not day:
+        return None
+    if day == UNKNOWN_DAY:
+        return day
+    try:
+        if datetime.strptime(day, "%Y-%m-%d").strftime("%Y-%m-%d") == day:
+            return day
+    except ValueError:
+        pass
+    return False
+
+
+def _dated_rows(account, status, search):
+    """Read-only date partition with identical account/status/search restrictions.
+
+    Parse WB ISO timestamps in Python to avoid SQLite/PostgreSQL timezone drift.
+    This is deliberately limited to the manager's existing pending queue.
+    """
+    terms = [account]
+    condition = ""
+    if status in ("confirm", "complete"):
+        condition += " AND o.wb_status=?"
+        terms.append(status)
+    if search:
+        condition += """ AND (LOWER(o.nm_id) LIKE ? ESCAPE '!'
+          OR LOWER(o.seller_article) LIKE ? ESCAPE '!'
+          OR o.order_id LIKE ? ESCAPE '!'
+          OR EXISTS (SELECT 1 FROM wb_fbs_order_skus ss
+            WHERE ss.account_id=o.account_id AND ss.order_id=o.order_id
+              AND LOWER(ss.sku) LIKE ? ESCAPE '!'))"""
+        terms.extend([_search_pattern(search)] * 4)
+    return query_all("""SELECT o.order_id,COALESCE(o.seller_article,''),
+        o.wb_status,o.created_at,q.accepted_at """ +
+        _orders_sql(condition), tuple(terms))
+
+
+def _read_days(account, status, search):
+    days = defaultdict(lambda: [0, 0, 0])
+    for oid, article, state, created, accepted in _dated_rows(account, status, search):
+        item = days[_order_day(created)]
+        item[0] += 1
+        item[1 if state == "confirm" else 2] += 1
+    return [dict(day=day, count=counts[0], confirm=counts[1], delivery=counts[2])
+            for day, counts in sorted(days.items(),
+                key=lambda item: (item[0] != UNKNOWN_DAY, item[0]), reverse=True)]
+
+
+def _read_page(account, status, search, page, article=None, day=None):
     terms = [account]
     condition = ""
     if status in ("confirm", "complete"):
@@ -59,12 +126,20 @@ def _read_page(account, status, search, page, article=None):
               WHERE ss.account_id=o.account_id AND ss.order_id=o.order_id
                 AND LOWER(ss.sku) LIKE ? ESCAPE '!'))"""
         terms.extend([_search_pattern(search)] * 4)
-    count = query_one("SELECT COUNT(*) " + _orders_sql(condition), tuple(terms))
-    total = int(count[0] or 0)
-    ids = query_all("""SELECT o.order_id """ + _orders_sql(condition) +
-                    " ORDER BY q.accepted_at DESC,o.order_id DESC LIMIT ? OFFSET ?",
-                    tuple(terms + [PAGE_SIZE, (page-1)*PAGE_SIZE]))
-    order_ids = [str(r[0]) for r in ids]
+    if day is None:
+        count = query_one("SELECT COUNT(*) " + _orders_sql(condition), tuple(terms))
+        total = int(count[0] or 0)
+        ids = query_all("""SELECT o.order_id """ + _orders_sql(condition) +
+                        " ORDER BY q.accepted_at DESC,o.order_id DESC LIMIT ? OFFSET ?",
+                        tuple(terms + [PAGE_SIZE, (page-1)*PAGE_SIZE]))
+        order_ids = [str(r[0]) for r in ids]
+    else:
+        filtered = [row for row in _dated_rows(account, status, search)
+                    if _order_day(row[3]) == day and
+                    (article is None or row[1] == article)]
+        filtered.sort(key=lambda row: (row[4] or "", str(row[0])), reverse=True)
+        total = len(filtered)
+        order_ids = [str(row[0]) for row in filtered[(page-1)*PAGE_SIZE:page*PAGE_SIZE]]
     if not order_ids:
         return total, []
     marks = ",".join("?" for _ in order_ids)
@@ -121,15 +196,31 @@ def unpicked_list():
     article = request.args.get("article")
     if article is not None and len(article) > 180:
         return jsonify(error="Слишком длинный артикул"), 400
-    total, rows = _read_page(_account(), status, search, page, article)
+    day = _requested_day()
+    if day is False:
+        return jsonify(error="Неверная дата"), 400
+    total, rows = _read_page(_account(), status, search, page, article, day)
     response = jsonify(total=total, page=page, page_size=PAGE_SIZE, rows=rows)
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
 
-def _read_groups(account, status, search, page):
+def _read_groups(account, status, search, page, day=None):
     """Group across the entire admitted, pending WB queue, not one order page."""
+    if day is not None:
+        groups = defaultdict(lambda: [0, 0, 0])
+        for oid, article, state, created, accepted in _dated_rows(account, status, search):
+            if _order_day(created) != day:
+                continue
+            item = groups[article]
+            item[0] += 1
+            item[1 if state == "confirm" else 2] += 1
+        grouped = sorted(groups.items(), key=lambda item: (-item[1][0], item[0]))
+        total_orders = sum(values[0] for values in groups.values())
+        return len(grouped), total_orders, [
+            dict(article=article, count=v[0], confirm=v[1], delivery=v[2])
+            for article, v in grouped[(page-1)*GROUP_PAGE_SIZE:page*GROUP_PAGE_SIZE]]
     terms = [account]
     condition = ""
     if status in ("confirm", "complete"):
@@ -179,9 +270,29 @@ def unpicked_groups():
         return jsonify(error="Неверная страница"), 400
     if not 1 <= page <= 10000:
         return jsonify(error="Неверная страница"), 400
-    total, orders, groups = _read_groups(_account(), status, search, page)
+    day = _requested_day()
+    if day is False:
+        return jsonify(error="Неверная дата"), 400
+    total, orders, groups = _read_groups(_account(), status, search, page, day)
     response = jsonify(total=total, orders=orders, page=page,
                        page_size=GROUP_PAGE_SIZE, groups=groups)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+
+@wb_unpicked_bp.get("/api/manager/wb-fbs/unpicked/days")
+def unpicked_days():
+    if not manager_access():
+        return jsonify(error="Доступ только руководителю"), 403
+    if not _enabled():
+        return jsonify(error="WB FBS отключён"), 503
+    status = request.args.get("status", "all")
+    if status not in ("all", "confirm", "complete"):
+        return jsonify(error="Неверный фильтр"), 400
+    search = (request.args.get("q") or "").strip()[:80]
+    days = _read_days(_account(), status, search)
+    response = jsonify(days=days, orders=sum(item["count"] for item in days))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -294,11 +405,14 @@ th{color:#adc4d7;font-size:12px}tr:hover td{background:#1b3147}
 .group-count{font-size:17px;font-weight:750}
 .toolbar label{display:inline-flex;gap:7px;align-items:center}
 #detailPanel{display:none}
+#daysPanel{margin-top:15px}
+#daysPanel button{font-size:13px}
+.day-active{border-color:#87dcba!important;color:#87dcba!important}
 @media(max-width:760px){main{padding:12px}.scroll{overflow-x:auto}table{min-width:820px}}
 </style></head><body><main>
 <a href="/manager">← Вернуться на главную</a>
 <h1>Несобранные заказы WB</h1>
-<div class="muted">Товары сгруппированы по артикулу продавца по всей очереди GRIT. Внутри группы можно печатать оригинальные WB-стикеры 58×40 мм по заказам.</div>
+<div class="muted">Текущий остаток несобранных заказов по дате создания на WB (Москва). Выбери день, затем артикул и заказ. Это не архив остатков на конец дня.</div>
 <div class="panel">
 <div class="toolbar">
 <input id="query" type="search" placeholder="Артикул WB, артикул продавца, ШК или заказ" aria-label="Поиск">
@@ -308,6 +422,11 @@ th{color:#adc4d7;font-size:12px}tr:hover td{background:#1b3147}
 <button id="refresh" class="secondary">Обновить</button>
 </div>
 <p id="summary" class="hint">Загрузка…</p>
+<section id="daysPanel" aria-label="Остатки по дням"><button id="allDays" type="button" class="secondary">Все дни</button>
+<div class="scroll"><table><thead><tr><th>Дата заказа WB (МСК)</th><th>Остаток</th><th>На сборке WB</th><th>В доставке WB</th><th>Действие</th></tr></thead>
+<tbody id="days"><tr><td colspan="5">Загрузка…</td></tr></tbody></table></div>
+</section>
+<p id="dayHint" class="hint">Все дни · выбери дату для просмотра артикулов</p>
 <section id="groupsPanel" aria-label="Группы товаров">
 <div class="scroll"><table><thead><tr><th>Артикул продавца</th><th>Заказов</th><th>На сборке</th><th>В доставке</th><th>Действие</th></tr></thead>
 <tbody id="groups"><tr><td colspan="5">Загрузка…</td></tr></tbody></table></div>
@@ -332,10 +451,39 @@ th{color:#adc4d7;font-size:12px}tr:hover td{background:#1b3147}
 <p class="hint">Нет артикула? Такие заказы попадают в группу «Без артикула». Список не включает собранные, отменённые и не принятые GRIT заказы.</p>
 </div></main><script>
 const csrf=__CSRF_JSON__;
-let groupPage=1,detailPage=1,groupsTotal=0,total=0,rows=[],selected=new Set(),busy=false,serial=0,article=null;
+let groupPage=1,detailPage=1,groupsTotal=0,total=0,rows=[],selected=new Set(),busy=false,serial=0,article=null,selectedDay=null,daySerial=0;
 const $=x=>document.getElementById(x);
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function queryParams(page){return new URLSearchParams({page:String(page),status:$('status').value,q:$('query').value.trim()})}
+function queryParams(page){
+ const p=new URLSearchParams({page:String(page),status:$('status').value,q:$('query').value.trim()});
+ if(selectedDay!==null)p.set('day',selectedDay);
+ return p;
+}
+async function loadDays(){
+ const call=++daySerial;
+ try{
+  const p=new URLSearchParams({status:$('status').value,q:$('query').value.trim()});
+  const r=await fetch('/api/manager/wb-fbs/unpicked/days?'+p,{cache:'no-store'});
+  const d=await r.json();if(call!==daySerial)return;
+  if(!r.ok)throw Error(d.error||'Ошибка загрузки дней');
+  const days=d.days||[];
+  $('days').innerHTML=days.length?days.map((x,i)=>'<tr><td>'+
+   esc(x.day==='unknown'?'Дата неизвестна':x.day)+'</td><td class="group-count">'+x.count+
+   '</td><td class="ok">'+x.confirm+'</td><td class="status">'+x.delivery+
+   '</td><td><button type="button" class="secondary day-select'+(selectedDay===x.day?' day-active':'')+
+   '" data-index="'+i+'">Открыть день</button></td></tr>').join(''):
+   '<tr><td colspan="5">Несобранных заказов нет</td></tr>';
+  window.dayData=days;
+  $('dayHint').textContent=selectedDay===null?'Все дни · выбери дату для просмотра артикулов':
+   'Выбран день: '+(selectedDay==='unknown'?'Дата неизвестна':selectedDay)+' · '+
+   'для сброса нажми «Все дни»';
+ }catch(e){if(call===daySerial)$('days').innerHTML='<tr><td colspan="5" class="error">'+esc(e.message)+'</td></tr>';}
+}
+function selectDay(day){
+ selectedDay=day;groupPage=1;detailPage=1;article=null;
+ $('groupsPanel').style.display='block';$('detailPanel').style.display='none';
+ loadDays();loadGroups();
+}
 function updateButtons(){
  $('print').disabled=busy||selected.size===0||selected.size>50;
  $('print').textContent='Печать WB 58×40 ('+selected.size+')';
@@ -378,6 +526,11 @@ async function loadOrders(){
  }catch(e){if(call===serial){$('rows').innerHTML='<tr><td colspan="7" class="error">'+esc(e.message)+'</td></tr>';$('articleSummary').textContent='Ошибка';}}
  updateButtons();
 }
+$('allDays').addEventListener('click',()=>selectDay(null));
+$('days').addEventListener('click',e=>{
+ const btn=e.target.closest('.day-select');if(!btn||!window.dayData)return;
+ const item=window.dayData[Number(btn.dataset.index)];if(item)selectDay(item.day);
+});
 $('groups').addEventListener('click',e=>{
  const target=e.target.closest('.open-group');if(!target||!window.groupData)return;
  const group=window.groupData[Number(target.dataset.index)];if(!group)return;
@@ -414,12 +567,12 @@ $('print').addEventListener('click',async()=>{
  finally{busy=false;updateButtons();}
 });
 let timer;
-$('query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{groupPage=1;loadGroups()},350)});
-$('status').addEventListener('change',()=>{groupPage=1;loadGroups()});
-$('refresh').addEventListener('click',()=>{if(article!==null)loadOrders();else loadGroups()});
+$('query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{groupPage=1;loadDays();loadGroups()},350)});
+$('status').addEventListener('change',()=>{groupPage=1;loadDays();loadGroups()});
+$('refresh').addEventListener('click',()=>{loadDays();if(article!==null)loadOrders();else loadGroups()});
 $('gprev').addEventListener('click',()=>{if(groupPage>1){groupPage--;loadGroups()}});
 $('gnext').addEventListener('click',()=>{if(groupPage*50<groupsTotal){groupPage++;loadGroups()}});
 $('prev').addEventListener('click',()=>{if(detailPage>1){detailPage--;loadOrders()}});
 $('next').addEventListener('click',()=>{if(detailPage*50<total){detailPage++;loadOrders()}});
-loadGroups();
+loadDays();loadGroups();
 </script></body></html>"""
