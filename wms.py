@@ -1433,6 +1433,7 @@ button:focus-visible,a:focus-visible,#barcode:focus-visible{outline:2px solid #f
       <button class="secondary" id="scanButton" onclick="manualScan()">Принять скан</button>
     </div>
     <div id="result" role="status" aria-live="polite"></div>
+    <div id="wbUnscannedHint" role="status" aria-live="polite" class="muted" style="font-size:12px;padding:6px 12px"></div>
   </div>
   <div id="side">
     <div class="card activity-switch">
@@ -1607,12 +1608,37 @@ async function acceptSkipQr(code){
   '<div class="ok">Пропуск товара разрешён руководителем. Заказ НЕ засчитан. Сканируй следующий товар.</div>';
  await refresh();return true;
 }
+let wbHintLastBarcode='',wbHintRequestSerial=0;
+async function refreshWbUnscannedHint(barcode, warnPrevious=false){
+ const container=document.getElementById('wbUnscannedHint');
+ if(!container||!shiftId||!barcode)return;
+ const serial=++wbHintRequestSerial;
+ try{
+  const url='/api/fbs/wb-unscanned-hints?'+new URLSearchParams({shift_id:shiftId,barcode});
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok)return;
+  const d=await r.json();
+  if(serial!==wbHintRequestSerial||!d.available)return;
+  const msg='Общий остаток WB по товару: '+d.remaining+(d.truncated?'+':'')+
+    (d.sticker_suffixes.length?' · окончания WB-стикеров: '+d.sticker_suffixes.join(', '):'');
+  container.textContent=(warnPrevious&&d.remaining>0?'⚠ Предыдущий товар не закрыт по общей очереди. ':'')+msg+
+    ' · это не личное задание';
+ }catch(e){if(serial===wbHintRequestSerial)container.textContent='Подсказка WB временно недоступна';}
+}
 async function acceptProduct(code){
  const r=await fetch('/api/fbs/product-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:code,shift_id:shiftId})});
  const d=await r.json();
  if(!r.ok){showTsdError(d.error||'Товар не найден');return false}
+ const previous=wbHintLastBarcode;
+ if(previous&&previous!==d.barcode){
+  // Warning is informational: never block the product-first WB scan flow.
+  refreshWbUnscannedHint(previous,true);
+ }
+ wbHintLastBarcode=d.barcode;
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
  updateScanStage();beep(true);
+ // Refresh after the warning; newest product lookup wins over stale requests.
+ setTimeout(()=>refreshWbUnscannedHint(d.barcode),0);
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
  return true;
 }
@@ -1628,7 +1654,9 @@ async function sendFbsScan(payload){
  const d=await r.json();
  if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB');return false}
  localStorage.removeItem(FBS_OUTBOX_KEY);
+ const verifiedBarcode=payload.product_barcode;
  pendingProduct=null;updateScanStage();beep(true);
+ refreshWbUnscannedHint(verifiedBarcode);
  document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
  return true;
 }
@@ -3699,6 +3727,52 @@ def stats_employees():
             "avg_speed": round(orders / hours, 1) if hours > 0 else 0.0,
         })
     return jsonify(employees=out)
+
+
+@wms_bp.get("/api/fbs/wb-unscanned-hints")
+def fbs_wb_unscanned_hints():
+    """Read-only, shared WB queue hints for the authenticated employee shift.
+
+    Not a personal picking plan: concurrent employees share this remainder.
+    Only a full WB sticker scan can complete an order.
+    """
+    ensure_db()
+    employee = get_session_employee()
+    if not employee:
+        return jsonify(error="Требуется вход по бейджу"), 401
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
+        return jsonify(available=False, reason="WB FBS API выключен")
+    shift_id = str(request.args.get("shift_id") or "").strip()
+    barcode = str(request.args.get("barcode") or "").strip()
+    if not shift_id or not barcode or len(barcode) > 128:
+        return jsonify(error="Нужны смена и ШК товара"), 400
+    shift = query_one(
+        "SELECT employee_id,ended_at FROM shifts WHERE id=?", (shift_id,))
+    if not shift or shift[0] != employee["id"] or shift[1] is not None:
+        return jsonify(error="Нет активной смены сотрудника"), 403
+    account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+    rows = query_all("""SELECT o.order_id,t.barcode,o.seller_article
+        FROM wb_fbs_picking_queue q
+        JOIN wb_fbs_orders o
+          ON o.account_id=q.account_id AND o.order_id=q.order_id
+        JOIN wb_fbs_order_skus s
+          ON s.account_id=o.account_id AND s.order_id=o.order_id
+        LEFT JOIN wb_fbs_stickers t
+          ON t.account_id=o.account_id AND t.order_id=o.order_id
+        WHERE q.account_id=?
+          AND s.sku=?
+          AND o.local_status='pending'
+          AND o.wb_status IN ('confirm','complete')
+        ORDER BY q.accepted_at DESC,o.order_id DESC LIMIT 101""",
+        (account, barcode))
+    # Never claim a complete list when the cap is reached.
+    total = len(rows)
+    hints = [str(row[1])[-4:] for row in rows[:100] if row[1]]
+    return jsonify(available=True, shared=True, barcode=barcode,
+                   remaining=total, truncated=total>100,
+                   sticker_suffixes=hints[:12],
+                   article=next((row[2] for row in rows if row[2]), ""),
+                   note="Общий остаток WB, не личный план. Подсказки не подтверждают сборку.")
 
 
 @wms_bp.get("/api/manager/wb-fbs/picking-queue")
