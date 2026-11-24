@@ -216,6 +216,9 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_audit")[0],1)
         with self.client.session_transaction() as s:
             s.clear()
+        self.assertEqual(self.client.post("/api/attendance/entry-intent",
+            json={"qr":"https://localhost/attendance/in"},
+            base_url="https://localhost").status_code,200)
         blocked=self.client.post("/api/auth/login",json={"badge_code":self.badge})
         self.assertEqual(blocked.status_code,409)
         self.assertEqual(self.client.get("/attendance/in").status_code,302)
