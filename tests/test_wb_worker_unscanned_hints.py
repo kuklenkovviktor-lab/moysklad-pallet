@@ -123,16 +123,31 @@ class WorkerWbHintTests(unittest.TestCase):
                 patch.object(wms, "query_all", return_value=[]):
             self.assertEqual(self.get().json["remaining"], 0)
 
+    def test_article_is_always_from_confirmed_product_scan(self):
+        from pathlib import Path
+        source = Path("wms.py").read_text(encoding="utf-8")
+        ui = source.split('FBS_PAGE = """',1)[1].split('"""',1)[0]
+        self.assertIn("wbHintLastArticle=d.article||'';", ui)
+        self.assertIn("const previousArticle=wbHintLastArticle;", ui)
+        self.assertIn("const article=scannedArticle||d.article||'Артикул не указан в WB';", ui)
+        self.assertNotIn("const article=d.article||barcode;", ui)
+        self.assertIn("refreshWbUnscannedHint(previous,true,previousArticle)", ui)
+        self.assertIn("refreshWbUnscannedHint(verifiedBarcode,false,wbHintLastBarcode===verifiedBarcode?wbHintLastArticle:'')", ui)
+        self.assertIn("Сегодня · товар", ui)
+        self.assertIn("WB последние 4 цифры: ", ui)
+
     def test_fbs_worker_ui_is_nonblocking(self):
         from pathlib import Path
         source = Path("wms.py").read_text(encoding="utf-8")
         ui = source.split('FBS_PAGE = """',1)[1].split('"""',1)[0]
         self.assertIn('id="wbUnscannedHint"',ui)
         self.assertIn('id="wbPreviousHint"',ui)
-        self.assertIn('refreshWbUnscannedHint(previous,true)',ui)
-        self.assertIn('setTimeout(()=>refreshWbUnscannedHint(d.barcode),0)',ui)
+        self.assertIn('refreshWbUnscannedHint(previous,true,previousArticle)',ui)
+        self.assertIn("setTimeout(()=>refreshWbUnscannedHint(d.barcode,false,d.article||''),0)",ui)
         self.assertIn("async function handleScan(code)",ui)
-        self.assertIn("x.part_a+' / '+x.part_b",ui)
+        self.assertIn("String(x.part_b||'')",ui)
+        self.assertIn("WB последние 4 цифры: ",ui)
+        self.assertNotIn("x.part_a+' / '+x.part_b",ui)
         self.assertIn("Осталось от предыдущего товара сегодня",ui)
 
 
