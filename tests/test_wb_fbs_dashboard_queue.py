@@ -74,6 +74,30 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         ))
         self.assertEqual(response.headers["Cache-Control"],"no-store")
 
+    def test_day_filter_excludes_old_orders_without_changing_historic_total(self):
+        rows = [
+            ("confirm", "2026-11-22T09:00:00+03:00"),
+            ("complete", "2026-11-23T11:00:00+03:00"),
+            ("confirm", "2026-11-24T08:00:00+03:00"),
+            ("complete", "2026-11-23T21:10:00+00:00"),
+            ("confirm", None),
+        ]
+        with patch.object(wms, "_wb_hint_today", return_value="2026-11-24"), \
+                patch.object(wms, "query_all", return_value=rows):
+            with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-24"):
+                result = wms.manager_wb_fbs_picking_queue().get_json()
+        self.assertEqual(result["day"], "2026-11-24")
+        self.assertEqual(result["confirm_orders"], 1)
+        self.assertEqual(result["delivery_orders"], 1)
+        self.assertEqual(result["remaining_orders"], 2)
+
+    def test_day_filter_rejects_past_day_on_live_endpoint(self):
+        with patch.object(wms, "_wb_hint_today", return_value="2026-11-24"):
+            with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-22"):
+                response, status = wms.manager_wb_fbs_picking_queue()
+        self.assertEqual(status, 400)
+        self.assertIn("error", response.get_json())
+
     def test_empty_queue_is_real_zero(self):
         self.assertEqual(wms.manager_wb_fbs_picking_queue().get_json()["remaining_orders"],0)
 
