@@ -10,6 +10,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import time
 import tempfile
 import unittest
 import uuid
@@ -64,6 +65,14 @@ class IssuedBadgeTests(unittest.TestCase):
         if self.wms._PG_POOL is not None:
             self.wms._PG_POOL.close()
 
+    def login_with_synthetic_qr_intent(self, code):
+        client = self.app.test_client()
+        # Badge compatibility tests use a synthetic server-side QR intent;
+        # the attendance integration suite tests actual QR recognition.
+        with client.session_transaction() as sess:
+            sess["attendance_entry_intent_at"] = time.time()
+        return client.post('/api/auth/login', json={'badge_code': code})
+
     def historical_codes(self):
         issued = {}
         key = b'synthetic-retired-issuing-key'
@@ -94,7 +103,7 @@ class IssuedBadgeTests(unittest.TestCase):
         for employee, codes in issued.items():
             for code in codes:
                 with self.subTest(employee=employee, kind='QR' if code.startswith('WMS-') else 'scanner'):
-                    response = self.app.test_client().post('/api/auth/login', json={'badge_code': code})
+                    response = self.login_with_synthetic_qr_intent(code)
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(response.json['employee']['id'], employee)
 
@@ -121,7 +130,7 @@ class IssuedBadgeTests(unittest.TestCase):
         self.assertEqual(len({row[2] for row in rows}), 5)
         for employee, qr, scanner in rows:
             self.assertTrue(qr and scanner)
-            response = self.app.test_client().post('/api/auth/login', json={'badge_code': scanner})
+            response = self.login_with_synthetic_qr_intent(scanner)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json['employee']['id'], employee)
 
@@ -130,7 +139,7 @@ class IssuedBadgeTests(unittest.TestCase):
         self.wms.execute('UPDATE employees SET active=0 WHERE id=?', ('anton',))
         self.wms.init_wms_db()
         for code in issued['anton']:
-            self.assertEqual(self.app.test_client().post('/api/auth/login', json={'badge_code': code}).status_code, 404)
+            self.assertEqual(self.login_with_synthetic_qr_intent(code).status_code, 404)
         self.assertEqual(self.wms.query_one('SELECT COUNT(*) FROM shifts WHERE employee_id=?', ('anton',))[0], 0)
 
     def test_bootstrap_and_printing_use_stored_issued_codes(self):
