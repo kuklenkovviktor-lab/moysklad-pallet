@@ -111,6 +111,82 @@ class UnpickedManagerTests(unittest.TestCase):
                 self.assertEqual(module._search_pattern("a_b%c!d"), "%a!_b!%c!!d%")
                 self.assertEqual(module._read_groups("default","all","nothing",1)[1],0)
 
+    def test_wb_order_day_uses_moscow_and_unknown_is_explicit(self):
+        self.assertEqual(module._order_day("2026-11-23T22:30:00Z"), "2026-11-24")
+        self.assertEqual(module._order_day("2026-11-24T01:30:00+03:00"), "2026-11-24")
+        self.assertEqual(module._order_day("2026-11-24T12:00:00+00:00"), "2026-11-24")
+        self.assertEqual(module._order_day(""), "unknown")
+        self.assertEqual(module._order_day("nonsense"), "unknown")
+        self.assertEqual(module._order_day(None), "unknown")
+
+    def test_day_remainder_filters_and_group_totals_on_synthetic_queue(self):
+        import tempfile
+        from pathlib import Path
+        import wms
+        from wb_fbs_sync_v11 import init_schema
+        with tempfile.TemporaryDirectory(prefix="wb-days-synthetic-") as tmp:
+            with patch.object(wms, "DB_PATH", str(Path(tmp) / "synthetic.db")):
+                init_schema()
+
+                def add(oid, created, status="confirm", local="pending",
+                        article="ART", account="default", queued=True):
+                    wms.execute("""INSERT INTO wb_fbs_orders
+                        (account_id,order_id,nm_id,seller_article,wb_status,local_status,
+                         created_at,synced_at) VALUES(?,?,?,?,?,?,?,?)""",
+                        (account, oid, "100", article, status, local, created, "2026-11-25T00:00:00Z"))
+                    if queued:
+                        wms.execute("""INSERT INTO wb_fbs_picking_queue
+                            (account_id,order_id,accepted_at) VALUES(?,?,?)""",
+                            (account,oid,"2026-11-25T00:00:00Z"))
+
+                add("101","2026-11-23T22:30:00Z","confirm",article="A")
+                add("102","2026-11-24T00:15:00Z","complete",article="A")
+                add("103","2026-11-23T12:00:00Z","confirm",article="B")
+                add("104",None,"complete",article="C")
+                add("105","2026-11-24T04:00:00Z",local="complete")
+                add("106","2026-11-24T04:00:00Z",status="cancel")
+                add("107","2026-11-24T04:00:00Z",account="other")
+                add("108","2026-11-24T04:00:00Z",queued=False)
+
+                days=module._read_days("default","all","")
+                self.assertEqual(sum(x["count"] for x in days),4)
+                self.assertEqual([(x["day"],x["count"]) for x in days],
+                                 [("2026-11-24",2),("2026-11-23",1),("unknown",1)])
+                self.assertEqual(days[0]["confirm"],1)
+                self.assertEqual(days[0]["delivery"],1)
+                self.assertEqual(module._read_groups("default","all","",1,"2026-11-24")[1],2)
+                self.assertEqual(module._read_groups("default","all","",1,"unknown")[1],1)
+                self.assertEqual(module._read_page("default","all","",1,"A","2026-11-24")[0],2)
+                self.assertEqual(module._read_page("default","all","",1,None,"unknown")[0],1)
+                self.assertEqual(module._read_page("default","all","",1,None,"2026-11-23")[0],1)
+                self.assertEqual(module._read_page("default","confirm","",1,None,"2026-11-24")[0],1)
+                self.assertEqual(module._read_page("default","complete","",1,None,"2026-11-24")[0],1)
+                self.assertEqual(module._read_days("default","all","ZZZ"),[])
+                # Repeated requests do not mutate the order queue.
+                self.assertEqual(wms.query_one("SELECT COUNT(*) FROM wb_fbs_picking_queue")[0],7)
+
+    def test_days_api_requires_manager_and_validates_day_filter(self):
+        with patch.object(module, "manager_access", return_value=False):
+            self.assertEqual(self.client.get("/api/manager/wb-fbs/unpicked/days").status_code,403)
+        with patch.object(module, "manager_access", return_value=True), \\
+             patch.object(module, "_enabled", return_value=True), \\
+             patch.object(module, "_read_days", return_value=[
+                 {"day":"2026-11-24","count":2,"confirm":1,"delivery":1}]):
+            r=self.client.get("/api/manager/wb-fbs/unpicked/days")
+            self.assertEqual(r.status_code,200)
+            self.assertEqual(r.json["orders"],2)
+            for bad in ("bogus","2026-02-30","2026-1-2"):
+                self.assertEqual(self.client.get("/api/manager/wb-fbs/unpicked/groups?day="+bad).status_code,400)
+                self.assertEqual(self.client.get("/api/manager/wb-fbs/unpicked?day="+bad).status_code,400)
+
+    def test_day_panel_keeps_article_and_order_drilldown(self):
+        html=module.PAGE
+        self.assertIn('id="daysPanel"',html)
+        self.assertIn('id="allDays"',html)
+        self.assertIn('selectedDay',html)
+        self.assertIn("loadDays();loadGroups();",html)
+        self.assertIn("Дата заказа WB (МСК)",html)
+
     def test_groups_api_manager_access(self):
         with patch.object(module, "manager_access", return_value=False):
             self.assertEqual(
