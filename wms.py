@@ -2320,14 +2320,14 @@ function renderProgress(done){
  document.getElementById('remaining').textContent=rest;
  document.getElementById('progressPlan').textContent=' / '+total+' под контролем';
  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
- document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · текущий остаток: '+rest+
-  ' · '+pct.toFixed(1)+'% условного объёма. Остаток может включать прошлые дни; это не дневной план.';
+ document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · остаток заказов WB за сегодня: '+rest+
+  ' · '+pct.toFixed(1)+'% условного объёма. Факт по дате сканирования, остаток по дате заказа; это не дневной план.';
 }
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
  try{
-  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
+  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue?day='+encodeURIComponent(dayKey()),{cache:'no-store'},5000);
   if(response.status===403){location.href='/manager-login';return}
   if(!response.ok)throw Error('HTTP '+response.status);
   const result=await response.json();
@@ -2337,7 +2337,7 @@ async function loadWbAssemblyPlan(){
   }
   wbAssemblyCount=result.remaining_orders;
   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB: на сборке '+result.confirm_orders+
+  info.textContent='Очередь WB за сегодня: на сборке '+result.confirm_orders+
     ' · в доставке WB '+result.delivery_orders+' · обновляется автоматически';
  }catch(e){
   wbAssemblyCount=null;
@@ -3786,27 +3786,44 @@ def manager_wb_fbs_picking_queue():
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         return jsonify(state="disabled"), 503
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+    day = (request.args.get("day") or "").strip()
+    if day and day != _wb_hint_today():
+        return jsonify(error="Доступна текущая дата по Москве"), 400
     try:
-        row = query_one(
-            """SELECT
-                COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
-                COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
-                COUNT(*)
-            FROM wb_fbs_picking_queue q
-            JOIN wb_fbs_orders o
-              ON o.account_id=q.account_id AND o.order_id=q.order_id
-            WHERE q.account_id=?
-              AND o.local_status='pending'
-              AND o.wb_status IN ('confirm','complete')""",
-            (account,),
-        )
+        if day:
+            from wb_unpicked_manager import _order_day
+            rows = query_all("""SELECT o.wb_status,o.created_at
+                FROM wb_fbs_picking_queue q
+                JOIN wb_fbs_orders o
+                  ON o.account_id=q.account_id AND o.order_id=q.order_id
+                WHERE q.account_id=?
+                  AND o.local_status='pending'
+                  AND o.wb_status IN ('confirm','complete')""", (account,))
+            today_rows = [row for row in rows if _order_day(row[1]) == day]
+            confirm = sum(1 for row in today_rows if row[0] == "confirm")
+            delivery = sum(1 for row in today_rows if row[0] == "complete")
+            remaining = len(today_rows)
+        else:
+            row = query_one(
+                """SELECT
+                    COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
+                    COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
+                    COUNT(*)
+                FROM wb_fbs_picking_queue q
+                JOIN wb_fbs_orders o
+                  ON o.account_id=q.account_id AND o.order_id=q.order_id
+                WHERE q.account_id=?
+                  AND o.local_status='pending'
+                  AND o.wb_status IN ('confirm','complete')""",
+                (account,),
+            )
+            confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
     except Exception:
-        # Never return a fabricated zero when the data source is unavailable.
         return jsonify(state="error", error="Очередь WB недоступна"), 503
-    confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
     response = jsonify(
         state="connected", remaining_orders=remaining,
         confirm_orders=confirm, delivery_orders=delivery,
+        **({"day": day} if day else {}),
     )
     response.headers["Cache-Control"] = "no-store"
     return response
