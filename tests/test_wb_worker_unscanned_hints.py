@@ -134,6 +134,7 @@ class WorkerWbHintTests(unittest.TestCase):
         self.assertIn("refreshWbUnscannedHint(previous,true,previousArticle)", ui)
         self.assertIn("refreshWbUnscannedHint(verifiedBarcode,false,wbHintLastBarcode===verifiedBarcode?wbHintLastArticle:'')", ui)
         self.assertIn("Сегодня · товар", ui)
+        self.assertIn("WB последние 4 цифры: ", ui)
 
     def test_fbs_worker_ui_is_nonblocking(self):
         from pathlib import Path
@@ -144,7 +145,9 @@ class WorkerWbHintTests(unittest.TestCase):
         self.assertIn('refreshWbUnscannedHint(previous,true,previousArticle)',ui)
         self.assertIn("setTimeout(()=>refreshWbUnscannedHint(d.barcode,false,d.article||''),0)",ui)
         self.assertIn("async function handleScan(code)",ui)
-        self.assertIn("x.part_a+' / '+x.part_b",ui)
+        self.assertIn("String(x.part_b||'')",ui)
+        self.assertIn("WB последние 4 цифры: ",ui)
+        self.assertNotIn("x.part_a+' / '+x.part_b",ui)
         self.assertIn("Осталось от предыдущего товара сегодня",ui)
 
 
