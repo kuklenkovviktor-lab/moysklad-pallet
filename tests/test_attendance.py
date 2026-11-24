@@ -44,6 +44,9 @@ class AttendanceTests(unittest.TestCase):
         self.badge=self.wms.query_one("SELECT badge_code FROM employees WHERE id=?",(self.employee_id,))[0]
 
     def login(self):
+        intent=self.client.post("/api/attendance/entry-intent",
+            json={"qr":"https://localhost/attendance/in"},base_url="https://localhost")
+        self.assertEqual(intent.status_code,200,intent.json)
         res=self.client.post("/api/auth/login",json={"badge_code":self.badge})
         self.assertEqual(res.status_code,200,res.json)
 
@@ -51,6 +54,35 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(self.client.get(path).status_code,200)
         with self.client.session_transaction() as s:
             return s["attendance_csrf"]
+
+    def test_badge_only_and_old_short_code_cannot_enter(self):
+        for code in (self.badge, "3", "ONIX-BADGE-3"):
+            with self.subTest(code=code):
+                res=self.client.post("/api/auth/login",json={"badge_code":code})
+                self.assertNotEqual(res.status_code,200)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts")[0],0)
+
+    def test_entry_intent_rejects_non_qr_strings(self):
+        for qr in ("WMS-BADGE-FAKE","https://localhost/attendance/out",
+                   "https://evil.example/attendance/in",
+                   "https://localhost/attendance/in?next=/fbs"):
+            self.assertEqual(self.client.post("/api/attendance/entry-intent",
+                json={"qr":qr},base_url="https://localhost").status_code,403)
+        self.assertEqual(self.client.post("/api/auth/login",
+            json={"badge_code":self.badge}).status_code,403)
+
+    def test_valid_qr_badge_immediately_records_arrival(self):
+        self.login()
+        row=self.wms.query_one("SELECT arrived_at,source,left_at FROM attendance_visits WHERE employee_id=?",
+                               (self.employee_id,))
+        self.assertTrue(row[0])
+        self.assertEqual(row[1],"qr")
+        self.assertIsNone(row[2])
+        self.assertEqual(self.client.get("/api/auth/me").status_code,200)
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess["attendance_verified"])
+            self.assertNotIn("attendance_entry_intent_at",sess)
 
     def test_entry_badge_exit_closes_shift_and_clears_session(self):
         self.login()
@@ -116,6 +148,7 @@ class AttendanceTests(unittest.TestCase):
     def test_departure_without_arrival_does_not_close_shift(self):
         self.login()
         shift=self.wms.query_one("SELECT id FROM shifts WHERE employee_id=? AND ended_at IS NULL",(self.employee_id,))[0]
+        self.wms.execute("DELETE FROM attendance_visits WHERE employee_id=?", (self.employee_id,))
         csrf=self.token("/attendance/out")
         response=self.client.post("/attendance/out",data={"csrf":csrf,"exit_qr":self.attendance.exit_qr_value()})
         self.assertEqual(response.status_code,403)
@@ -155,7 +188,7 @@ class AttendanceTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.client.post("/attendance/in",data={}).status_code,403)
         self.assertEqual(self.client.post("/attendance/in",data={"csrf":"wrong"}).status_code,403)
-        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],1)
 
     def test_manager_only_journal_and_no_manager_in_register(self):
         self.login()
@@ -183,8 +216,9 @@ class AttendanceTests(unittest.TestCase):
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_audit")[0],1)
         with self.client.session_transaction() as s:
             s.clear()
-        self.login()
-        self.assertEqual(self.client.get("/attendance/in").status_code,403)
+        blocked=self.client.post("/api/auth/login",json={"badge_code":self.badge})
+        self.assertEqual(blocked.status_code,409)
+        self.assertEqual(self.client.get("/attendance/in").status_code,302)
 
     def test_translucent_pill_navigation(self):
         from grit_theme import GRIT_CSS
@@ -218,9 +252,9 @@ class AttendanceTests(unittest.TestCase):
         self.assertIn("parsed.pathname==='/attendance/out'",login_html)
         self.assertIn("pendingAttendanceAction=action",login_html)
         self.assertIn("pendingAttendanceAction ||",login_html)
-        self.assertIn("if(!setAttendanceAction(attendanceActionFromQr(code))){",login_html)
+        self.assertIn("if(!setAttendanceAction(attendanceActionFromQr(code),code)){",login_html)
         self.assertIn("// Keep the camera open to scan the personal badge next.",login_html)
-        self.assertIn("if(setAttendanceAction(attendanceActionFromQr(code)))return;",login_html)
+        self.assertIn("if(setAttendanceAction(attendanceActionFromQr(code),code))return;",login_html)
         self.assertIn("await login(code)",login_html)
 
     def test_qr_to_badge_login_returns_to_correct_action(self):
@@ -285,7 +319,7 @@ class AttendanceTests(unittest.TestCase):
         self.assertIn(b"clearTimeout(timeout)", page.data)
         self.assertIn("Проверь журнал перед повторным сканированием".encode(), page.data)
         # A view or timeout never writes to the attendance journal.
-        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0], 0)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0], 1)
 
     def test_exit_get_and_unproven_posts_preserve_terminal(self):
         self.login()
