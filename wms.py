@@ -1609,8 +1609,8 @@ async function acceptSkipQr(code){
   '<div class="ok">Пропуск товара разрешён руководителем. Заказ НЕ засчитан. Сканируй следующий товар.</div>';
  await refresh();return true;
 }
-let wbHintLastBarcode='',wbHintRequestSerial=0,wbPreviousSerial=0;
-async function refreshWbUnscannedHint(barcode, warnPrevious=false){
+let wbHintLastBarcode='',wbHintLastArticle='',wbHintRequestSerial=0,wbPreviousSerial=0;
+async function refreshWbUnscannedHint(barcode, warnPrevious=false, scannedArticle=''){
  const container=document.getElementById(warnPrevious?'wbPreviousHint':'wbUnscannedHint');
  if(!container||!shiftId||!barcode)return;
  const serial=warnPrevious?++wbPreviousSerial:++wbHintRequestSerial;
@@ -1622,7 +1622,9 @@ async function refreshWbUnscannedHint(barcode, warnPrevious=false){
   if(serial!==(warnPrevious?wbPreviousSerial:wbHintRequestSerial))return;
   if(!d.available){container.textContent='';return}
   if(warnPrevious&&d.remaining===0){container.textContent='';return}
-  const article=d.article||barcode;
+  // Product-info supplies the article even when today's queue is empty.
+  // Never substitute a product EAN for the seller's article.
+  const article=scannedArticle||d.article||'Артикул не указан в WB';
   const labels=(d.stickers||[]).map(x=>x.part_a+' / '+x.part_b).join(', ');
   container.textContent=(warnPrevious?'⚠ Осталось от предыдущего товара сегодня':'Сегодня · товар')+
    ': '+article+' · не отсканировано: '+d.remaining+(d.truncated?'+':'')+
@@ -1634,15 +1636,17 @@ async function acceptProduct(code){
  const d=await r.json();
  if(!r.ok){showTsdError(d.error||'Товар не найден');return false}
  const previous=wbHintLastBarcode;
+ const previousArticle=wbHintLastArticle;
  if(previous&&previous!==d.barcode){
   // Warning is informational: never block the product-first WB scan flow.
-  refreshWbUnscannedHint(previous,true);
+  refreshWbUnscannedHint(previous,true,previousArticle);
  }else{document.getElementById('wbPreviousHint').textContent='';}
  wbHintLastBarcode=d.barcode;
+ wbHintLastArticle=d.article||'';
  pendingProduct={barcode:d.barcode,article:d.article||'',name:d.name||''};
  updateScanStage();beep(true);
  // Refresh after the warning; newest product lookup wins over stale requests.
- setTimeout(()=>refreshWbUnscannedHint(d.barcode),0);
+ setTimeout(()=>refreshWbUnscannedHint(d.barcode,false,d.article||''),0);
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
  return true;
 }
@@ -1660,7 +1664,7 @@ async function sendFbsScan(payload){
  localStorage.removeItem(FBS_OUTBOX_KEY);
  const verifiedBarcode=payload.product_barcode;
  pendingProduct=null;updateScanStage();beep(true);
- refreshWbUnscannedHint(verifiedBarcode);
+ refreshWbUnscannedHint(verifiedBarcode,false,wbHintLastBarcode===verifiedBarcode?wbHintLastArticle:'');
  document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
  return true;
 }
