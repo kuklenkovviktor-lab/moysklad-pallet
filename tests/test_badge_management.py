@@ -30,6 +30,11 @@ class BadgeManagementTests(unittest.TestCase):
         spec.loader.exec_module(self.wms)
         modules=patch.dict(sys.modules,{"wms":self.wms})
         modules.start();self.addCleanup(modules.stop)
+        spec_att=importlib.util.spec_from_file_location("synthetic_badge_att_"+uuid.uuid4().hex,ROOT/"attendance.py")
+        att=importlib.util.module_from_spec(spec_att)
+        spec_att.loader.exec_module(att)
+        att_mod=patch.dict(sys.modules,{"attendance":att})
+        att_mod.start();self.addCleanup(att_mod.stop)
         self.wms.init_wms_db()
         self.app=Flask(__name__)
         self.app.secret_key="synthetic-manager-cookie"
