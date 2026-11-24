@@ -39,8 +39,9 @@ class WorkerWbHintTests(unittest.TestCase):
             self.assertFalse(result["available"])
             self.assertNotIn("remaining", result)
 
-    def test_shared_queue_suffixes_only_and_no_mutation(self):
-        fake = [("101", "WB-ABCD6471", "1022_MIX"), ("102", "WB-ABC34286", "1022_MIX")]
+    def test_printed_sticker_numbers_article_and_no_mutation(self):
+        fake = [("101", "6008122", "9340", "1022_MIX"),
+                ("102", "6008123", "6471", "1022_MIX")]
         with patch.object(wms, "ensure_db"), patch.object(wms, "get_session_employee",
                 return_value={"id": "staff1"}), patch.dict(os.environ,
                 {"WB_FBS_V11_ENABLED": "1", "WB_FBS_V11_ACCOUNT_ID": "default"}), \
@@ -49,14 +50,31 @@ class WorkerWbHintTests(unittest.TestCase):
             res = self.get()
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json["remaining"], 2)
-            self.assertEqual(res.json["sticker_suffixes"], ["6471", "4286"])
+            self.assertEqual(res.json["stickers"], [
+                {"part_a": "6008122", "part_b": "9340"},
+                {"part_a": "6008123", "part_b": "6471"}])
+            self.assertEqual(res.json["article"], "1022_MIX")
             self.assertTrue(res.json["shared"])
             self.assertNotIn("101", str(res.json))
             self.assertEqual(query.call_count, 1)
             sql, args = query.call_args.args
+            self.assertIn("t.part_a,t.part_b,o.seller_article", sql)
             self.assertIn("o.local_status='pending'", sql)
             self.assertIn("o.wb_status IN ('confirm','complete')", sql)
             self.assertEqual(args, ("default", "460111"))
+
+    def test_missing_printed_numbers_not_faked_from_qr(self):
+        with patch.object(wms, "ensure_db"), patch.object(wms, "get_session_employee",
+                return_value={"id": "staff1"}), patch.dict(os.environ,
+                {"WB_FBS_V11_ENABLED": "1"}), \
+                patch.object(wms, "query_one", return_value=("staff1", None)), \
+                patch.object(wms, "query_all", return_value=[
+                    ("101", None, None, "1022_MIX"),
+                    ("102", "6008122", "zhyU", "1022_MIX")]):
+            result = self.get().json
+            self.assertEqual(result["remaining"], 2)
+            self.assertEqual(result["stickers"], [])
+            self.assertNotIn("sticker_suffixes", result)
 
     def test_no_matches_is_valid_zero_when_enabled(self):
         with patch.object(wms, "ensure_db"), patch.object(wms, "get_session_employee",
@@ -74,6 +92,8 @@ class WorkerWbHintTests(unittest.TestCase):
         self.assertIn('refreshWbUnscannedHint(previous,true)',ui)
         self.assertIn('setTimeout(()=>refreshWbUnscannedHint(d.barcode),0)',ui)
         self.assertIn("async function handleScan(code)",ui)
+        self.assertIn("x.part_a+' / '+x.part_b",ui)
+        self.assertIn("Осталось от предыдущего товара",ui)
 
 
 if __name__ == "__main__":
