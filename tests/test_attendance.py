@@ -3,6 +3,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import time
 import tempfile
 import unittest
 import uuid
@@ -63,6 +64,30 @@ class AttendanceTests(unittest.TestCase):
                 res=self.client.post("/api/auth/login",json={"badge_code":code})
                 self.assertNotEqual(res.status_code,200)
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts")[0],0)
+
+    def test_login_url_next_does_not_authorize_badge(self):
+        self.assertEqual(self.client.get("/login?next=/attendance/in").status_code,200)
+        res=self.client.post("/api/auth/login",json={"badge_code":self.badge})
+        self.assertEqual(res.status_code,403)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts")[0],0)
+
+    def test_expired_qr_intent_rejects_badge_without_journal(self):
+        with self.client.session_transaction() as sess:
+            sess["attendance_entry_intent_at"]=time.time()-121
+        res=self.client.post("/api/auth/login",json={"badge_code":self.badge})
+        self.assertEqual(res.status_code,403)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0],0)
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts")[0],0)
+
+    def test_journal_failure_cannot_grant_terminal_session(self):
+        self.assertEqual(self.client.post("/api/attendance/entry-intent",
+            json={"qr":"https://localhost/attendance/in"},base_url="https://localhost").status_code,200)
+        import attendance
+        with patch.object(attendance,"record_badge_entry",side_effect=RuntimeError("synthetic DB failure")):
+            res=self.client.post("/api/auth/login",json={"badge_code":self.badge})
+        self.assertEqual(res.status_code,409)
+        self.assertEqual(self.client.get("/api/auth/me").status_code,401)
         self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM shifts")[0],0)
 
     def test_entry_intent_rejects_non_qr_strings(self):
