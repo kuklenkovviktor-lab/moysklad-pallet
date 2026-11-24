@@ -2201,11 +2201,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
   <div class="progress-head">
    <div>
     <div class="small progress-label"><svg class="ui-icon" aria-hidden="true"><use href="#ic-target"></use></svg> Прогресс WB FBS</div>
-    <div class="progress-main"><span class="done" id="progressDone">0</span><span class="plan" id="progressPlan">/ план не задан</span></div>
-   </div>
-   <div class="plan-edit">
-    <input id="planInput" type="number" min="0" step="1" placeholder="План на день">
-    <button onclick="savePlan()">Сохранить план</button>
+    <div class="progress-main"><span class="done" id="progressDone">0</span><span class="plan" id="progressPlan"> / ожидаем данные WB</span></div>
    </div>
   </div>
   <div class="progress"><div id="progressBar"></div></div>
@@ -2260,7 +2256,6 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid #ff9b
 
 
 <script>
-let currentPlan=0;
 let wbAssemblyCount=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 function fmt(ts){if(!ts)return '—';try{return new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){return ts}}
@@ -2307,26 +2302,27 @@ function renderHourly(rows){
 }
 
 function renderProgress(done){
- document.getElementById('progressDone').textContent=done;
- // WB queue remainder is not a daily plan and must not be overwritten.
- if(wbAssemblyCount!==null)document.getElementById('remaining').textContent=wbAssemblyCount;
- if(currentPlan>0){
-  const rem=Math.max(currentPlan-done,0),pct=Math.min(done/currentPlan*100,100);
-  if(wbAssemblyCount===null)document.getElementById('remaining').textContent=rem;
-  document.getElementById('progressPlan').textContent='/ '+currentPlan;
-  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
-  document.getElementById('progressText').textContent='Выполнено '+pct.toFixed(1)+'% плана · осталось по плану: '+rem+' заказов';
- }else{
-  if(wbAssemblyCount===null)document.getElementById('remaining').textContent='—';
-  document.getElementById('progressPlan').textContent='/ план не задан';
+ const n=Math.max(0,Number(done)||0);
+ document.getElementById('progressDone').textContent=n;
+ if(wbAssemblyCount===null){
+  document.getElementById('remaining').textContent='—';
+  document.getElementById('progressPlan').textContent=' / очередь WB недоступна';
   document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='План на сегодня не задан · процент не рассчитывается';
+  document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · актуальный остаток WB неизвестен';
+  return;
  }
+ const rest=Math.max(0,wbAssemblyCount);
+ const total=n+rest;
+ const pct=total>0?n/total*100:0;
+ document.getElementById('remaining').textContent=rest;
+ document.getElementById('progressPlan').textContent=' / '+total+' под контролем';
+ document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
+ document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · текущий остаток: '+rest+
+  ' · '+pct.toFixed(1)+'% условного объёма. Остаток может включать прошлые дни; это не дневной план.';
 }
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
- const editor=document.querySelector('.plan-edit');
  try{
   const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
   if(response.status===403){location.href='/manager-login';return}
@@ -2337,18 +2333,13 @@ async function loadWbAssemblyPlan(){
    throw Error('Очередь WB недоступна');
   }
   wbAssemblyCount=result.remaining_orders;
-  const remaining=result.remaining_orders;
-  const done=Number(document.getElementById('todayOrders').textContent||0);
-  document.getElementById('remaining').textContent=remaining;
-  renderProgress(done);
-  info.textContent='Текущий остаток GRIT: '+remaining+' · на сборке WB: '+result.confirm_orders+
-    ' · в доставке WB: '+result.delivery_orders+' (это не дневной план)';
-  if(editor)editor.style.display='';
+  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
+  info.textContent='Очередь WB: на сборке '+result.confirm_orders+
+    ' · в доставке WB '+result.delivery_orders+' · обновляется автоматически';
  }catch(e){
   wbAssemblyCount=null;
-  if(editor)editor.style.display='';
   renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB недоступна · показан только дневной план';
+  info.textContent='Очередь WB недоступна · общий объём не рассчитан';
  }
 }
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
@@ -2359,22 +2350,19 @@ async function fetchWithTimeout(url,options={},timeoutMs=5000){
 }
 async function load(){
  const b=dayBounds(),p=new URLSearchParams(b),date=dayKey();
- const [dashR,fbsR,recR,planR,devR,hourR,histR]=await Promise.all([
+ const [dashR,fbsR,recR,devR,hourR,histR]=await Promise.all([
   fetchWithTimeout('/api/fbs/dashboard?'+p.toString()),
   fetchWithTimeout('/api/fbs/overview?'+p.toString()),
   fetchWithTimeout('/api/receiving/overview?'+p.toString()),
-  fetchWithTimeout('/api/manager/daily-plan?date='+encodeURIComponent(date)),
   fetchWithTimeout('/api/operations/deviations?'+p.toString()),
   fetchWithTimeout('/api/fbs/hourly?'+p.toString()),
   fetchWithTimeout('/api/manager/integrations/wildberries/history?date='+encodeURIComponent(date)).catch(()=>null)
  ]);
- if([dashR,fbsR,recR,planR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
- const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),plan=await planR.json(),dev=await devR.json(),hour=await hourR.json();
+ if([dashR,fbsR,recR,devR,hourR].some(r=>r.status===403)){location.href='/manager-login';return}
+ const d=await dashR.json(),f=await fbsR.json(),r=await recR.json(),dev=await devR.json(),hour=await hourR.json();
  const hist=histR&&histR.ok?await histR.json():null;
  const picked=hist&&Number.isInteger(hist.picked_in_grit)?hist.picked_in_grit:null;
 
- currentPlan=Number(plan.wb_fbs_plan||0);
- document.getElementById('planInput').value=currentPlan||'';
  const fact=picked!==null?picked:Number(f.orders||0);
  document.getElementById('todayOrders').textContent=fact;
  document.getElementById('wbDailyFlow').textContent=picked!==null
@@ -2399,14 +2387,6 @@ async function load(){
 
  document.getElementById('deviations').innerHTML=dev.rows.length?dev.rows.slice(0,8).map(x=>'<div class="dev"><div>'+esc(fmt(x.created_at))+'</div><div><b>'+esc(x.employee)+'</b></div><div class="why '+deviationClass(x.event_type)+'">'+esc(deviationLabel(x.event_type))+'</div><div class="object">'+esc(x.article||x.object_code||x.result||'—')+'</div></div>').join(''):'<div class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#ic-check"></use></svg><strong>Отклонений сегодня нет</strong><span>Новых ошибок и предупреждений не зарегистрировано</span></div>';
 }
-
-async function savePlan(){
- const input=document.getElementById('planInput'),v=Math.max(0,parseInt(input.value||'0',10)||0);
- const r=await fetch('/api/manager/daily-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:dayKey(),wb_fbs_plan:v})});
- const d=await r.json();if(!r.ok){alert(d.error||'Не удалось сохранить план');return}
- currentPlan=v;runDashboardLoad();
-}
-
 
 async function loadWbStatus(){
  try{

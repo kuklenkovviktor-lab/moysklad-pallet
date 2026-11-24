@@ -116,14 +116,23 @@ class WBProgressSourceContractTests(unittest.TestCase):
         self.assertIn("document.getElementById('todayOrders').textContent=fact;",self.ui)
         self.assertIn("renderProgress(fact);",self.ui)
 
-    def test_pending_queue_never_replaces_daily_plan(self):
-        self.assertIn("renderProgress(done);",self.ui)
-        self.assertNotIn("'/ очередь GRIT'",self.ui)
-        self.assertIn("if(wbAssemblyCount===null)document.getElementById('remaining').textContent=rem;",self.ui)
-        self.assertIn("if(editor)editor.style.display='';",self.ui)
-        self.assertIn("это не дневной план",self.ui)
+    def test_auto_workload_keeps_queue_and_fact_separate(self):
+        self.assertIn("const total=n+rest;",self.ui)
+        self.assertIn("const pct=total>0?n/total*100:0;",self.ui)
+        self.assertIn("Остаток может включать прошлые дни; это не дневной план.",self.ui)
+        self.assertIn("renderProgress(fact);",self.ui)
+        self.assertNotIn('id="planInput"',self.ui)
+        self.assertNotIn('onclick="savePlan()"',self.ui)
+        self.assertNotIn("/api/manager/daily-plan?date=",self.ui)
+        self.assertNotIn("function savePlan()",self.ui)
 
-    def test_zero_percent_only_for_missing_plan(self):
-        self.assertIn("const rem=Math.max(currentPlan-done,0),pct=",self.ui)
-        self.assertIn("План на сегодня не задан · процент не рассчитывается",self.ui)
-        self.assertNotIn("document.getElementById('progressPlan').textContent='/ очередь GRIT';",self.ui)
+    def test_unavailable_wb_queue_never_fakes_zero(self):
+        self.assertIn("wbAssemblyCount=null;",self.ui)
+        self.assertIn("актуальный остаток WB неизвестен",self.ui)
+        self.assertIn("Очередь WB недоступна · общий объём не рассчитан",self.ui)
+        self.assertIn("document.getElementById('remaining').textContent='—';",self.ui)
+
+    def test_preserves_live_confirm_delivery_breakdown(self):
+        self.assertIn("result.confirm_orders",self.ui)
+        self.assertIn("result.delivery_orders",self.ui)
+        self.assertIn("обновляется автоматически",self.ui)
