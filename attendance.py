@@ -174,16 +174,24 @@ async function submitExit(code){
  if(busy||!code.trim())return;
  busy=true;
  result.textContent='Проверка QR…';
+ const controller=new AbortController();
+ const timeout=setTimeout(()=>controller.abort(),8000);
  try{
   const body=new URLSearchParams({csrf,exit_qr:code.trim()});
-  const r=await fetch('/attendance/out',{method:'POST',body,redirect:'follow'});
+  const r=await fetch('/attendance/out',{method:'POST',body,redirect:'follow',signal:controller.signal});
   if(r.redirected&&new URL(r.url).pathname==='/login'){
    try{['onix_employee_id','fbs_shift_id','receipt_id','receipt_name','onix_fbo_pending_scan_v1','onix_fbo_pending_undo_v1'].forEach(k=>localStorage.removeItem(k));sessionStorage.removeItem('openExitQr')}catch(_){}
    location.replace('/login');return;
   }
-  result.textContent=r.status===403?'Неверный QR ВЫХОД. Повтори сканирование.':'Выход не записан. Повтори сканирование или вернись к работе.';
- }catch(_){result.textContent='Нет ответа сервера. Повтори сканирование.'}
- finally{busy=false;input.value='';input.focus()}
+  result.textContent=r.status===403?'Неверный QR ВЫХОД. Повтори сканирование.':
+   r.status===409?'Выход не записан: нет открытого прихода или смена изменилась. Повтори сканирование.':
+   'Выход не записан. Повтори сканирование или вернись к работе.';
+ }catch(e){
+  result.textContent=e&&e.name==='AbortError'?
+   'Сервер не ответил за 8 секунд. Проверь журнал перед повторным сканированием.':
+   'Нет ответа сервера. Проверь журнал перед повторным сканированием.';
+ }
+ finally{clearTimeout(timeout);busy=false;input.value='';input.focus()}
 }
 input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitExit(input.value)}});
 document.getElementById('camera').onclick=async()=>{

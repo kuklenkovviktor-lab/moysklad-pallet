@@ -275,6 +275,18 @@ class AttendanceTests(unittest.TestCase):
         self.assertIn(b"#09121e",page.data)
 
 
+    def test_exit_scan_request_is_bounded_and_keeps_journal_authoritative(self):
+        self.login()
+        page = self.client.get("/attendance/out")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"new AbortController()", page.data)
+        self.assertIn(b"setTimeout(()=>controller.abort(),8000)", page.data)
+        self.assertIn(b"signal:controller.signal", page.data)
+        self.assertIn(b"clearTimeout(timeout)", page.data)
+        self.assertIn("Проверь журнал перед повторным сканированием".encode(), page.data)
+        # A view or timeout never writes to the attendance journal.
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM attendance_visits")[0], 0)
+
     def test_exit_get_and_unproven_posts_preserve_terminal(self):
         self.login()
         csrf = self.token("/attendance/in")
