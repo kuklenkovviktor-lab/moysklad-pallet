@@ -1523,7 +1523,12 @@ function showTsdError(message,reason=''){
               reason==='WB_PRODUCT_MISMATCH'?'НЕ ТОТ ТОВАР':
               reason==='WB_NOT_ON_ASSEMBLY'?'НЕ НА СБОРКЕ':
               reason==='WB_DELIVERY_NOT_ADMITTED'?'В ДОСТАВКЕ WB':
-              reason==='WB_STATUS_STALE'?'СТАТУС WB УСТАРЕЛ':'ОШИБКА');
+              reason==='WB_STATUS_STALE'?'СТАТУС WB УСТАРЕЛ':
+              reason==='WB_STICKER_UNKNOWN'?'СТИКЕР НЕ НАЙДЕН':
+              reason==='WB_STICKER_AMBIGUOUS'?'ОШИБКА СТИКЕРА':
+              reason==='WB_PRODUCT_MAPPING_MISSING'?'НЕТ СВЯЗИ С ТОВАРОМ':
+              reason==='WB_NOT_ADMITTED'?'ЗАКАЗ НЕ В ОЧЕРЕДИ':
+              reason==='WB_BLOCKED_STATUS'?'СТАТУС WB ЗАПРЕЩАЕТ СБОРКУ':'ОШИБКА');
  document.querySelector('.tsd-error-title').textContent=title;
  document.getElementById('tsdErrorText').textContent=String(message||'Скан отклонён');
  document.getElementById('tsdError').classList.add('open');
