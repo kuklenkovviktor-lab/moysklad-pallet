@@ -3812,7 +3812,12 @@ def fbs_wb_unscanned_hints():
 
 @wms_bp.get("/api/manager/wb-fbs/picking-queue")
 def manager_wb_fbs_picking_queue():
-    """Live remaining WB orders from GRIT's admitted, unassembled queue."""
+    """Current WB 'На сборке' cohort, not WB order creation-day or supply date.
+
+    Source: WB supplierStatus cached by the dedicated WB API sync worker.
+    The worker MUST be healthy/current; this endpoint never calls WB or
+    changes order state while employees are assembling.
+    """
     ensure_db()
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
@@ -3820,43 +3825,59 @@ def manager_wb_fbs_picking_queue():
         return jsonify(state="disabled"), 503
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
     day = (request.args.get("day") or "").strip()
-    if day and day != _wb_hint_today():
-        return jsonify(error="Доступна текущая дата по Москве"), 400
+    if day:
+        # Backward-compatible day filter now means FIRST observed CONFIRM,
+        # not the day WB originally created the order.
+        from wb_unpicked_manager import _assembly_day, UNKNOWN_DAY
+        if day != UNKNOWN_DAY:
+            try:
+                if datetime.strptime(day, "%Y-%m-%d").strftime("%Y-%m-%d") != day:
+                    raise ValueError()
+            except ValueError:
+                return jsonify(error="Неверная дата поступления на сборку"), 400
     try:
         if day:
-            from wb_unpicked_manager import _order_day
-            rows = query_all("""SELECT o.wb_status,o.created_at
-                FROM wb_fbs_picking_queue q
-                JOIN wb_fbs_orders o
-                  ON o.account_id=q.account_id AND o.order_id=q.order_id
-                WHERE q.account_id=?
-                  AND o.local_status='pending'
-                  AND o.wb_status IN ('confirm','complete')""", (account,))
-            today_rows = [row for row in rows if _order_day(row[1]) == day]
-            confirm = sum(1 for row in today_rows if row[0] == "confirm")
-            delivery = sum(1 for row in today_rows if row[0] == "complete")
-            remaining = len(today_rows)
+            rows = query_all("""SELECT o.local_status,q.accepted_at,o.synced_at
+                FROM wb_fbs_orders o
+                LEFT JOIN wb_fbs_picking_queue q
+                  ON q.account_id=o.account_id AND q.order_id=o.order_id
+                WHERE o.account_id=? AND o.wb_status='confirm'""", (account,))
+            rows = [row for row in rows if _assembly_day(row[1]) == day]
+            total = len(rows)
+            assembled = sum(1 for row in rows if row[0] == "complete")
+            remaining = total - assembled
+            unadmitted = sum(1 for row in rows if row[0] != "complete" and not row[1])
+            synced_at = max((row[2] for row in rows if row[2]), default=None)
         else:
-            row = query_one(
-                """SELECT
-                    COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
-                    COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
-                    COUNT(*)
-                FROM wb_fbs_picking_queue q
-                JOIN wb_fbs_orders o
-                  ON o.account_id=q.account_id AND o.order_id=q.order_id
-                WHERE q.account_id=?
-                  AND o.local_status='pending'
-                  AND o.wb_status IN ('confirm','complete')""",
-                (account,),
-            )
-            confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
+            counts = query_one("""SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN o.local_status='complete' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN o.local_status<>'complete' AND q.order_id IS NULL
+                     THEN 1 ELSE 0 END),0),
+                MAX(o.synced_at)
+                FROM wb_fbs_orders o
+                LEFT JOIN wb_fbs_picking_queue q
+                  ON q.account_id=o.account_id AND q.order_id=o.order_id
+                WHERE o.account_id=? AND o.wb_status='confirm'""", (account,))
+            total = int(counts[0] or 0)
+            assembled = int(counts[1] or 0)
+            unadmitted = int(counts[2] or 0)
+            remaining = total - assembled
+            synced_at = counts[3]
+        delivery = query_one("""SELECT COUNT(*)
+            FROM wb_fbs_picking_queue q JOIN wb_fbs_orders o
+              ON o.account_id=q.account_id AND o.order_id=q.order_id
+            WHERE q.account_id=? AND o.local_status='pending'
+              AND o.wb_status='complete'""", (account,))
+        delivery_pending = int((delivery or (0,))[0] or 0)
     except Exception:
+        # A broken or missing WB cache is NOT an empty assembly queue.
         return jsonify(state="error", error="Очередь WB недоступна"), 503
     response = jsonify(
-        state="connected", remaining_orders=remaining,
-        confirm_orders=confirm, delivery_orders=delivery,
-        **({"day": day} if day else {}),
+        state="connected", source="wb_api_synced_statuses",
+        day=day or None, synced_at=synced_at,
+        assembly_orders=total, assembled_assembly_orders=assembled,
+        remaining_orders=remaining, confirm_orders=remaining,
+        delivery_orders=delivery_pending, unadmitted_orders=unadmitted,
     )
     response.headers["Cache-Control"] = "no-store"
     return response
