@@ -22,6 +22,7 @@ def connect():
 
 TABLES = (
     "CREATE TABLE IF NOT EXISTS employees(id text primary key,active int not null)",
+    "CREATE TABLE IF NOT EXISTS scans(id text primary key,shift_id text,employee_id text,wb_order_id text,marketplace text)",
     "CREATE TABLE IF NOT EXISTS shifts(id text primary key,employee_id text not null,ended_at text)",
     "CREATE TABLE IF NOT EXISTS activities(id text primary key,shift_id text,employee_id text,activity_type text,ended_at text)",
     "CREATE TABLE IF NOT EXISTS grit_line_printers(printer_id text primary key,name text,lines_json text,token_digest text,enabled int)",
