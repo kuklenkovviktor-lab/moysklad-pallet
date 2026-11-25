@@ -11,6 +11,7 @@ import secrets
 import threading
 import time
 import uuid
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
@@ -76,6 +77,9 @@ def utcnow():
 def init_schema():
     """Additive schema only. Does not alter existing GRIT tables."""
     schema = (
+        """CREATE TABLE IF NOT EXISTS wb_fbs_delivery_observations (
+            account_id TEXT NOT NULL, order_id TEXT NOT NULL, observed_at TEXT NOT NULL,
+            PRIMARY KEY(account_id,order_id))""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_orders (
             account_id TEXT NOT NULL, order_id TEXT NOT NULL, rid TEXT,
             nm_id TEXT, chrt_id TEXT, seller_article TEXT, warehouse_id TEXT,
@@ -129,6 +133,16 @@ def _clean(value):
     return str(value).strip() if value is not None else ""
 
 
+def _observe_delivery(cur, account_id, oid, status, now):
+    if status == "complete":
+        cur.execute(sql("""INSERT INTO wb_fbs_delivery_observations
+            (account_id,order_id,observed_at)
+            SELECT o.account_id,o.order_id,? FROM wb_fbs_orders o
+            JOIN wb_fbs_picking_queue q ON q.account_id=o.account_id AND q.order_id=o.order_id
+            WHERE o.account_id=? AND o.order_id=? AND o.wb_status='confirm'
+            ON CONFLICT(account_id,order_id) DO NOTHING"""), (now, account_id, oid))
+
+
 def ingest_orders(account_id, orders, statuses=None):
     """UPSERT order snapshot. Never guess status or replace known SKUs with empties."""
     now = utcnow()
@@ -155,6 +169,7 @@ def ingest_orders(account_id, orders, statuses=None):
                 if status not in PICKABLE_STATUSES:
                     if status not in {"new", "cancel", "canceled", "cancelled", "decline", "unknown"}:
                         status = "unknown"
+                _observe_delivery(cur, account_id, oid, status, now)
                 cur.execute(sql("""INSERT INTO wb_fbs_orders
                     (account_id,order_id,rid,nm_id,chrt_id,seller_article,warehouse_id,
                      wb_status,local_status,created_at,synced_at)
@@ -382,31 +397,58 @@ class WBClient:
         self.marketplace_token = marketplace_token
         self.content_token = content_token
         self.http = session or requests.Session()
+        self.progress = lambda: None
+        self.cooldowns = {}
+
+    def diagnostic(self, method, path, attempt, status, response=None):
+        # Fixed operation paths only; never log exception text, URLs, bodies,
+        # headers or raw external identifiers (including hostile header values).
+        known = {"/api/v3/orders/new", "/api/v3/orders", "/api/v3/orders/status",
+                 "/api/v3/orders/stickers", "/content/v2/get/cards/list"}
+        request_id = (getattr(response, "headers", {}) or {}).get("X-Request-Id", "")
+        print(json.dumps(dict(event="wb_api_failure", at=utcnow(), method=method,
+            operation=path if path in known else "other", attempt=attempt,
+            status=status, request_id_hash=hashlib.sha256(str(request_id).encode()).hexdigest()[:16]
+            if request_id else None)), flush=True)
 
     def request(self, method, base, path, token, **kwargs):
+        if time.monotonic() < self.cooldowns.get(path, 0):
+            raise requests.HTTPError("WB endpoint cooling down")
         last = None
         for attempt in range(4):
             try:
+                self.progress()
                 response = self.http.request(
                     method, base + path,
                     headers={"Authorization": token, "Content-Type": "application/json"},
                     timeout=30, **kwargs)
+                self.progress()
+                if response.status_code >= 400:
+                    self.diagnostic(method, path, attempt + 1, response.status_code, response)
                 if response.status_code in (401, 403):
-                    response.raise_for_status()
+                    self.cooldowns[path] = time.monotonic() + 300
+                    raise requests.HTTPError(f"WB HTTP {response.status_code}")
                 if response.status_code == 429 or response.status_code >= 500:
                     last = requests.HTTPError(f"WB HTTP {response.status_code}")
-                    if attempt == 3:
-                        raise last
                     raw = response.headers.get("Retry-After", "0")
                     try:
-                        delay = min(60.0, max(float(raw), 0.0))
-                    except ValueError:
-                        delay = 0.0
+                        delay = max(float(raw), 0.0)
+                    except (ValueError, TypeError):
+                        try:
+                            delay = max(0.0, parsedate_to_datetime(raw).timestamp() - time.time())
+                        except (ValueError, TypeError, OverflowError):
+                            delay = 0.0
+                    if not 0 <= delay < float("inf"):
+                        delay = 60.0
+                    if attempt == 3 or delay > 60:
+                        self.cooldowns[path] = time.monotonic() + max(delay, 30)
+                        raise last
                     time.sleep(max(delay, 0.3 * (2 ** attempt)) + random.random() * 0.2)
                     continue
                 response.raise_for_status()
                 return response.json()
             except (requests.ConnectionError, requests.Timeout) as exc:
+                self.diagnostic(method, path, attempt + 1, type(exc).__name__)
                 last = exc
                 if attempt == 3:
                     raise
@@ -459,6 +501,8 @@ class WBClient:
     def statuses(self, ids):
         result = {}
         for offset in range(0, len(ids), 1000):
+            if offset:
+                time.sleep(0.35)
             data = self.request("POST", MARKETPLACE_API, "/api/v3/orders/status",
                                 self.marketplace_token,
                                 json={"orders": [int(x) for x in ids[offset:offset + 1000]]})
@@ -660,41 +704,53 @@ def _sync_status_once_unlocked(account_id, client):
     """Refresh active cached orders without touching WB statuses remotely."""
     from wms import execute, query_all
     init_schema()
-    # Refresh NEW/CONFIRM orders, admitted unassembled deliveries even after
+    # Refresh NEW/CONFIRM orders (including locally completed), admitted unassembled deliveries even after
     # the recent window, plus other recently created orders. Do not sync the
     # entire 14-day history every 30 seconds.
     recent_cutoff = datetime.fromtimestamp(
         time.time() - 2 * 86400, timezone.utc).isoformat()
     ids = [r[0] for r in query_all("""SELECT order_id FROM wb_fbs_orders
-        WHERE account_id=? AND local_status<>'complete'
+        WHERE account_id=?
           AND (wb_status IN ('new','confirm')
-               OR (wb_status='complete' AND EXISTS(
+               OR (wb_status='unknown' AND EXISTS(
                     SELECT 1 FROM wb_fbs_picking_queue q
                     WHERE q.account_id=wb_fbs_orders.account_id
                       AND q.order_id=wb_fbs_orders.order_id))
-               OR created_at>=?)""",
+               OR (local_status<>'complete' AND wb_status='complete' AND EXISTS(
+                    SELECT 1 FROM wb_fbs_picking_queue q
+                    WHERE q.account_id=wb_fbs_orders.account_id
+                      AND q.order_id=wb_fbs_orders.order_id))
+               OR (local_status<>'complete' AND created_at>=?))""",
         (account_id, recent_cutoff))]
     statuses = client.statuses(ids) if ids else {}
     # Missing order entries in the WB response cannot silently retain an old
     # pickable status. Fail closed until a complete status response is obtained.
     for oid in ids:
         statuses.setdefault(str(oid), "unknown")
+    statuses = {str(oid): statuses[str(oid)] for oid in ids}
     # Persist authoritative WB status changes before fetching stickers. Even
     # when the sticker endpoint fails, cancellations must already be enforced.
-    for oid, status in statuses.items():
-        if status not in PICKABLE_STATUSES and status not in {
-            "new", "cancel", "canceled", "cancelled", "decline"}:
-            status = "unknown"
-        execute("""UPDATE wb_fbs_orders SET wb_status=?,synced_at=?
-            WHERE account_id=? AND order_id=?""",
-            (status, utcnow(), account_id, oid))
-        if status == "confirm":
-            execute("""INSERT INTO wb_fbs_picking_queue
-                (account_id,order_id,accepted_at)
-                SELECT account_id,order_id,? FROM wb_fbs_orders
-                WHERE account_id=? AND order_id=?
-                ON CONFLICT(account_id,order_id) DO NOTHING""",
-                (utcnow(), account_id, oid))
+    with db_connect() as conn:
+        cur = conn.cursor()
+        try:
+            for oid, status in statuses.items():
+                if status not in PICKABLE_STATUSES and status not in {
+                    "new", "cancel", "canceled", "cancelled", "decline"}:
+                    status = "unknown"
+                now = utcnow()
+                _observe_delivery(cur, account_id, oid, status, now)
+                cur.execute(sql("""UPDATE wb_fbs_orders SET wb_status=?,synced_at=?
+                    WHERE account_id=? AND order_id=?"""), (status, now, account_id, oid))
+                if status == "confirm":
+                    cur.execute(sql("""INSERT INTO wb_fbs_picking_queue
+                        (account_id,order_id,accepted_at) VALUES(?,?,?)
+                        ON CONFLICT(account_id,order_id) DO NOTHING"""), (account_id, oid, now))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
     existing = {row[0] for row in query_all(
         "SELECT order_id FROM wb_fbs_stickers WHERE account_id=?", (account_id,))}
     eligible = [int(oid) for oid, status in statuses.items()
@@ -729,6 +785,9 @@ def worker_loop(account_id, client, stop=None):
     """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
+    from wb_worker_health import WorkerHealth
+    health = WorkerHealth()
+    client.progress = health.touch
     intervals = {"new": 30, "status": 30, "catalog": 21600, "full": 86400}
     last = {key: -float("inf") for key in intervals}
     while stop is None or not stop.is_set():
@@ -737,6 +796,9 @@ def worker_loop(account_id, client, stop=None):
             if now - last[name] < interval:
                 continue
             last[name] = now
+            if name == "catalog" and not client.content_token:
+                continue
+            health.begin(name)
             try:
                 if name == "new":
                     sync_new_once(account_id, client)
@@ -746,9 +808,13 @@ def worker_loop(account_id, client, stop=None):
                     sync_catalog_once(account_id, client)
                 elif name == "full":
                     sync_once(account_id, client, int(time.time()) - 86400 * 14)
+                health.finish(name, True)
             except Exception as exc:
+                health.finish(name, False)
                 # Avoid leaking WB token or personal data in the log.
                 print(f"WB FBS v1.1 {name} failed: {type(exc).__name__}", flush=True)
+            last[name] = time.monotonic()
+        health.touch()
         if stop is not None and stop.wait(1):
             break
         if stop is None:

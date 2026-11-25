@@ -6,6 +6,7 @@ The FBS order is one merchandise unit under the configured WB business rule.
 """
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import os
 
 from wms import db_connect, sql, query_all
 
@@ -90,6 +91,7 @@ def _bounds(date_key):
 def daily_history(date_key):
     """Separate independently verifiable metrics: observed inflow, scans, WB deliver."""
     start, end = _bounds(date_key)
+    unknown_admission = 0
     with db_connect() as conn:
         cur = conn.cursor()
         try:
@@ -104,6 +106,19 @@ def daily_history(date_key):
                 "SELECT COUNT(*) FROM wb_fbs_status_tracking "
                 "WHERE delivered_at >= ? AND delivered_at < ?"), (start, end))
             shipped = int(cur.fetchone()[0] or 0)
+            if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+                account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
+                from wb_unpicked_manager import _assembly_day, UNKNOWN_DAY
+                cur.execute(sql("""SELECT q.accepted_at FROM wb_fbs_orders o
+                    LEFT JOIN wb_fbs_picking_queue q
+                    ON q.account_id=o.account_id AND q.order_id=o.order_id
+                    WHERE o.account_id=?"""), (account,))
+                days = [_assembly_day(row[0]) for row in cur.fetchall()]
+                entered = days.count(date_key)
+                unknown_admission = days.count(UNKNOWN_DAY)
+                cur.execute(sql("""SELECT observed_at FROM wb_fbs_delivery_observations
+                    WHERE account_id=?"""), (account,))
+                shipped = sum(_assembly_day(row[0]) == date_key for row in cur.fetchall())
             cur.execute(sql(
                 "SELECT COUNT(*) FROM scans "
                 "WHERE scanned_at >= ? AND scanned_at < ?"), (start, end))
@@ -118,10 +133,11 @@ def daily_history(date_key):
         finally:
             cur.close()
     return {"date":date_key, "new_on_assembly_observed":entered,
+            "unknown_admission_orders":unknown_admission,
             "picked_in_grit":picked, "moved_to_delivery_observed":shipped,
             "workers":workers, "time_zone":"Europe/Moscow",
             "tracking_note":"WB статусы фиксируются при опросах; история начинается с включения наблюдения. "
-                            "Переход в доставку означает supplierStatus=deliver, а не приёмку на ПВЗ."}
+                            "Доставка: наблюдаемый переход confirm → complete в API v3 (deliver в старом источнике), не приёмка на ПВЗ."}
 
 
 def recent_history(days=7, today=None):
