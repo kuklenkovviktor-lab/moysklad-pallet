@@ -149,6 +149,62 @@ class IntegratedPrinterPGTests(unittest.TestCase):
         self.update("INSERT INTO cell_sku_assignments VALUES ('loc2','product1')")
         self.assertEqual(self.claim()[1], "PRODUCT_MULTIPLE_LINES")
 
+    def test_same_request_replay_while_valid_is_idempotent(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        result, reason = self.claim()
+        self.assertTrue(result.accepted)
+        self.assertEqual(reason, "ALREADY_RESERVED_SAME_REQUEST")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_after_shift_closes_is_denied_without_deleting_claim(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        self.update("UPDATE shifts SET ended_at='closed' WHERE id='s1'")
+        result, reason = self.claim()
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "SHIFT_NOT_ACTIVE")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_after_order_cancel_is_denied_without_deleting_claim(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        self.update("UPDATE wb_fbs_orders SET wb_status='cancel'")
+        result, reason = self.claim()
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "WB_STATUS_NOT_PICKABLE")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_after_printer_disabled_is_denied(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        self.update("UPDATE grit_line_printers SET enabled=0")
+        result, reason = self.claim()
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "PRINTER_DISABLED")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_after_qr_rotation_is_denied(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        other, payload = create_printer("p1", "Линии А-Б", ["А", "Б"])
+        self.update("UPDATE grit_line_printers SET token_digest=%s",
+                    (other.token_digest,))
+        result, reason = self.claim()
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "QR_INVALID")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_after_employee_deactivated_is_denied(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        self.update("UPDATE employees SET active=0 WHERE id='e1'")
+        result, reason = self.claim()
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "EMPLOYEE_INACTIVE")
+        self.assertEqual(self.count(), 1)
+
+    def test_replay_with_other_employee_cannot_take_over(self):
+        self.assertEqual(self.claim()[1], "RESERVED")
+        result, reason = self.claim(employee_id="e2", shift_id="s2")
+        self.assertFalse(result.accepted)
+        self.assertEqual(reason, "ORDER_RESERVED_ELSEWHERE")
+        self.assertEqual(self.count(), 1)
+
     def test_eight_terminals_compete_one_wins(self):
         def actor(i):
             employee = "e1" if i % 2 == 0 else "e2"
