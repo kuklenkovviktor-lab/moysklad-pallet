@@ -27,8 +27,6 @@ echo "=== EPHEMERAL POSTGRESQL 17 ==="
 docker run -d --name "$DB_CONTAINER" \
   --network "$NETWORK" \
   --network-alias pr192-db \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=synthetic-only \
   -e POSTGRES_DB="$DB_NAME" \
