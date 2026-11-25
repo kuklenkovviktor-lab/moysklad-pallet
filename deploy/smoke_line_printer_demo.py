@@ -54,7 +54,7 @@ assert worker("/demo/login", {"mode": "employee", "badge": "DEMO-BADGE-1"})[0] =
 ws = worker("/demo/session")[1]
 assert ws["employee"] == "demo-e1"
 sku = "SYNTH-SKU-V"
-orders = worker("/demo/orders?qr=" + urllib.parse.quote(qr, safe=""))[1]
+orders = worker("/demo/orders", {"csrf": ws["csrf"], "qr": qr})[1]
 assert "SYNTH-1003" in [o["order_id"] for o in orders["orders"]]
 # Different-line order cannot be issued to В.
 assert "SYNTH-1001" not in [o["order_id"] for o in orders["orders"]]
@@ -81,7 +81,7 @@ rotated = manager("/demo/printers/" + printer["printer_id"] + "/rotate",
                   {"csrf": csrf})
 assert rotated[0] == 200, rotated
 assert rotated[1]["qr"] != qr
-assert worker("/demo/orders?qr=" + urllib.parse.quote(qr, safe=""))[0] == 403
+assert worker("/demo/orders", {"csrf": ws["csrf"], "qr": qr})[0] == 403
 configured = manager("/demo/printers/" + printer["printer_id"] + "/configure",
                      {"csrf": csrf, "name": "Тест В-Б", "lines": ["В", "Б"]})
 assert configured[0] == 200, configured
