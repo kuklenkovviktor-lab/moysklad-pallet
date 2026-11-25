@@ -313,7 +313,7 @@ class WBFBSSyncV11Tests(unittest.TestCase):
                 "shift_id":shift,"barcode":"*ВапфЬУс2","product_barcode":"WRONG",
                 "request_id":str(uuid.uuid4())})
             self.assertEqual(response.status_code,409,response.json)
-            self.assertEqual(response.json["reason"],"MISMATCH")
+            self.assertEqual(response.json["reason"],"WB_PRODUCT_MISMATCH")
             self.assertTrue(response.json["reset_pending"])
             self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],0)
             record_pending_item(shift,emp,"4601234567890","test","test")
