@@ -2316,45 +2316,57 @@ function renderHourly(rows){
  }).join('');
 }
 
-function renderProgress(done){
- const n=Math.max(0,Number(done)||0);
- document.getElementById('progressDone').textContent=n;
+function renderProgress(){
  if(wbAssemblyCount===null){
   document.getElementById('remaining').textContent='—';
+  document.getElementById('progressDone').textContent='—';
   document.getElementById('progressPlan').textContent=' / очередь WB недоступна';
   document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · актуальный остаток WB неизвестен';
+  document.getElementById('progressText').textContent='Текущий статус WB не получен · прогресс неизвестен';
   return;
  }
- const rest=Math.max(0,wbAssemblyCount);
- const total=n+rest;
- const pct=total>0?n/total*100:0;
+ // Numerator and denominator describe the SAME current WB CONFIRM cohort.
+ // The separate 'WB FBS собрано сегодня' KPI is by scan time and is NOT added.
+ const rest=wbAssemblyCount.remaining_orders;
+ const done=wbAssemblyCount.assembled_assembly_orders;
+ const total=wbAssemblyCount.assembly_orders;
+ const pct=total>0?done/total*100:0;
  document.getElementById('remaining').textContent=rest;
- document.getElementById('progressPlan').textContent=' / '+total+' под контролем';
+ document.getElementById('progressDone').textContent=done;
+ document.getElementById('progressPlan').textContent=' / '+total+' сейчас на сборке WB';
  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
- document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · остаток заказов WB за сегодня: '+rest+
-  ' · '+pct.toFixed(1)+'% условного объёма. Факт по дате сканирования, остаток по дате заказа; это не дневной план.';
+ document.getElementById('progressText').textContent='Сейчас на сборке WB: '+total+
+  ' · подтверждено GRIT: '+done+' · осталось: '+rest+' · '+pct.toFixed(1)+'%. Отдельно от собранного за сегодня.';
 }
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
  try{
-  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue?day='+encodeURIComponent(dayKey()),{cache:'no-store'},5000);
+  // NO date filter: this is CURRENT supplierStatus=confirm, including older orders.
+  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
   if(response.status===403){location.href='/manager-login';return}
   if(!response.ok)throw Error('HTTP '+response.status);
   const result=await response.json();
-  if(result.state!=='connected'||!Number.isInteger(result.remaining_orders)||
-     !Number.isInteger(result.confirm_orders)||!Number.isInteger(result.delivery_orders)){
-   throw Error('Очередь WB недоступна');
+  if(result.state!=='connected'||result.source!=='wb_api_synced_statuses'||
+     !Number.isInteger(result.assembly_orders)||
+     !Number.isInteger(result.assembled_assembly_orders)||
+     !Number.isInteger(result.remaining_orders)||
+     result.assembly_orders!==result.remaining_orders+result.assembled_assembly_orders||
+     !Number.isInteger(result.unadmitted_orders)||
+     !Number.isInteger(result.delivery_orders)){
+    throw Error('Очередь WB недоступна');
   }
-  wbAssemblyCount=result.remaining_orders;
-  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB за сегодня: на сборке '+result.confirm_orders+
-    ' · в доставке WB '+result.delivery_orders+' · обновляется автоматически';
+  wbAssemblyCount=result;
+  renderProgress();
+  info.textContent='Сейчас в статусе WB «На сборке»: '+result.assembly_orders+
+    ' · ещё не собрано в GRIT: '+result.remaining_orders+
+    (result.unadmitted_orders?' · не поставлено в очередь GRIT: '+result.unadmitted_orders:'')+
+    ' · в доставке WB, но не закрыто в GRIT: '+result.delivery_orders+
+    ' · проверено по кэшу WB: '+(result.synced_at||'время неизвестно');
  }catch(e){
   wbAssemblyCount=null;
-  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB недоступна · общий объём не рассчитан';
+  renderProgress();
+  info.textContent='Очередь WB недоступна · актуальный объём не рассчитан';
  }
 }
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
@@ -2387,7 +2399,7 @@ async function load(){
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
  document.getElementById('active').textContent=d.workers.length;
- renderProgress(fact);
+ renderProgress();
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
