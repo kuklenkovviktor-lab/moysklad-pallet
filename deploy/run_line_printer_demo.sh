@@ -17,6 +17,16 @@ PG_NAME="grit_pr192_synthetic_${RUN//-/_}"
 IMAGE="grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4"
 PORT="${GRIT_PR192_DEMO_PORT:-18765}"
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] || exit 2
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+for path in ("line_printer_demo_app.py", "line_printer_http_synthetic.py",
+             "line_printer_pg_integrated_trial.py", "line_printer_pg_lifecycle.py",
+             "line_printer_wms_auth_adapter.py"):
+    compile((root/path).read_text(encoding="utf-8"), str(root/path), "exec")
+print("PR192 PYTHON SYNTAX PASS")
+PY
 docker image inspect "$IMAGE" >/dev/null
 PASS="$(python3 -c 'import secrets; print(secrets.token_urlsafe(15))')"
 SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
@@ -69,6 +79,8 @@ for i in $(seq 1 60); do
   sleep 1
 done
 test "$READY" = 1
+GRIT_PR192_DEMO_PORT="$PORT" GRIT_PR192_DEMO_PASSWORD="$PASS" \
+  python3 "$SRC/deploy/smoke_line_printer_demo.py"
 (umask 077; printf 'NET=%q\nDB=%q\nAPP=%q\nPORT=%q\n' \
   "$NET" "$DB" "$APP" "$PORT" > "$STATE")
 CREATED=1
