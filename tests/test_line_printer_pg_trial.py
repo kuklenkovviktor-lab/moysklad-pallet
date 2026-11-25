@@ -53,6 +53,15 @@ class PGPrinterTrialTests(unittest.TestCase):
         self.assertEqual(self.reserve().reason, "ALREADY_RESERVED_SAME_REQUEST")
         self.assertEqual(self.rows(), 1)
 
+    def test_postgres_columns_store_exact_intended_values(self):
+        self.assertTrue(self.reserve().accepted)
+        with connect() as conn:
+            row = conn.execute("""
+                SELECT account_id, order_id, request_id, printer_id, employee_id
+                FROM synthetic_line_printer_claims
+            """).fetchone()
+        self.assertEqual(row, ("test-account", "SYNTH-ORDER-1", "REQ1", "P1", "EMP1"))
+
     def test_competing_eight_terminals_one_winner(self):
         def actor(i):
             return self.reserve(printer=f"P{i}", employee=f"E{i}", request=f"R{i}")
