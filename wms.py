@@ -2987,35 +2987,10 @@ def auth_login():
         (badge_code, badge_code),
     )
 
-    # Простые стабильные форматы для TSD. Они не зависят от смены секрета
-    # и спасают вход, если старый распечатанный бейдж пережил деплой/ротацию ключей.
-    if not row:
-        employee_id = ""
-        badge_number = None
-        upper = badge_code.upper()
-        if upper.startswith("ONIX-EMP-"):
-            employee_id = badge_code[len("ONIX-EMP-"):].strip()
-        elif upper.startswith("ONIX-BADGE-"):
-            try:
-                badge_number = int(badge_code[len("ONIX-BADGE-"):].strip())
-            except Exception:
-                badge_number = None
-        elif badge_code.isdigit() and len(badge_code) <= 4:
-            try:
-                badge_number = int(badge_code)
-            except Exception:
-                badge_number = None
-
-        if employee_id:
-            row = query_one(
-                "SELECT id, name, role, badge_number FROM employees WHERE id = ? AND active = 1",
-                (employee_id,),
-            )
-        elif badge_number is not None:
-            row = query_one(
-                "SELECT id, name, role, badge_number FROM employees WHERE badge_number = ? AND active = 1",
-                (badge_number,),
-            )
+    # Only DB-stored, keyed/HMAC badge and scanner tokens grant a session.
+    # The old ONIX-EMP-<id>, ONIX-BADGE-<number>, or bare numbers
+    # let anyone impersonate an employee or supervisor by guessing a short
+    # identifier. Existing issued WMS-BADGE or 20-digit scanner QR remain valid.
 
     if not row:
         return jsonify(error="Бейдж не найден"), 404

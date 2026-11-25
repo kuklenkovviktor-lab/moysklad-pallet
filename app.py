@@ -484,6 +484,7 @@ def require_employee_login():
         "/api/manager/integrations/http/journal",
         "/api/partners/accounts",
         "/manager",
+        "/fbs-manager",  # legacy URL redirects to /stats -> /manager
         "/manager/shifts",
         "/manager/shift-history",
         "/manager/attendance",
