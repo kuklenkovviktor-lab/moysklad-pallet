@@ -35,7 +35,8 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
             conn.executescript("""
                 CREATE TABLE wb_fbs_orders (
                     account_id TEXT, order_id TEXT, wb_status TEXT,
-                    local_status TEXT, PRIMARY KEY(account_id,order_id));
+                    local_status TEXT, created_at TEXT, synced_at TEXT,
+                    PRIMARY KEY(account_id,order_id));
                 CREATE TABLE wb_fbs_picking_queue (
                     account_id TEXT, order_id TEXT, accepted_at TEXT,
                     PRIMARY KEY(account_id,order_id));
@@ -50,13 +51,15 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.db_patch.stop()
         self.tmp.cleanup()
 
-    def seed(self, account, oid, wb_status, local_status, admitted):
+    def seed(self, account, oid, wb_status, local_status, admitted,
+             created="2026-11-24T08:00:00Z", accepted="2026-11-25T07:00:00Z"):
         with sqlite3.connect(self.db) as conn:
-            conn.execute("INSERT INTO wb_fbs_orders VALUES(?,?,?,?)",
-                         (account,oid,wb_status,local_status))
+            conn.execute("INSERT INTO wb_fbs_orders VALUES(?,?,?,?,?,?)",
+                         (account,oid,wb_status,local_status,created,
+                          "2026-11-25T08:00:00Z"))
             if admitted:
                 conn.execute("INSERT INTO wb_fbs_picking_queue VALUES(?,?,?)",
-                             (account,oid,"2026-11-23T00:00:00+00:00"))
+                             (account,oid,accepted))
 
     def test_only_admitted_pending_confirm_and_delivery(self):
         for args in [
@@ -72,35 +75,53 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
             self.seed(*args)
         response = wms.manager_wb_fbs_picking_queue()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), dict(
-            state="connected", remaining_orders=3,
-            confirm_orders=2, delivery_orders=1,
-        ))
+        data=response.get_json()
+        self.assertEqual(data["state"],"connected")
+        self.assertEqual(data["source"],"wb_api_synced_statuses")
+        self.assertEqual(data["assembly_orders"],3)
+        self.assertEqual(data["assembled_assembly_orders"],1)
+        self.assertEqual(data["remaining_orders"],2)
+        self.assertEqual(data["confirm_orders"],2)
+        self.assertEqual(data["delivery_orders"],1)
+        self.assertEqual(data["unadmitted_orders"],0)
+        self.assertIsNone(data["day"])
         self.assertEqual(response.headers["Cache-Control"],"no-store")
 
-    def test_day_filter_excludes_old_orders_without_changing_historic_total(self):
-        rows = [
-            ("confirm", "2026-11-22T09:00:00+03:00"),
-            ("complete", "2026-11-23T11:00:00+03:00"),
-            ("confirm", "2026-11-24T08:00:00+03:00"),
-            ("complete", "2026-11-23T21:10:00+00:00"),
-            ("confirm", None),
-        ]
-        with patch.object(wms, "_wb_hint_today", return_value="2026-11-24"), \
-                patch.object(wms, "query_all", return_value=rows):
-            with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-24"):
-                result = wms.manager_wb_fbs_picking_queue().get_json()
-        self.assertEqual(result["day"], "2026-11-24")
-        self.assertEqual(result["confirm_orders"], 1)
-        self.assertEqual(result["delivery_orders"], 1)
-        self.assertEqual(result["remaining_orders"], 2)
+    def test_current_confirm_ignores_creation_day_and_tracks_unadmitted(self):
+        self.seed("default","old","confirm","pending",True,
+                  created="2026-11-24T02:00:00Z",accepted="2026-11-25T06:00:00Z")
+        self.seed("default","today","confirm","pending",True,
+                  created="2026-11-25T05:00:00Z",accepted="2026-11-25T08:00:00Z")
+        self.seed("default","outside","confirm","pending",False,
+                  created="2026-11-23T05:00:00Z")
+        self.seed("default","assembled","confirm","complete",True)
+        self.seed("default","shipped","complete","pending",True)
+        data=wms.manager_wb_fbs_picking_queue().get_json()
+        self.assertEqual(data["assembly_orders"],4)
+        self.assertEqual(data["assembled_assembly_orders"],1)
+        self.assertEqual(data["remaining_orders"],3)
+        self.assertEqual(data["unadmitted_orders"],1)
+        self.assertEqual(data["delivery_orders"],1)
 
-    def test_day_filter_rejects_past_day_on_live_endpoint(self):
-        with patch.object(wms, "_wb_hint_today", return_value="2026-11-24"):
-            with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-22"):
-                response, status = wms.manager_wb_fbs_picking_queue()
-        self.assertEqual(status, 400)
-        self.assertIn("error", response.get_json())
+    def test_assembly_admission_day_not_created_day(self):
+        self.seed("default","old","confirm","pending",True,
+                  created="2026-11-23T10:00:00Z",
+                  accepted="2026-11-24T23:10:00Z")
+        self.seed("default","today","confirm","pending",True,
+                  created="2026-11-25T10:00:00Z",
+                  accepted="2026-11-25T11:00:00Z")
+        with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-25"):
+            data=wms.manager_wb_fbs_picking_queue().get_json()
+        self.assertEqual(data["assembly_orders"],2)  # Moscow: 23:10Z is Nov25
+        with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-11-24"):
+            data=wms.manager_wb_fbs_picking_queue().get_json()
+        self.assertEqual(data["assembly_orders"],0)
+
+    def test_invalid_admission_day_rejected(self):
+        with self.app.test_request_context("/api/manager/wb-fbs/picking-queue?day=2026-02-30"):
+            response, status = wms.manager_wb_fbs_picking_queue()
+        self.assertEqual(status,400)
+        self.assertIn("error",response.get_json())
 
     def test_empty_queue_is_real_zero(self):
         self.assertEqual(wms.manager_wb_fbs_picking_queue().get_json()["remaining_orders"],0)
@@ -145,11 +166,14 @@ class WBProgressSourceContractTests(unittest.TestCase):
         self.assertIn("renderProgress(fact);",self.ui)
 
     def test_auto_workload_keeps_queue_and_fact_separate(self):
-        self.assertIn("const total=n+rest;",self.ui)
-        self.assertIn("const pct=total>0?n/total*100:0;",self.ui)
-        self.assertIn("остаток по дате заказа; это не дневной план.",self.ui)
-        self.assertIn("/api/manager/wb-fbs/picking-queue?day=",self.ui)
-        self.assertIn("renderProgress(fact);",self.ui)
+        self.assertIn("const rest=wbAssemblyCount.remaining_orders;",self.ui)
+        self.assertIn("const done=wbAssemblyCount.assembled_assembly_orders;",self.ui)
+        self.assertIn("const total=wbAssemblyCount.assembly_orders;",self.ui)
+        self.assertIn("const pct=total>0?done/total*100:0;",self.ui)
+        self.assertIn("fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000)",self.ui)
+        self.assertNotIn("/api/manager/wb-fbs/picking-queue?day=",self.ui)
+        self.assertNotIn("renderProgress(fact);",self.ui)
+        self.assertIn("renderProgress();",self.ui)
         self.assertNotIn('id="planInput"',self.ui)
         self.assertNotIn('onclick="savePlan()"',self.ui)
         self.assertNotIn("/api/manager/daily-plan?date=",self.ui)
@@ -157,11 +181,12 @@ class WBProgressSourceContractTests(unittest.TestCase):
 
     def test_unavailable_wb_queue_never_fakes_zero(self):
         self.assertIn("wbAssemblyCount=null;",self.ui)
-        self.assertIn("актуальный остаток WB неизвестен",self.ui)
-        self.assertIn("Очередь WB недоступна · общий объём не рассчитан",self.ui)
+        self.assertIn("Текущий статус WB не получен · прогресс неизвестен",self.ui)
+        self.assertIn("Очередь WB недоступна · актуальный объём не рассчитан",self.ui)
         self.assertIn("document.getElementById('remaining').textContent='—';",self.ui)
 
     def test_preserves_live_confirm_delivery_breakdown(self):
-        self.assertIn("result.confirm_orders",self.ui)
+        self.assertIn("result.assembly_orders",self.ui)
         self.assertIn("result.delivery_orders",self.ui)
+        self.assertIn("result.unadmitted_orders",self.ui)
         self.assertIn("обновляется автоматически",self.ui)
