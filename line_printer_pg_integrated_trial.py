@@ -131,5 +131,8 @@ def reserve_integrated_synthetic(
     result = reserve_synthetic_pg(
         connection_factory, account_id=account_id, order_id=order_id,
         printer_id=printer_id, employee_id=employee_id,
-        request_id=request_id, is_eligible_locked=validator)
-    return result, denial["reason"] if result.reason == "ORDER_INELIGIBLE" else result.reason
+        request_id=request_id, is_eligible_locked=validator,
+        replay_authorizer_locked=validator)
+    return result, (denial["reason"] if result.reason in
+                    ("ORDER_INELIGIBLE", "REPLAY_DENIED_STALE_STATE")
+                    else result.reason)
