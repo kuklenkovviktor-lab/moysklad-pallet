@@ -59,4 +59,21 @@ docker run --rm \
   "$APP_IMAGE" \
   /app/tests/test_line_printer_pg_trial.py -v
 
+echo "=== SYNTHETIC PG17 INTEGRATION TESTS ==="
+docker run --rm \
+  --network "$NETWORK" \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=64m \
+  -v "$SRC:/app:ro" \
+  -w /app \
+  -e PYTHONPATH=/app \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
+  -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$DB_NAME" \
+  --entrypoint python \
+  "$APP_IMAGE" \
+  /app/tests/test_line_printer_pg_integrated_trial.py -v
+
 echo "PR192 PG17 ISOLATED TEST PASS"
