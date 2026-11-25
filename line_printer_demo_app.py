@@ -75,9 +75,6 @@ def seed():
             conn.execute(statement)
         conn.execute("INSERT INTO employees VALUES('demo-e1',1) ON CONFLICT DO NOTHING")
         conn.execute("INSERT INTO shifts VALUES('demo-shift-1','demo-e1',NULL) ON CONFLICT DO NOTHING")
-        conn.execute("""INSERT INTO activities VALUES
-          ('act1','demo-shift-1','demo-e1','picking',NULL)
-          ON CONFLICT DO NOTHING""") if False else None
         if not conn.execute("SELECT 1 FROM activities WHERE shift_id='demo-shift-1'").fetchone():
             conn.execute("INSERT INTO activities VALUES('act1','demo-shift-1','demo-e1','picking',NULL)")
         for loc, label, product, sku in (
@@ -149,7 +146,9 @@ def page():
 def demo_session():
     emp = identity()
     return jsonify(employee=emp[0] if emp else None,
-                   manager=is_manager(), csrf=fresh_csrf(), synthetic=True)
+                   manager=is_manager(), csrf=fresh_csrf(),
+                   manager_csrf=session.get("pr192_manager_csrf") if is_manager() else None,
+                   synthetic=True)
 
 
 @app.post("/demo/login")
