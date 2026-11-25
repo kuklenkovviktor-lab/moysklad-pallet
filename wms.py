@@ -1516,8 +1516,20 @@ function beep(ok=true){
  }catch(e){}
 }
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
-function showTsdError(message){
+function showTsdError(message,reason=''){
  beep(false);
+ const title=(reason==='WB_CANCELLED'?'ЗАКАЗ ОТМЕНЕН':
+              reason==='WB_ALREADY_SCANNED'?'ЗАКАЗ УЖЕ СОБРАН':
+              reason==='WB_PRODUCT_MISMATCH'?'НЕ ТОТ ТОВАР':
+              reason==='WB_NOT_ON_ASSEMBLY'?'НЕ НА СБОРКЕ':
+              reason==='WB_DELIVERY_NOT_ADMITTED'?'В ДОСТАВКЕ WB':
+              reason==='WB_STATUS_STALE'?'СТАТУС WB УСТАРЕЛ':
+              reason==='WB_STICKER_UNKNOWN'?'СТИКЕР НЕ НАЙДЕН':
+              reason==='WB_STICKER_AMBIGUOUS'?'ОШИБКА СТИКЕРА':
+              reason==='WB_PRODUCT_MAPPING_MISSING'?'НЕТ СВЯЗИ С ТОВАРОМ':
+              reason==='WB_NOT_ADMITTED'?'ЗАКАЗ НЕ В ОЧЕРЕДИ':
+              reason==='WB_BLOCKED_STATUS'?'СТАТУС WB ЗАПРЕЩАЕТ СБОРКУ':'ОШИБКА');
+ document.querySelector('.tsd-error-title').textContent=title;
  document.getElementById('tsdErrorText').textContent=String(message||'Скан отклонён');
  document.getElementById('tsdError').classList.add('open');
 }
@@ -1655,6 +1667,7 @@ async function acceptProduct(code){
  updateScanStage();beep(true);
  // Refresh after the warning; newest product lookup wins over stale requests.
  setTimeout(()=>refreshWbUnscannedHint(d.barcode,false,d.article||''),0);
+ document.getElementById('result').style.color='';
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
  return true;
 }
@@ -1668,12 +1681,16 @@ function queuedFbsScan(){
 async function sendFbsScan(payload){
  const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const d=await r.json();
- if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB');return false}
+ if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB',d.reason);return false}
  localStorage.removeItem(FBS_OUTBOX_KEY);
  const verifiedBarcode=payload.product_barcode;
  pendingProduct=null;updateScanStage();beep(true);
  refreshWbUnscannedHint(verifiedBarcode,false,wbHintLastBarcode===verifiedBarcode?wbHintLastArticle:'');
- document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
+ const resultEl=document.getElementById('result');
+ resultEl.style.color=d.wb_status==='complete'?'#ffd166':'';
+ resultEl.textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':
+  d.wb_status==='complete'?'⚠️ ЗАКАЗ В ДОСТАВКЕ WB · скан GRIT успешно подтверждён (+1 заказ).':
+  '✅ +1 заказ · '+payload.barcode;
  return true;
 }
 async function retryFbsOutbox(){
@@ -2316,45 +2333,57 @@ function renderHourly(rows){
  }).join('');
 }
 
-function renderProgress(done){
- const n=Math.max(0,Number(done)||0);
- document.getElementById('progressDone').textContent=n;
+function renderProgress(){
  if(wbAssemblyCount===null){
   document.getElementById('remaining').textContent='—';
+  document.getElementById('progressDone').textContent='—';
   document.getElementById('progressPlan').textContent=' / очередь WB недоступна';
   document.getElementById('progressBar').style.width='0%';
-  document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · актуальный остаток WB неизвестен';
+  document.getElementById('progressText').textContent='Текущий статус WB не получен · прогресс неизвестен';
   return;
  }
- const rest=Math.max(0,wbAssemblyCount);
- const total=n+rest;
- const pct=total>0?n/total*100:0;
+ // Numerator and denominator describe the SAME current WB CONFIRM cohort.
+ // The separate 'WB FBS собрано сегодня' KPI is by scan time and is NOT added.
+ const rest=wbAssemblyCount.remaining_orders;
+ const done=wbAssemblyCount.assembled_assembly_orders;
+ const total=wbAssemblyCount.assembly_orders;
+ const pct=total>0?done/total*100:0;
  document.getElementById('remaining').textContent=rest;
- document.getElementById('progressPlan').textContent=' / '+total+' под контролем';
+ document.getElementById('progressDone').textContent=done;
+ document.getElementById('progressPlan').textContent=' / '+total+' сейчас на сборке WB';
  document.getElementById('progressBar').style.width=pct.toFixed(1)+'%';
- document.getElementById('progressText').textContent='Собрано сегодня: '+n+' · остаток заказов WB за сегодня: '+rest+
-  ' · '+pct.toFixed(1)+'% условного объёма. Факт по дате сканирования, остаток по дате заказа; это не дневной план.';
+ document.getElementById('progressText').textContent='Сейчас на сборке WB: '+total+
+  ' · подтверждено GRIT: '+done+' · осталось: '+rest+' · '+pct.toFixed(1)+'%. Отдельно от собранного за сегодня.';
 }
 
 async function loadWbAssemblyPlan(){
  const info=document.getElementById('wbAssemblyInfo');
  try{
-  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue?day='+encodeURIComponent(dayKey()),{cache:'no-store'},5000);
+  // NO date filter: this is CURRENT supplierStatus=confirm, including older orders.
+  const response=await fetchWithTimeout('/api/manager/wb-fbs/picking-queue',{cache:'no-store'},5000);
   if(response.status===403){location.href='/manager-login';return}
   if(!response.ok)throw Error('HTTP '+response.status);
   const result=await response.json();
-  if(result.state!=='connected'||!Number.isInteger(result.remaining_orders)||
-     !Number.isInteger(result.confirm_orders)||!Number.isInteger(result.delivery_orders)){
-   throw Error('Очередь WB недоступна');
+  if(result.state!=='connected'||result.source!=='wb_api_synced_statuses'||
+     !Number.isInteger(result.assembly_orders)||
+     !Number.isInteger(result.assembled_assembly_orders)||
+     !Number.isInteger(result.remaining_orders)||
+     result.assembly_orders!==result.remaining_orders+result.assembled_assembly_orders||
+     !Number.isInteger(result.unadmitted_orders)||
+     !Number.isInteger(result.delivery_orders)){
+    throw Error('Очередь WB недоступна');
   }
-  wbAssemblyCount=result.remaining_orders;
-  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB за сегодня: на сборке '+result.confirm_orders+
-    ' · в доставке WB '+result.delivery_orders+' · обновляется автоматически';
+  wbAssemblyCount=result;
+  renderProgress();
+  info.textContent='Сейчас в статусе WB «На сборке»: '+result.assembly_orders+
+    ' · ещё не собрано в GRIT: '+result.remaining_orders+
+    (result.unadmitted_orders?' · не поставлено в очередь GRIT: '+result.unadmitted_orders:'')+
+    ' · в доставке WB, но не закрыто в GRIT: '+result.delivery_orders+
+    ' · проверено по кэшу WB: '+(result.synced_at||'время неизвестно');
  }catch(e){
   wbAssemblyCount=null;
-  renderProgress(Number(document.getElementById('todayOrders').textContent||0));
-  info.textContent='Очередь WB недоступна · общий объём не рассчитан';
+  renderProgress();
+  info.textContent='Очередь WB недоступна · актуальный объём не рассчитан';
  }
 }
 async function fetchWithTimeout(url,options={},timeoutMs=5000){
@@ -2387,7 +2416,7 @@ async function load(){
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
  document.getElementById('active').textContent=d.workers.length;
- renderProgress(fact);
+ renderProgress();
  renderHourly(hour.rows||[]);
 
  const box=document.getElementById('workers');
@@ -3812,7 +3841,12 @@ def fbs_wb_unscanned_hints():
 
 @wms_bp.get("/api/manager/wb-fbs/picking-queue")
 def manager_wb_fbs_picking_queue():
-    """Live remaining WB orders from GRIT's admitted, unassembled queue."""
+    """Current WB 'На сборке' cohort, not WB order creation-day or supply date.
+
+    Source: WB supplierStatus cached by the dedicated WB API sync worker.
+    The worker MUST be healthy/current; this endpoint never calls WB or
+    changes order state while employees are assembling.
+    """
     ensure_db()
     if not manager_access():
         return jsonify(error="Доступ только руководителю"), 403
@@ -3820,43 +3854,59 @@ def manager_wb_fbs_picking_queue():
         return jsonify(state="disabled"), 503
     account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
     day = (request.args.get("day") or "").strip()
-    if day and day != _wb_hint_today():
-        return jsonify(error="Доступна текущая дата по Москве"), 400
+    if day:
+        # Backward-compatible day filter now means FIRST observed CONFIRM,
+        # not the day WB originally created the order.
+        from wb_unpicked_manager import _assembly_day, UNKNOWN_DAY
+        if day != UNKNOWN_DAY:
+            try:
+                if datetime.strptime(day, "%Y-%m-%d").strftime("%Y-%m-%d") != day:
+                    raise ValueError()
+            except ValueError:
+                return jsonify(error="Неверная дата поступления на сборку"), 400
     try:
         if day:
-            from wb_unpicked_manager import _order_day
-            rows = query_all("""SELECT o.wb_status,o.created_at
-                FROM wb_fbs_picking_queue q
-                JOIN wb_fbs_orders o
-                  ON o.account_id=q.account_id AND o.order_id=q.order_id
-                WHERE q.account_id=?
-                  AND o.local_status='pending'
-                  AND o.wb_status IN ('confirm','complete')""", (account,))
-            today_rows = [row for row in rows if _order_day(row[1]) == day]
-            confirm = sum(1 for row in today_rows if row[0] == "confirm")
-            delivery = sum(1 for row in today_rows if row[0] == "complete")
-            remaining = len(today_rows)
+            rows = query_all("""SELECT o.local_status,q.accepted_at,o.synced_at
+                FROM wb_fbs_orders o
+                LEFT JOIN wb_fbs_picking_queue q
+                  ON q.account_id=o.account_id AND q.order_id=o.order_id
+                WHERE o.account_id=? AND o.wb_status='confirm'""", (account,))
+            rows = [row for row in rows if _assembly_day(row[1]) == day]
+            total = len(rows)
+            assembled = sum(1 for row in rows if row[0] == "complete")
+            remaining = total - assembled
+            unadmitted = sum(1 for row in rows if row[0] != "complete" and not row[1])
+            synced_at = max((row[2] for row in rows if row[2]), default=None)
         else:
-            row = query_one(
-                """SELECT
-                    COUNT(*) FILTER (WHERE o.wb_status = 'confirm'),
-                    COUNT(*) FILTER (WHERE o.wb_status = 'complete'),
-                    COUNT(*)
-                FROM wb_fbs_picking_queue q
-                JOIN wb_fbs_orders o
-                  ON o.account_id=q.account_id AND o.order_id=q.order_id
-                WHERE q.account_id=?
-                  AND o.local_status='pending'
-                  AND o.wb_status IN ('confirm','complete')""",
-                (account,),
-            )
-            confirm, delivery, remaining = (int(x or 0) for x in (row or (0, 0, 0)))
+            counts = query_one("""SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN o.local_status='complete' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN o.local_status<>'complete' AND q.order_id IS NULL
+                     THEN 1 ELSE 0 END),0),
+                MAX(o.synced_at)
+                FROM wb_fbs_orders o
+                LEFT JOIN wb_fbs_picking_queue q
+                  ON q.account_id=o.account_id AND q.order_id=o.order_id
+                WHERE o.account_id=? AND o.wb_status='confirm'""", (account,))
+            total = int(counts[0] or 0)
+            assembled = int(counts[1] or 0)
+            unadmitted = int(counts[2] or 0)
+            remaining = total - assembled
+            synced_at = counts[3]
+        delivery = query_one("""SELECT COUNT(*)
+            FROM wb_fbs_picking_queue q JOIN wb_fbs_orders o
+              ON o.account_id=q.account_id AND o.order_id=q.order_id
+            WHERE q.account_id=? AND o.local_status='pending'
+              AND o.wb_status='complete'""", (account,))
+        delivery_pending = int((delivery or (0,))[0] or 0)
     except Exception:
+        # A broken or missing WB cache is NOT an empty assembly queue.
         return jsonify(state="error", error="Очередь WB недоступна"), 503
     response = jsonify(
-        state="connected", remaining_orders=remaining,
-        confirm_orders=confirm, delivery_orders=delivery,
-        **({"day": day} if day else {}),
+        state="connected", source="wb_api_synced_statuses",
+        day=day or None, synced_at=synced_at,
+        assembly_orders=total, assembled_assembly_orders=assembled,
+        remaining_orders=remaining, confirm_orders=remaining,
+        delivery_orders=delivery_pending, unadmitted_orders=unadmitted,
     )
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -4435,6 +4485,33 @@ def fbs_skip_item():
     return jsonify(ok=True, skipped=True, order_counted=False)
 
 
+def _wb_scan_feedback(verdict):
+    """Human-readable worker errors; do not modify WB verification results."""
+    result = verdict.get("result")
+    status = str(verdict.get("wb_status") or "").lower()
+    if result == "BLOCKED_STATUS":
+        if status in ("cancel", "canceled", "cancelled", "decline"):
+            return "ЗАКАЗ ОТМЕНЕН", "WB_CANCELLED"
+        if status == "new":
+            return "ЗАКАЗ ЕЩЁ НЕ НА СБОРКЕ WB", "WB_NOT_ON_ASSEMBLY"
+        if status == "confirm" and not verdict.get("admitted"):
+            return "ЗАКАЗ НА СБОРКЕ WB, НО НЕ ПОПАЛ В ОЧЕРЕДЬ GRIT. Сообщи руководителю.", "WB_NOT_ADMITTED"
+        if status == "complete" and not verdict.get("admitted"):
+            return "ЗАКАЗ В ДОСТАВКЕ WB, НО НЕ БЫЛ ПОДТВЕРЖДЁН НА СБОРКЕ GRIT.", "WB_DELIVERY_NOT_ADMITTED"
+        return "ЗАКАЗ НЕДОСТУПЕН ДЛЯ СБОРКИ. Статус WB: " + (status or "неизвестен"), "WB_BLOCKED_STATUS"
+    messages = {
+        "ALREADY_COMPLETE": ("ЗАКАЗ УЖЕ СОБРАН В GRIT. Повторный скан не засчитан.", "WB_ALREADY_SCANNED"),
+        "STALE_CACHE": ("СТАТУС WB УСТАРЕЛ. Скан не засчитан. Обнови данные с руководителем.", "WB_STATUS_STALE"),
+        "MISMATCH": ("НЕ ТОТ ТОВАР. Отсканируй правильный товар для этого WB-стикера.", "WB_PRODUCT_MISMATCH"),
+        "MAPPING_ERROR": ("ТОВАР НЕ СОПОСТАВЛЕН С ЗАКАЗОМ WB. Сообщи руководителю.", "WB_PRODUCT_MAPPING_MISSING"),
+        "UNKNOWN_STICKER": ("СТИКЕР WB НЕ НАЙДЕН В GRIT. Проверь стикер и синхронизацию.", "WB_STICKER_UNKNOWN"),
+        "AMBIGUOUS_STICKER": ("СТИКЕР WB СВЯЗАН С НЕСКОЛЬКИМИ ЗАКАЗАМИ. Нужна проверка руководителя.", "WB_STICKER_AMBIGUOUS"),
+        "PRODUCT_REQUIRED": ("СНАЧАЛА ОТСКАНИРУЙ ТОВАР.", "WB_PRODUCT_REQUIRED"),
+        "STICKER_REQUIRED": ("ОТСКАНИРУЙ СТИКЕР WB.", "WB_STICKER_REQUIRED"),
+    }
+    return messages.get(result, ("Скан WB отклонён. Код: " + str(result or "UNKNOWN"), "WB_SCAN_REJECTED"))
+
+
 @wms_bp.post("/api/fbs/scan")
 def fbs_scan():
     ensure_db()
@@ -4515,7 +4592,9 @@ def fbs_scan():
         if verdict["result"] != "MATCH":
             from fbs_skip_authorization import complete_pending_item
             complete_pending_item(shift_id, employee["id"], product_barcode)
-            return jsonify(error="WB FBS: " + verdict["result"], reason=verdict["result"],
+            message, reason = _wb_scan_feedback(verdict)
+            return jsonify(error=message, reason=reason,
+                           wb_status=verdict.get("wb_status"),
                            reset_pending=True), 409
         try:
             replayed = commit_scan(
@@ -4528,7 +4607,8 @@ def fbs_scan():
             if query_one("SELECT id FROM scans WHERE barcode=?", (barcode,)):
                 return jsonify(error="Этот заказ уже был засчитан"), 409
             raise
-        return jsonify(ok=True, replayed=replayed, **shift_stats(shift_id))
+        return jsonify(ok=True, replayed=replayed, wb_status=verdict.get("wb_status"),
+                       **shift_stats(shift_id))
     try:
         if replay(request_id, shift_id, employee["id"], barcode, product_barcode):
             return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
