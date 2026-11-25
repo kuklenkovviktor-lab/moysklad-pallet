@@ -501,7 +501,12 @@ class WBApiMockTests(unittest.TestCase):
         self.assertEqual(self.verdict(), "BLOCKED_STATUS")
 
     def test_complete_order_sticker_can_still_be_synced(self):
-        self.sync.ingest_orders(ACCOUNT, [order()], {"84500123": "complete"})
+        # Status refresh intentionally checks recent orders, not every old
+        # unadmitted delivery. Use a current synthetic order for this contract.
+        from datetime import datetime, timezone
+        recent = order()
+        recent["createdAt"] = datetime.now(timezone.utc).isoformat()
+        self.sync.ingest_orders(ACCOUNT, [recent], {"84500123": "complete"})
         client, http = self.client([
             ("POST", "/api/v3/orders/status", response(payload={"orders": [{
                 "id": 84500123, "supplierStatus": "complete", "wbStatus": "waiting"}]})),
