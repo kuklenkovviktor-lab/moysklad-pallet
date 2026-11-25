@@ -355,7 +355,8 @@ def verify_pair(account_id, product_barcode, sticker_barcode, cursor=None):
         result = "MISMATCH"
     else:
         result = "MATCH"
-    return {"result": result, "order_id": oid, "expected_skus": allowed}
+    return {"result": result, "order_id": oid, "expected_skus": allowed,
+            "wb_status": status, "admitted": bool(accepted)}
 
 
 def log_verification(account_id, employee_id, terminal_id, product, sticker, verdict):
