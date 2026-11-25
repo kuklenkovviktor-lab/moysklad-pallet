@@ -1,5 +1,6 @@
 """Synthetic WB FBS history tests. No credentials, warehouse or WB requests."""
 import sqlite3
+import os
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -61,6 +62,24 @@ class WBHistoryTests(unittest.TestCase):
         history.record_observed_statuses({12:"confirm"},"2026-11-16T09:00:00+00:00")
         rows=self.connection.execute("SELECT COUNT(*) FROM wb_fbs_status_tracking WHERE delivered_at IS NOT NULL").fetchone()
         self.assertEqual(rows[0],0)
+
+    def test_v11_admissions_moscow_midnight_unknown_and_account_isolation(self):
+        self.connection.executescript("""
+            CREATE TABLE wb_fbs_orders(account_id TEXT, order_id TEXT);
+            CREATE TABLE wb_fbs_picking_queue(account_id TEXT, order_id TEXT, accepted_at TEXT);
+            CREATE TABLE wb_fbs_delivery_observations(account_id TEXT, order_id TEXT, observed_at TEXT);
+            INSERT INTO wb_fbs_orders VALUES('a','1'),('a','2'),('a','3'),('a','4'),('b','5');
+            INSERT INTO wb_fbs_picking_queue VALUES
+                ('a','1','2026-11-24T20:59:59+00:00'),
+                ('a','2','2026-11-24T21:00:00+00:00'),
+                ('a','4','invalid'),('b','5','2026-11-24T21:00:00+00:00');
+            INSERT INTO wb_fbs_delivery_observations VALUES('a','1','2026-11-24T21:01:00+00:00');
+        """)
+        with patch.dict(os.environ, {"WB_FBS_V11_ENABLED": "1", "WB_FBS_V11_ACCOUNT_ID": "a"}):
+            report = history.daily_history('2026-11-25')
+        self.assertEqual(report['new_on_assembly_observed'], 1)
+        self.assertEqual(report['unknown_admission_orders'], 2)
+        self.assertEqual(report['moved_to_delivery_observed'], 1)
 
     def test_manager_route_and_history_link(self):
         from pathlib import Path

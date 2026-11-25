@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 
 os.environ.setdefault("WMS_BADGE_SECRET", "synthetic-badge-only")
@@ -31,7 +32,7 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.ensure.start()
         self.enabled = patch.dict(os.environ, {"WB_FBS_V11_ENABLED": "1", "WB_FBS_V11_ACCOUNT_ID": "default"})
         self.enabled.start()
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE wb_fbs_orders (
                     account_id TEXT, order_id TEXT, wb_status TEXT,
@@ -53,7 +54,7 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
 
     def seed(self, account, oid, wb_status, local_status, admitted,
              created="2026-11-24T08:00:00Z", accepted="2026-11-25T07:00:00Z"):
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("INSERT INTO wb_fbs_orders VALUES(?,?,?,?,?,?)",
                          (account,oid,wb_status,local_status,created,
                           "2026-11-25T08:00:00Z"))
@@ -86,6 +87,20 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.assertEqual(data["unadmitted_orders"],0)
         self.assertIsNone(data["day"])
         self.assertEqual(response.headers["Cache-Control"],"no-store")
+
+    def test_fresh_pending_cannot_hide_stale_completed_confirm(self):
+        from datetime import datetime, timezone
+        self.seed('default','old','confirm','complete',True)
+        self.seed('default','fresh','confirm','pending',True)
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute("UPDATE wb_fbs_orders SET synced_at=? WHERE order_id='old'",
+                         ('2020-01-01T00:00:00+00:00',))
+            conn.execute("UPDATE wb_fbs_orders SET synced_at=? WHERE order_id='fresh'",
+                         (datetime.now(timezone.utc).isoformat(),))
+        data = wms.manager_wb_fbs_picking_queue().get_json()
+        self.assertTrue(data['cache_stale'])
+        self.assertEqual(data['remaining_orders'], 1)
+        self.assertEqual(data['synced_at'], '2020-01-01T00:00:00+00:00')
 
     def test_current_confirm_ignores_creation_day_and_tracks_unadmitted(self):
         self.seed("default","old","confirm","pending",True,
@@ -127,7 +142,7 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
         self.assertEqual(wms.manager_wb_fbs_picking_queue().get_json()["remaining_orders"],0)
 
     def test_failure_is_not_displayed_as_zero(self):
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("DROP TABLE wb_fbs_picking_queue")
         response, code = wms.manager_wb_fbs_picking_queue()
         self.assertEqual(code,503)
