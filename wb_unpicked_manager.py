@@ -36,17 +36,26 @@ def _search_pattern(search):
 
 
 def _orders_sql(extra=""):
-    return """FROM wb_fbs_picking_queue q
-      JOIN wb_fbs_orders o
+    # Include current WB CONFIRM orders even if the sync has not enrolled them
+    # in GRIT's picking queue. Delivery leftovers remain visible only after
+    # confirmed queue admission, and only when explicitly filtered.
+    return """FROM wb_fbs_orders o
+      LEFT JOIN wb_fbs_picking_queue q
         ON o.account_id=q.account_id AND o.order_id=q.order_id
-      WHERE q.account_id=?
+      WHERE o.account_id=?
         AND o.local_status='pending'
-        AND o.wb_status IN ('confirm','complete') """ + extra
+        AND o.wb_status IN ('confirm','complete')
+        AND (o.wb_status='confirm' OR q.order_id IS NOT NULL) """ + extra
 
 
 
 MSK = timezone(timedelta(hours=3))
 UNKNOWN_DAY = "unknown"
+
+
+def _assembly_day(accepted_at):
+    """Date GRIT first observed WB CONFIRM, never WB order creation date."""
+    return _order_day(accepted_at)
 
 
 def _order_day(created_at):
@@ -75,10 +84,10 @@ def _requested_day():
 
 
 def _dated_rows(account, status, search):
-    """Read-only date partition with identical account/status/search restrictions.
+    """Current pending WB cohort partitioned by first observed CONFIRM date.
 
-    Parse WB ISO timestamps in Python to avoid SQLite/PostgreSQL timezone drift.
-    This is deliberately limited to the manager's existing pending queue.
+    Unadmitted active CONFIRM orders have an explicit unknown day. Never
+    partition by WB's original order creation date or today's scan date.
     """
     terms = [account]
     condition = ""
@@ -101,7 +110,7 @@ def _dated_rows(account, status, search):
 def _read_days(account, status, search):
     days = defaultdict(lambda: [0, 0, 0])
     for oid, article, state, created, accepted in _dated_rows(account, status, search):
-        item = days[_order_day(created)]
+        item = days[_assembly_day(accepted)]
         item[0] += 1
         item[1 if state == "confirm" else 2] += 1
     return [dict(day=day, count=counts[0], confirm=counts[1], delivery=counts[2])
@@ -135,7 +144,7 @@ def _read_page(account, status, search, page, article=None, day=None):
         order_ids = [str(r[0]) for r in ids]
     else:
         filtered = [row for row in _dated_rows(account, status, search)
-                    if _order_day(row[3]) == day and
+                    if _assembly_day(row[4]) == day and
                     (article is None or row[1] == article)]
         filtered.sort(key=lambda row: (row[4] or "", str(row[0])), reverse=True)
         total = len(filtered)
@@ -184,7 +193,7 @@ def unpicked_list():
     if not _enabled():
         return jsonify(error="WB FBS отключён"), 503
     search = (request.args.get("q") or "").strip()[:80]
-    status = request.args.get("status", "all")
+    status = request.args.get("status", "confirm")
     if status not in ("all", "confirm", "complete"):
         return jsonify(error="Неверный фильтр"), 400
     try:
@@ -211,7 +220,7 @@ def _read_groups(account, status, search, page, day=None):
     if day is not None:
         groups = defaultdict(lambda: [0, 0, 0])
         for oid, article, state, created, accepted in _dated_rows(account, status, search):
-            if _order_day(created) != day:
+            if _assembly_day(accepted) != day:
                 continue
             item = groups[article]
             item[0] += 1
@@ -261,7 +270,7 @@ def unpicked_groups():
     if not _enabled():
         return jsonify(error="WB FBS отключён"), 503
     search = (request.args.get("q") or "").strip()[:80]
-    status = request.args.get("status", "all")
+    status = request.args.get("status", "confirm")
     if status not in ("all", "confirm", "complete"):
         return jsonify(error="Неверный фильтр"), 400
     try:
@@ -287,7 +296,7 @@ def unpicked_days():
         return jsonify(error="Доступ только руководителю"), 403
     if not _enabled():
         return jsonify(error="WB FBS отключён"), 503
-    status = request.args.get("status", "all")
+    status = request.args.get("status", "confirm")
     if status not in ("all", "confirm", "complete"):
         return jsonify(error="Неверный фильтр"), 400
     search = (request.args.get("q") or "").strip()[:80]
@@ -412,18 +421,18 @@ th{color:#adc4d7;font-size:12px}tr:hover td{background:#1b3147}
 </style></head><body><main>
 <a href="/manager">← Вернуться на главную</a>
 <h1>Несобранные заказы WB</h1>
-<div class="muted">Текущий остаток несобранных заказов по дате создания на WB (Москва). Выбери день, затем артикул и заказ. Это не архив остатков на конец дня.</div>
+<div class="muted">Актуальные заказы в статусе WB «На сборке», не закрытые в GRIT, независимо от даты создания. Внизу разбивка по первому попаданию на сборку (Москва). Это текущий остаток, не исторический снимок на конец дня.</div>
 <div class="panel">
 <div class="toolbar">
 <input id="query" type="search" placeholder="Артикул WB, артикул продавца, ШК или заказ" aria-label="Поиск">
 <select id="status" aria-label="Статус WB">
-<option value="all">Все статусы</option><option value="confirm">На сборке</option><option value="complete">В доставке WB</option>
+<option value="confirm" selected>На сборке</option><option value="complete">В доставке WB (отдельно)</option><option value="all">Все статусы</option><option value="complete">В доставке WB</option>
 </select>
 <button id="refresh" class="secondary">Обновить</button>
 </div>
 <p id="summary" class="hint">Загрузка…</p>
 <section id="daysPanel" aria-label="Остатки по дням"><button id="allDays" type="button" class="secondary">Все дни</button>
-<div class="scroll"><table><thead><tr><th>Дата заказа WB (МСК)</th><th>Остаток</th><th>На сборке WB</th><th>В доставке WB</th><th>Действие</th></tr></thead>
+<div class="scroll"><table><thead><tr><th>Впервые на сборке (МСК)</th><th>Остаток</th><th>На сборке WB</th><th>В доставке WB</th><th>Действие</th></tr></thead>
 <tbody id="days"><tr><td colspan="5">Загрузка…</td></tr></tbody></table></div>
 </section>
 <p id="dayHint" class="hint">Все дни · выбери дату для просмотра артикулов</p>
@@ -468,14 +477,14 @@ async function loadDays(){
   if(!r.ok)throw Error(d.error||'Ошибка загрузки дней');
   const days=d.days||[];
   $('days').innerHTML=days.length?days.map((x,i)=>'<tr><td>'+
-   esc(x.day==='unknown'?'Дата неизвестна':x.day)+'</td><td class="group-count">'+x.count+
+   esc(x.day==='unknown'?'Поступление неизвестно':x.day)+'</td><td class="group-count">'+x.count+
    '</td><td class="ok">'+x.confirm+'</td><td class="status">'+x.delivery+
    '</td><td><button type="button" class="secondary day-select'+(selectedDay===x.day?' day-active':'')+
    '" data-index="'+i+'">Открыть день</button></td></tr>').join(''):
    '<tr><td colspan="5">Несобранных заказов нет</td></tr>';
   window.dayData=days;
   $('dayHint').textContent=selectedDay===null?'Все дни · выбери дату для просмотра артикулов':
-   'Выбран день: '+(selectedDay==='unknown'?'Дата неизвестна':selectedDay)+' · '+
+   'Выбран день: '+(selectedDay==='unknown'?'Поступление неизвестно':selectedDay)+' · '+
    'для сброса нажми «Все дни»';
  }catch(e){if(call===daySerial)$('days').innerHTML='<tr><td colspan="5" class="error">'+esc(e.message)+'</td></tr>';}
 }
