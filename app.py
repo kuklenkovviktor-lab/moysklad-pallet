@@ -349,6 +349,21 @@ _GRIT_DESKTOP_PAGES = frozenset({
     "/fbs-journal", "/receiving-monitor", "/history", "/badges",
 })
 
+@app.get("/grit-sidebar-loading.gif")
+def grit_sidebar_loading_animation():
+    """Optional branded GIF in the desktop manager sidebar.
+
+    Only serve a checked-in file; no remote fetches or runtime generation.
+    The existing SVG remains the visual fallback when the GIF is absent.
+    """
+    image_path = Path(__file__).with_name("grit-sidebar-loading.gif")
+    if not image_path.is_file():
+        return Response(status=404)
+    response = Response(image_path.read_bytes(), mimetype="image/gif")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 @app.get("/grit-warehouse-sidebar.svg")
 def grit_warehouse_sidebar_asset():
     """Public brand illustration; no warehouse data or secrets."""
