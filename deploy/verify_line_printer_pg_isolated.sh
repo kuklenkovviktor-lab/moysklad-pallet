@@ -125,4 +125,21 @@ docker run --rm \
   "$APP_IMAGE" \
   /app/tests/test_line_printer_http_synthetic.py -v
 
+echo "=== REAL GRIT WMS AUTH + ISOLATED PG17 HTTP TESTS ==="
+docker run --rm \
+  --network "$NETWORK" \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=128m \
+  -v "$SRC:/app:ro" \
+  -w /app \
+  -e PYTHONPATH=/app \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
+  -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$DB_NAME" \
+  --entrypoint python \
+  "$APP_IMAGE" \
+  /app/tests/test_line_printer_wms_auth_adapter.py -v
+
 echo "PR192 PG17 ISOLATED TEST PASS"
