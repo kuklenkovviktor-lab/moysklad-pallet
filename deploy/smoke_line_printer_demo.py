@@ -76,6 +76,16 @@ assert complete[0] == 200 and complete[1]["state"] == "COMPLETED", complete
 audit = manager("/synthetic/pr192/audit/SYNTH-1003")
 assert audit[0] == 200 and [e["action"] for e in audit[1]["events"]] == ["RESERVE", "COMPLETE"]
 
+# Revoking a printer QR invalidates the original immediately.
+rotated = manager("/demo/printers/" + printer["printer_id"] + "/rotate",
+                  {"csrf": csrf})
+assert rotated[0] == 200, rotated
+assert rotated[1]["qr"] != qr
+assert worker("/demo/orders?qr=" + urllib.parse.quote(qr, safe=""))[0] == 403
+configured = manager("/demo/printers/" + printer["printer_id"] + "/configure",
+                     {"csrf": csrf, "name": "Тест В-Б", "lines": ["В", "Б"]})
+assert configured[0] == 200, configured
+
 # A second order on line А is explicitly released by the manager.
 code, p2 = manager("/demo/printers", {
     "csrf": csrf, "name": "Изолированный тест: линия А", "lines": ["А"]})
