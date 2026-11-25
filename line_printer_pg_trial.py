@@ -62,8 +62,8 @@ def reserve_synthetic_pg(
     Only transaction-scoped lock, no print or WB mutation. Unique(account,order)
     in the DB remains the final defense if lock coverage is imperfect.
     """
-    fields = (account_id, order_id, printer_id, employee_id, request_id)
-    if any(not isinstance(x, str) or not x.strip() or len(x) > 160 for x in fields):
+    identifiers = (account_id, order_id, printer_id, employee_id, request_id)
+    if any(not isinstance(x, str) or not x.strip() or len(x) > 160 for x in identifiers):
         return PGReservationResult(False, "INVALID_INPUT")
     if not callable(is_eligible_locked):
         return PGReservationResult(False, "ELIGIBILITY_REQUIRED")
@@ -101,7 +101,7 @@ def reserve_synthetic_pg(
                 VALUES (%s,%s,%s,%s,%s)
                 ON CONFLICT DO NOTHING
                 RETURNING request_id
-            """, fields).fetchone()
+            """, (account_id, order_id, request_id, printer_id, employee_id)).fetchone()
             if not inserted:
                 return PGReservationResult(False, "CONCURRENT_CONFLICT")
             return PGReservationResult(True, "RESERVED", request_id, printer_id)
