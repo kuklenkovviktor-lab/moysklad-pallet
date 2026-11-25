@@ -40,7 +40,10 @@ cleanup_failed() {
   fi
 }
 trap cleanup_failed EXIT
-docker network create --internal "$NET" >/dev/null
+# A Docker --internal bridge can make host-published loopback ports unreachable.
+# This is a dedicated bridge, attached ONLY to synthetic demo containers.
+# No production containers, credentials, or WB tokens are present.
+docker network create --driver bridge "$NET" >/dev/null
 docker run -d --name "$DB" \
   --network "$NET" --network-alias pr192-db \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=synthetic-only \
@@ -56,6 +59,7 @@ done
 test "$READY" = 1
 docker run -d --name "$APP" \
   --network "$NET" \
+  --no-healthcheck \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,size=128m \
   -p "127.0.0.1:${PORT}:8000" \
@@ -74,11 +78,21 @@ docker run -d --name "$APP" \
   --access-logfile - --error-logfile - line_printer_demo_app:app >/dev/null
 READY=0
 for i in $(seq 1 60); do
-  if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health" \
+  if curl -fs --max-time 3 "http://127.0.0.1:${PORT}/health" \
       | grep -q '"ok":true'; then READY=1; break; fi
+  if [ "$(docker inspect --format '{{.State.Running}}' "$APP" 2>/dev/null || true)" != "true" ]; then
+    echo "Demo application container exited before readiness."
+    docker logs "$APP" --tail 100 2>&1 || true
+    exit 1
+  fi
   sleep 1
 done
-test "$READY" = 1
+if [ "$READY" != 1 ]; then
+  echo "Demo HTTP health probe FAILED on loopback port $PORT."
+  docker inspect "$APP" --format 'APP={{.State.Status}} EXIT={{.State.ExitCode}} NETWORK={{.HostConfig.NetworkMode}} PORTS={{json .NetworkSettings.Ports}}' || true
+  docker logs "$APP" --tail 100 2>&1 || true
+  exit 1
+fi
 GRIT_PR192_DEMO_PORT="$PORT" GRIT_PR192_DEMO_PASSWORD="$PASS" \
   python3 "$SRC/deploy/smoke_line_printer_demo.py"
 (umask 077; printf 'NET=%q\nDB=%q\nAPP=%q\nPORT=%q\n' \
