@@ -1516,8 +1516,15 @@ function beep(ok=true){
  }catch(e){}
 }
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
-function showTsdError(message){
+function showTsdError(message,reason=''){
  beep(false);
+ const title=(reason==='WB_CANCELLED'?'ЗАКАЗ ОТМЕНЕН':
+              reason==='WB_ALREADY_SCANNED'?'ЗАКАЗ УЖЕ СОБРАН':
+              reason==='WB_PRODUCT_MISMATCH'?'НЕ ТОТ ТОВАР':
+              reason==='WB_NOT_ON_ASSEMBLY'?'НЕ НА СБОРКЕ':
+              reason==='WB_DELIVERY_NOT_ADMITTED'?'В ДОСТАВКЕ WB':
+              reason==='WB_STATUS_STALE'?'СТАТУС WB УСТАРЕЛ':'ОШИБКА');
+ document.querySelector('.tsd-error-title').textContent=title;
  document.getElementById('tsdErrorText').textContent=String(message||'Скан отклонён');
  document.getElementById('tsdError').classList.add('open');
 }
@@ -1655,6 +1662,7 @@ async function acceptProduct(code){
  updateScanStage();beep(true);
  // Refresh after the warning; newest product lookup wins over stale requests.
  setTimeout(()=>refreshWbUnscannedHint(d.barcode,false,d.article||''),0);
+ document.getElementById('result').style.color='';
  document.getElementById('result').innerHTML='<div class="ok">✅ Товар подтверждён. Теперь сканируй ШК WB.</div>';
  return true;
 }
@@ -1668,12 +1676,16 @@ function queuedFbsScan(){
 async function sendFbsScan(payload){
  const r=await fetch('/api/fbs/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
  const d=await r.json();
- if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB');return false}
+ if(!r.ok){if([400,404,409,422].includes(r.status))localStorage.removeItem(FBS_OUTBOX_KEY);if(d.reset_pending){pendingProduct=null;updateScanStage()}showTsdError(d.error||'Ошибка ШК WB',d.reason);return false}
  localStorage.removeItem(FBS_OUTBOX_KEY);
  const verifiedBarcode=payload.product_barcode;
  pendingProduct=null;updateScanStage();beep(true);
  refreshWbUnscannedHint(verifiedBarcode,false,wbHintLastBarcode===verifiedBarcode?wbHintLastArticle:'');
- document.getElementById('result').textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':'✅ +1 заказ · '+payload.barcode;
+ const resultEl=document.getElementById('result');
+ resultEl.style.color=d.wb_status==='complete'?'#ffd166':'';
+ resultEl.textContent=d.replayed?'Заказ уже учтён ранее. Повтор не увеличил счётчик.':
+  d.wb_status==='complete'?'⚠️ ЗАКАЗ В ДОСТАВКЕ WB · скан GRIT успешно подтверждён (+1 заказ).':
+  '✅ +1 заказ · '+payload.barcode;
  return true;
 }
 async function retryFbsOutbox(){
@@ -4468,6 +4480,33 @@ def fbs_skip_item():
     return jsonify(ok=True, skipped=True, order_counted=False)
 
 
+def _wb_scan_feedback(verdict):
+    """Human-readable worker errors; do not modify WB verification results."""
+    result = verdict.get("result")
+    status = str(verdict.get("wb_status") or "").lower()
+    if result == "BLOCKED_STATUS":
+        if status in ("cancel", "canceled", "cancelled", "decline"):
+            return "ЗАКАЗ ОТМЕНЕН", "WB_CANCELLED"
+        if status == "new":
+            return "ЗАКАЗ ЕЩЁ НЕ НА СБОРКЕ WB", "WB_NOT_ON_ASSEMBLY"
+        if status == "confirm" and not verdict.get("admitted"):
+            return "ЗАКАЗ НА СБОРКЕ WB, НО НЕ ПОПАЛ В ОЧЕРЕДЬ GRIT. Сообщи руководителю.", "WB_NOT_ADMITTED"
+        if status == "complete" and not verdict.get("admitted"):
+            return "ЗАКАЗ В ДОСТАВКЕ WB, НО НЕ БЫЛ ПОДТВЕРЖДЁН НА СБОРКЕ GRIT.", "WB_DELIVERY_NOT_ADMITTED"
+        return "ЗАКАЗ НЕДОСТУПЕН ДЛЯ СБОРКИ. Статус WB: " + (status or "неизвестен"), "WB_BLOCKED_STATUS"
+    messages = {
+        "ALREADY_COMPLETE": ("ЗАКАЗ УЖЕ СОБРАН В GRIT. Повторный скан не засчитан.", "WB_ALREADY_SCANNED"),
+        "STALE_CACHE": ("СТАТУС WB УСТАРЕЛ. Скан не засчитан. Обнови данные с руководителем.", "WB_STATUS_STALE"),
+        "MISMATCH": ("НЕ ТОТ ТОВАР. Отсканируй правильный товар для этого WB-стикера.", "WB_PRODUCT_MISMATCH"),
+        "MAPPING_ERROR": ("ТОВАР НЕ СОПОСТАВЛЕН С ЗАКАЗОМ WB. Сообщи руководителю.", "WB_PRODUCT_MAPPING_MISSING"),
+        "UNKNOWN_STICKER": ("СТИКЕР WB НЕ НАЙДЕН В GRIT. Проверь стикер и синхронизацию.", "WB_STICKER_UNKNOWN"),
+        "AMBIGUOUS_STICKER": ("СТИКЕР WB СВЯЗАН С НЕСКОЛЬКИМИ ЗАКАЗАМИ. Нужна проверка руководителя.", "WB_STICKER_AMBIGUOUS"),
+        "PRODUCT_REQUIRED": ("СНАЧАЛА ОТСКАНИРУЙ ТОВАР.", "WB_PRODUCT_REQUIRED"),
+        "STICKER_REQUIRED": ("ОТСКАНИРУЙ СТИКЕР WB.", "WB_STICKER_REQUIRED"),
+    }
+    return messages.get(result, ("Скан WB отклонён. Код: " + str(result or "UNKNOWN"), "WB_SCAN_REJECTED"))
+
+
 @wms_bp.post("/api/fbs/scan")
 def fbs_scan():
     ensure_db()
@@ -4548,7 +4587,9 @@ def fbs_scan():
         if verdict["result"] != "MATCH":
             from fbs_skip_authorization import complete_pending_item
             complete_pending_item(shift_id, employee["id"], product_barcode)
-            return jsonify(error="WB FBS: " + verdict["result"], reason=verdict["result"],
+            message, reason = _wb_scan_feedback(verdict)
+            return jsonify(error=message, reason=reason,
+                           wb_status=verdict.get("wb_status"),
                            reset_pending=True), 409
         try:
             replayed = commit_scan(
@@ -4561,7 +4602,8 @@ def fbs_scan():
             if query_one("SELECT id FROM scans WHERE barcode=?", (barcode,)):
                 return jsonify(error="Этот заказ уже был засчитан"), 409
             raise
-        return jsonify(ok=True, replayed=replayed, **shift_stats(shift_id))
+        return jsonify(ok=True, replayed=replayed, wb_status=verdict.get("wb_status"),
+                       **shift_stats(shift_id))
     try:
         if replay(request_id, shift_id, employee["id"], barcode, product_barcode):
             return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
