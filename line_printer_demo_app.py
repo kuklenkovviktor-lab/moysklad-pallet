@@ -353,7 +353,8 @@ async function refresh(){
  const s=await api('/demo/session');csrf=s.csrf;el('who').textContent='Сотрудник: '+(s.employee||'нет')+' · Руководитель: '+(s.manager?'да':'нет');
  if(s.manager){
  const j=await api('/demo/printers');
- el('printers').innerHTML=j.printers.map(p=>'<div class="item"><b>'+esc(p.name)+'</b> · '+esc(p.lines.join(', '))+' <small>'+(p.enabled?'ВКЛ':'ВЫКЛ')+'</small> <button class="secondary" onclick="toggle(\\''+esc(p.id)+'\\','+(!p.enabled)+')">Переключить</button></div>').join('');
+ el('printers').innerHTML=j.printers.map(p=>`<div class="item"><b>${esc(p.name)}</b> · ${esc(p.lines.join(', '))} <small>${p.enabled?'ВКЛ':'ВЫКЛ'}</small> <button class="secondary printer-toggle" data-id="${esc(p.id)}" data-enabled="${p.enabled?'0':'1'}">Переключить</button></div>`).join('');
+ el('printers').querySelectorAll('.printer-toggle').forEach(b=>b.addEventListener('click',()=>toggle(b.dataset.id,b.dataset.enabled==='1')));
  }else el('printers').textContent='Требуется вход руководителя';
 }
 async function login(mode){return wrap(async()=>{const j=await api('/demo/login','POST',{mode,badge:el('badge').value,password:el('pwd').value});info(j);await refresh()})}
@@ -369,7 +370,8 @@ async function createPrinter(){return wrap(async()=>{
 async function findOrders(){return wrap(async()=>{
  activeQR=el('qr').value;
  const j=await api('/demo/orders?qr='+encodeURIComponent(activeQR));
- el('orders').innerHTML='<p>'+esc(j.printer)+'</p>'+j.orders.map(o=>'<div class="item"><b>'+esc(o.order_id)+'</b> <button onclick="reserve(\\''+esc(o.order_id)+'\\')">Забрать заказ</button></div>').join('');
+ el('orders').innerHTML='<p>'+esc(j.printer)+'</p>'+j.orders.map(o=>`<div class="item"><b>${esc(o.order_id)}</b> <button class="order-reserve" data-order="${esc(o.order_id)}">Забрать заказ</button></div>`).join('');
+ el('orders').querySelectorAll('.order-reserve').forEach(b=>b.addEventListener('click',()=>reserve(b.dataset.order)));
  info(j)
 })}
 async function reserve(order){return wrap(async()=>{
