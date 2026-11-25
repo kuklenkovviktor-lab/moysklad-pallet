@@ -55,6 +55,7 @@ class SyntheticHTTPTests(unittest.TestCase):
         fixture.setUp()
         self.qr = fixture.payload
         with connect() as conn:
+            conn.execute("DELETE FROM scans")
             conn.execute("DELETE FROM synthetic_line_printer_lifecycle_events")
             conn.execute("DELETE FROM synthetic_line_printer_lifecycle")
         app = Flask(__name__)
@@ -117,9 +118,20 @@ class SyntheticHTTPTests(unittest.TestCase):
         self.assertEqual(self.state(), "RESERVED")
         with connect() as conn:
             conn.execute("UPDATE wb_fbs_orders SET local_status='complete' WHERE order_id='o1'")
+        self.assertEqual(self.complete().status_code, 403)
+        with connect() as conn:
+            conn.execute("INSERT INTO scans (id,shift_id,employee_id,wb_order_id,marketplace) VALUES ('scan1','s1','e1','o1','WB')")
         self.assertEqual(self.complete().json["state"], "COMPLETED")
         self.assertEqual(self.state(), "COMPLETED")
         self.assertEqual(self.release().status_code, 409)
+
+    def test_other_worker_scan_cannot_complete_my_assignment(self):
+        self.reserve()
+        with connect() as conn:
+            conn.execute("UPDATE wb_fbs_orders SET local_status='complete'")
+            conn.execute("INSERT INTO scans (id,shift_id,employee_id,wb_order_id,marketplace) VALUES ('scan2','s2','e2','o1','WB')")
+        self.assertEqual(self.complete().status_code, 403)
+        self.assertEqual(self.state(), "RESERVED")
 
     def test_worker_cannot_release_or_see_manager_audit(self):
         self.reserve()
