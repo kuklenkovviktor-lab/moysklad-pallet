@@ -267,12 +267,15 @@ def rotate_printer(printer_id):
     return jsonify(ok=True,qr=qr,label_html=label)
 
 
-@app.get("/demo/orders")
+@app.post("/demo/orders")
 def orders():
     emp=identity()
     if not emp:
         return jsonify(error="EMPLOYEE_REQUIRED"),401
-    qr=request.args.get("qr","")
+    data=request.get_json(silent=True) or {}
+    if not csrf_ok(data):
+        return jsonify(error="CSRF_REQUIRED"),403
+    qr=data.get("qr","")
     from line_printer_registry import Printer,verify_printer_scan
     with pg() as conn:
         printers=conn.execute("SELECT printer_id,name,lines_json,token_digest,enabled FROM grit_line_printers").fetchall()
@@ -432,7 +435,7 @@ async function createPrinter(){return wrap(async()=>{
 })}
 async function findOrders(){return wrap(async()=>{
  activeQR=el('qr').value;
- const j=await api('/demo/orders?qr='+encodeURIComponent(activeQR));
+ const j=await api('/demo/orders','POST',{csrf,qr:activeQR});
  el('orders').innerHTML='<p>'+esc(j.printer)+'</p>'+j.orders.map(o=>`<div class="item"><b>${esc(o.order_id)}</b> <button class="order-reserve" data-order="${esc(o.order_id)}">Забрать заказ</button></div>`).join('');
  el('orders').querySelectorAll('.order-reserve').forEach(b=>b.addEventListener('click',()=>reserve(b.dataset.order)));
  info(j)
