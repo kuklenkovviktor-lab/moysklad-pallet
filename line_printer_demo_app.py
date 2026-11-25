@@ -220,6 +220,53 @@ def toggle_printer(printer_id):
     return jsonify(ok=bool(row)),200 if row else 404
 
 
+@app.post("/demo/printers/<printer_id>/configure")
+def configure_printer(printer_id):
+    if not is_manager():
+        return jsonify(error="MANAGER_REQUIRED"),403
+    data=request.get_json(silent=True) or {}
+    if not csrf_ok(data):
+        return jsonify(error="CSRF_REQUIRED"),403
+    from line_printer_registry import normalize_lines
+    try:
+        lines=normalize_lines(data.get("lines"))
+        name=data.get("name")
+        if not isinstance(name,str) or not 1 <= len(name.strip()) <= 80:
+            raise ValueError("INVALID_NAME")
+    except (ValueError,TypeError):
+        return jsonify(error="INVALID_PRINTER_CONFIG"),400
+    with pg() as conn:
+        row=conn.execute("""UPDATE grit_line_printers
+          SET name=%s,lines_json=%s WHERE printer_id=%s RETURNING printer_id""",
+          (name.strip(),json.dumps(lines,ensure_ascii=False),printer_id)).fetchone()
+    return jsonify(ok=bool(row)),200 if row else 404
+
+
+@app.post("/demo/printers/<printer_id>/rotate")
+def rotate_printer(printer_id):
+    if not is_manager():
+        return jsonify(error="MANAGER_REQUIRED"),403
+    data=request.get_json(silent=True) or {}
+    if not csrf_ok(data):
+        return jsonify(error="CSRF_REQUIRED"),403
+    from line_printer_registry import Printer,rotate_printer_token
+    with pg() as conn:
+        row=conn.execute("""SELECT name,lines_json,token_digest,enabled
+          FROM grit_line_printers WHERE printer_id=%s FOR UPDATE""",
+          (printer_id,)).fetchone()
+        if not row:
+            return jsonify(error="PRINTER_MISSING"),404
+        if row[3]!=1:
+            return jsonify(error="PRINTER_DISABLED"),409
+        current=Printer(printer_id,row[0],tuple(json.loads(row[1])),
+                        row[2],True)
+        replacement,qr=rotate_printer_token(current)
+        label=printable_58x40_html(replacement,qr)
+        conn.execute("""UPDATE grit_line_printers SET token_digest=%s
+          WHERE printer_id=%s""",(replacement.token_digest,printer_id))
+    return jsonify(ok=True,qr=qr,label_html=label)
+
+
 @app.get("/demo/orders")
 def orders():
     emp=identity()
@@ -321,6 +368,7 @@ small{color:#93a7bf}.item{border-top:1px solid #34465e;padding:12px 0}
 <input id="printerName" placeholder="Принтер А-Б" value="Принтер А-Б">
 <input id="printerLines" value="А, Б" placeholder="А, Б">
 <button onclick="createPrinter()">Создать принтер и получить QR</button>
+<p><small>У существующего принтера можно изменить название и линии либо перевыпустить QR.</small></p>
 <div id="printers"></div></section>
 <section class="panel"><h3>Сотрудник · QR принтера → заказы</h3>
 <input id="qr" placeholder="Отсканируй QR принтера">
@@ -353,18 +401,33 @@ async function refresh(){
  const s=await api('/demo/session');csrf=s.csrf;el('who').textContent='Сотрудник: '+(s.employee||'нет')+' · Руководитель: '+(s.manager?'да':'нет');
  if(s.manager){
  const j=await api('/demo/printers');
- el('printers').innerHTML=j.printers.map(p=>`<div class="item"><b>${esc(p.name)}</b> · ${esc(p.lines.join(', '))} <small>${p.enabled?'ВКЛ':'ВЫКЛ'}</small> <button class="secondary printer-toggle" data-id="${esc(p.id)}" data-enabled="${p.enabled?'0':'1'}">Переключить</button></div>`).join('');
+ el('printers').innerHTML=j.printers.map(p=>`<div class="item"><b>${esc(p.name)}</b> · ${esc(p.lines.join(', '))} <small>${p.enabled?'ВКЛ':'ВЫКЛ'}</small> <button class="secondary printer-toggle" data-id="${esc(p.id)}" data-enabled="${p.enabled?'0':'1'}">Переключить</button> <button class="secondary printer-config" data-id="${esc(p.id)}" data-name="${esc(p.name)}" data-lines="${esc(p.lines.join(', '))}">Линии</button> <button class="secondary printer-rotate" data-id="${esc(p.id)}">Новый QR</button></div>`).join('');
  el('printers').querySelectorAll('.printer-toggle').forEach(b=>b.addEventListener('click',()=>toggle(b.dataset.id,b.dataset.enabled==='1')));
+ el('printers').querySelectorAll('.printer-config').forEach(b=>b.addEventListener('click',()=>configure(b.dataset.id,b.dataset.name,b.dataset.lines)));
+ el('printers').querySelectorAll('.printer-rotate').forEach(b=>b.addEventListener('click',()=>rotate(b.dataset.id)));
  }else el('printers').textContent='Требуется вход руководителя';
 }
 async function login(mode){return wrap(async()=>{const j=await api('/demo/login','POST',{mode,badge:el('badge').value,password:el('pwd').value});info(j);await refresh()})}
 async function logout(){return wrap(async()=>{await api('/demo/logout','POST');location.reload()})}
 async function toggle(id,enabled){return wrap(async()=>{info(await api('/demo/printers/'+encodeURIComponent(id)+'/toggle','POST',{csrf,enabled}));await refresh()})}
-async function createPrinter(){return wrap(async()=>{
- const j=await api('/demo/printers','POST',{csrf,name:el('printerName').value,lines:el('printerLines').value.split(',').map(x=>x.trim())});
+function saveLabel(j){
  el('qr').value=j.qr;activeQR=j.qr;
  const blob=new Blob([j.label_html],{type:'text/html'}),url=URL.createObjectURL(blob);
  const a=document.createElement('a');a.href=url;a.download='GRIT-QR-58x40.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function configure(id,oldName,oldLines){return wrap(async()=>{
+ const name=prompt('Название принтера',oldName);if(name===null)return;
+ const lines=prompt('Линии через запятую',oldLines);if(lines===null)return;
+ info(await api('/demo/printers/'+encodeURIComponent(id)+'/configure','POST',{csrf,name,lines:lines.split(',').map(x=>x.trim())}));await refresh()
+})}
+async function rotate(id){return wrap(async()=>{
+ if(!confirm('Старый QR перестанет работать. Перевыпустить?'))return;
+ const j=await api('/demo/printers/'+encodeURIComponent(id)+'/rotate','POST',{csrf});
+ saveLabel(j);info('QR перевыпущен. Старый отозван. Этикетка сохранена.');await refresh()
+})}
+async function createPrinter(){return wrap(async()=>{
+ const j=await api('/demo/printers','POST',{csrf,name:el('printerName').value,lines:el('printerLines').value.split(',').map(x=>x.trim())});
+ saveLabel(j);
  info('Демо-принтер создан. Этикетка 58×40 получена. QR введён в поле сотрудника.');await refresh()
 })}
 async function findOrders(){return wrap(async()=>{
