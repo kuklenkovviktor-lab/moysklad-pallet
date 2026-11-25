@@ -5,9 +5,18 @@ Callers must verify employee badge, printer QR and current catalog mappings
 separately. No database access, outbound network, writes or actual printing.
 """
 from dataclasses import dataclass
+import re
 from typing import Mapping, Sequence
 
-from warehouse_map import line_of
+# Keep the same address parsing rule as warehouse_map.line_of without importing
+# Flask, WMS secrets or database modules into the offline decision engine.
+_LINE_PATTERN = re.compile(r"^([А-ЯЁA-Z]{1,3})-?\d")
+
+
+def line_of(label):
+    text = str(label or "").strip().upper()
+    match = _LINE_PATTERN.match(text)
+    return match.group(1) if match else "ПРОЧЕЕ"
 
 
 @dataclass(frozen=True)
