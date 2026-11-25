@@ -76,4 +76,19 @@ docker run --rm \
   "$APP_IMAGE" \
   /app/tests/test_line_printer_pg_integrated_trial.py -v
 
+echo "=== OFFLINE TERMINAL IDENTITY TESTS ==="
+docker run --rm \
+  --network none \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=32m \
+  -v "$SRC:/app:ro" \
+  -w /app \
+  -e PYTHONPATH=/app \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  --entrypoint python \
+  "$APP_IMAGE" \
+  /app/tests/test_line_printer_session_gate.py -v
+
 echo "PR192 PG17 ISOLATED TEST PASS"
