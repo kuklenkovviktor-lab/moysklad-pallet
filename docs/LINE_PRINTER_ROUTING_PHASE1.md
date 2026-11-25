@@ -47,7 +47,7 @@
 ## Запуск теста (только изолированная копия)
 
 ```bash
-python -m unittest -v tests.test_line_printer_routing
+python -m unittest discover -s tests -p 'test_line_printer_routing.py' -v
 ```
 
 Избегать окружения с рабочей БД или токенами. Текущий код не требует
