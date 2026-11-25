@@ -21,7 +21,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== ISOLATED PG17 NETWORK ==="
-docker network create "$NETWORK" >/dev/null
+docker network create --internal "$NETWORK" >/dev/null
 
 echo "=== EPHEMERAL POSTGRESQL 17 ==="
 docker run -d --name "$DB_CONTAINER" \
