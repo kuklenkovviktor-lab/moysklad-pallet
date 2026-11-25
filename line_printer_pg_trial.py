@@ -55,7 +55,7 @@ def initialize_synthetic_pg(conn):
 def reserve_synthetic_pg(
     connection_factory, *,
     account_id, order_id, printer_id, employee_id, request_id,
-    is_eligible_locked,
+    is_eligible_locked, replay_authorizer_locked=None,
 ):
     """Serialize competing claims on a synthetic order with an advisory lock.
 
@@ -67,6 +67,8 @@ def reserve_synthetic_pg(
         return PGReservationResult(False, "INVALID_INPUT")
     if not callable(is_eligible_locked):
         return PGReservationResult(False, "ELIGIBILITY_REQUIRED")
+    if replay_authorizer_locked is not None and not callable(replay_authorizer_locked):
+        return PGReservationResult(False, "REPLAY_AUTHORIZER_INVALID")
     with connection_factory() as conn:
         _verify_isolated_connection(conn)
         with conn.transaction():
@@ -84,6 +86,10 @@ def reserve_synthetic_pg(
             """, (account_id, order_id)).fetchone()
             if row:
                 if row == (request_id, printer_id, employee_id):
+                    # A stored claim is history, never fresh authorization.
+                    # Integration must recheck current employee/shift/QR/order.
+                    if replay_authorizer_locked is not None and replay_authorizer_locked(conn) is not True:
+                        return PGReservationResult(False, "REPLAY_DENIED_STALE_STATE", row[0], row[1])
                     return PGReservationResult(
                         True, "ALREADY_RESERVED_SAME_REQUEST", row[0], row[1])
                 return PGReservationResult(
