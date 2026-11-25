@@ -1,4 +1,4 @@
-"""Synthetic regression: live dashboard counts the admitted GRIT WB queue only."""
+"""Synthetic regression: current WB CONFIRM cohort, first admission day, and TSD status."""
 import os
 import sqlite3
 import tempfile
@@ -61,7 +61,7 @@ class WBPickingQueueDashboardTest(unittest.TestCase):
                 conn.execute("INSERT INTO wb_fbs_picking_queue VALUES(?,?,?)",
                              (account,oid,accepted))
 
-    def test_only_admitted_pending_confirm_and_delivery(self):
+    def test_current_confirm_backlog_and_separate_delivery(self):
         for args in [
             ("default","1","confirm","pending",True),
             ("default","2","confirm","pending",True),
@@ -171,7 +171,7 @@ class WBWorkerStatusUIContractTests(unittest.TestCase):
 
 
 class WBProgressSourceContractTests(unittest.TestCase):
-    """Manager UI only: same Moscow day, separate plan and pending WB queue."""
+    """Manager UI keeps current WB status separate from Moscow-day scan fact."""
 
     @classmethod
     def setUpClass(cls):
@@ -189,7 +189,7 @@ class WBProgressSourceContractTests(unittest.TestCase):
         self.assertIn("/api/manager/integrations/wildberries/history?date=",self.ui)
         self.assertIn("const fact=picked!==null?picked:Number(f.orders||0);",self.ui)
         self.assertIn("document.getElementById('todayOrders').textContent=fact;",self.ui)
-        self.assertIn("renderProgress(fact);",self.ui)
+        self.assertIn("renderProgress();",self.ui)
 
     def test_auto_workload_keeps_queue_and_fact_separate(self):
         self.assertIn("const rest=wbAssemblyCount.remaining_orders;",self.ui)
@@ -215,4 +215,4 @@ class WBProgressSourceContractTests(unittest.TestCase):
         self.assertIn("result.assembly_orders",self.ui)
         self.assertIn("result.delivery_orders",self.ui)
         self.assertIn("result.unadmitted_orders",self.ui)
-        self.assertIn("обновляется автоматически",self.ui)
+        self.assertIn("проверено по кэшу WB",self.ui)
