@@ -114,6 +114,43 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair(
             "a", "4601234567890", "WB-QR-123")["result"], "MATCH")
 
+    def test_employee_feedback_cancelled_is_explicit_red_error(self):
+        self.seed()
+        self.mod.ingest_orders("a", [self.order(status="cancel")])
+        verdict = self.mod.verify_pair("a", "4601234567890", "WB-QR-123")
+        self.assertEqual(verdict["result"], "BLOCKED_STATUS")
+        self.assertEqual(verdict["wb_status"], "cancel")
+        message, reason = self.wms._wb_scan_feedback(verdict)
+        self.assertEqual(message, "ЗАКАЗ ОТМЕНЕН")
+        self.assertEqual(reason, "WB_CANCELLED")
+
+    def test_employee_feedback_for_distinct_statuses(self):
+        self.seed()
+        for status, expectation in [
+            ("new", "WB_NOT_ON_ASSEMBLY"),
+            ("confirm", "MATCH"),
+            ("complete", "MATCH"),
+        ]:
+            with self.subTest(status=status):
+                self.mod.ingest_orders("a", [self.order(status=status)])
+                verdict = self.mod.verify_pair("a", "4601234567890", "WB-QR-123")
+                self.assertEqual(verdict["wb_status"], status)
+                if expectation == "MATCH":
+                    self.assertEqual(verdict["result"], "MATCH")
+                else:
+                    self.assertEqual(self.wms._wb_scan_feedback(verdict)[1], expectation)
+        self.assertEqual(self.wms._wb_scan_feedback({"result":"ALREADY_COMPLETE"})[1],"WB_ALREADY_SCANNED")
+        self.assertEqual(self.wms._wb_scan_feedback({"result":"MISMATCH"})[1],"WB_PRODUCT_MISMATCH")
+        self.assertEqual(self.wms._wb_scan_feedback({"result":"STALE_CACHE"})[1],"WB_STATUS_STALE")
+        self.assertEqual(self.wms._wb_scan_feedback({"result":"UNKNOWN_STICKER"})[1],"WB_STICKER_UNKNOWN")
+        self.assertEqual(self.wms._wb_scan_feedback({"result":"MAPPING_ERROR"})[1],"WB_PRODUCT_MAPPING_MISSING")
+
+    def test_delivery_without_queue_has_distinct_rejection_reason(self):
+        self.seed(order=self.order(status="complete"))
+        verdict = self.mod.verify_pair("a","4601234567890","WB-QR-123")
+        self.assertEqual(verdict["result"],"BLOCKED_STATUS")
+        self.assertEqual(self.wms._wb_scan_feedback(verdict)[1],"WB_DELIVERY_NOT_ADMITTED")
+
     def test_delivery_import_without_prior_confirmation_is_blocked(self):
         self.seed(order=self.order(status="complete"))
         self.assertIsNone(self.mod.accepted_product("a", "4601234567890"))
