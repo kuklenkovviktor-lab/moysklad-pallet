@@ -144,6 +144,32 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class WBWorkerStatusUIContractTests(unittest.TestCase):
+    """TSD renders server-provided WB status without altering scan rules."""
+
+    @classmethod
+    def setUpClass(cls):
+        from pathlib import Path
+        source = Path("wms.py").read_text(encoding="utf-8")
+        cls.ui = source.split('FBS_PAGE = """', 1)[1].split('"""', 1)[0]
+
+    def test_cancel_is_red_full_screen_and_titled(self):
+        self.assertIn(".tsd-error{position:fixed",self.ui)
+        self.assertIn("background:#b42318",self.ui)
+        self.assertIn("reason==='WB_CANCELLED'?'ЗАКАЗ ОТМЕНЕН'",self.ui)
+        self.assertIn("showTsdError(d.error||'Ошибка ШК WB',d.reason)",self.ui)
+
+    def test_delivery_is_distinct_warning_only_on_confirmed_scan(self):
+        self.assertIn("d.wb_status==='complete'?'#ffd166':''",self.ui)
+        self.assertIn("ЗАКАЗ В ДОСТАВКЕ WB · скан GRIT успешно подтверждён",self.ui)
+        self.assertIn("d.replayed?'Заказ уже учтён ранее",self.ui)
+
+    def test_other_errors_have_distinct_titles(self):
+        for label in ("ЗАКАЗ УЖЕ СОБРАН","НЕ ТОТ ТОВАР","НЕ НА СБОРКЕ",
+                      "СТАТУС WB УСТАРЕЛ"):
+            self.assertIn(label,self.ui)
+
+
 class WBProgressSourceContractTests(unittest.TestCase):
     """Manager UI only: same Moscow day, separate plan and pending WB queue."""
 
