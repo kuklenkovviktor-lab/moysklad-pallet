@@ -115,8 +115,16 @@ def make_synthetic_printer_blueprint(connection_factory, authenticated_employee,
                 SELECT wb_status,local_status FROM wb_fbs_orders
                 WHERE account_id='synthetic' AND order_id=%s FOR UPDATE
             """, (order,)).fetchone()
-            return bool(order_state and order_state[0] in ("confirm", "complete")
-                        and order_state[1] == "complete")
+            if not order_state or order_state[0] not in ("confirm", "complete") or order_state[1] != "complete":
+                return False
+            # Match the WB scan to THIS employee and the assigned shift.
+            scan = conn.execute("""
+                SELECT 1 FROM scans
+                WHERE wb_order_id=%s AND employee_id=%s AND shift_id=%s
+                  AND marketplace='WB'
+                LIMIT 1 FOR SHARE
+            """, (order, employee, shift)).fetchone()
+            return bool(scan)
         result = complete_lifecycle(
             connection_factory, account_id="synthetic", order_id=order,
             action_id=action_id, actor_id=employee, reservation_id=lease,
