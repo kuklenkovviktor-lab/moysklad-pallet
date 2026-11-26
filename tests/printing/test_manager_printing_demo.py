@@ -83,7 +83,7 @@ class VirtualManagerUITests(unittest.TestCase):
         response=self.manager.get("/demo/printing")
         self.assertEqual(response.status_code,200)
         data=response.get_data(as_text=True)
-        self.assertIn("Очередь виртуальной печати",data)
+        self.assertIn("Контроль печати",data)
         self.assertIn("id=\"jobs\"",data)
         self.assertIn("/synthetic/pr192/assets/printing_queue.js",data)
         self.assertEqual(response.headers.get("Cache-Control"),"no-store")
