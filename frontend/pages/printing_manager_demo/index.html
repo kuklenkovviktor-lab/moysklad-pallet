@@ -1,60 +1,107 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#09121e">
-<title>GRIT WMS · Очередь виртуальной печати · ДЕМО</title>
-<style>
-:root{color-scheme:dark}*{box-sizing:border-box}
-body{background:#09121e;color:#e8f2ff;font:15px system-ui,-apple-system,Segoe UI,sans-serif;margin:0}
-main{max-width:1050px;margin:auto;padding:24px}
-header{color:#80a8d1;text-transform:uppercase;letter-spacing:.10em;font-size:12px}
-h1{font-size:24px;margin:18px 0 10px}h2{font-size:18px;margin:0 0 12px}
-p{color:#a9bdd3;line-height:1.5}
-.panel{background:#15243a;border:1px solid #364e68;border-radius:14px;padding:20px;margin:16px 0}
-small{color:#9fb3cd}
-label{display:block;color:#aec5df;margin-bottom:8px}
-select{width:100%;max-width:420px;background:#0c192c;color:#fff;padding:11px;border:1px solid #536c88;border-radius:8px}
-button{padding:11px 15px;border:0;border-radius:9px;background:#3576c8;color:#fff;font-weight:700;cursor:pointer;margin:10px 8px 10px 0}
-button:disabled{opacity:.4;cursor:not-allowed}
-button.secondary{background:#30445f}
-#status{background:#102137;border:1px solid #435a76;padding:15px;border-radius:9px;min-height:48px}
-#status[data-state=error]{color:#ffbbbb;border-color:#a95353}
-#status[data-state=ok]{color:#8ee8bb}
-.scroll{max-width:100%;overflow:auto}
-table{border-collapse:collapse;min-width:590px;width:100%;font-size:13px}
-th,td{text-align:left;padding:10px;border-bottom:1px solid #304459}
-th{color:#b3cbec;font-weight:600}
-#counts{font-weight:600;color:#b6e0ff;line-height:1.8}
-a{color:#95c6ff}
-.tag{color:#ffca80;font-weight:700}
-</style>
-<script defer src="/synthetic/pr192/assets/printing_queue.js"></script>
-</head><body><main>
-<header>GRIT WMS / РУКОВОДИТЕЛЬ / ПЕЧАТЬ</header>
-<h1>Очередь виртуальной печати</h1>
-<p class="tag">СИНТЕТИЧЕСКИЙ СТЕНД · БЕЗ USB И ФИЗИЧЕСКОЙ ПЕЧАТИ</p>
-<p>Заказы создаются сканированием QR принтера на экране сборщика. Здесь руководитель видит статусы и может вручную отправить <strong>одно</strong> тестовое задание виртуальному агенту.</p>
-<section class="panel">
-<h2>Текущая очередь</h2>
-<div id="counts" role="status">Загрузка...</div>
-<p id="lastRefresh"></p>
-<button type="button" class="secondary" id="refresh">Обновить статусы</button>
-</section>
-<section class="panel">
-<h2>Виртуальный агент</h2>
-<label for="printer">Тестовый принтер</label>
-<select id="printer" aria-label="Выбрать тестовый принтер"></select>
-<div><button type="button" id="dispatch" disabled>Обработать 1 тестовое задание</button></div>
-<div id="status" role="status" aria-live="polite">Ожидание загрузки</div>
-<p><small>SUBMITTED означает подтверждение виртуального приёмника, а НЕ PRINTED. Ошибки UNKNOWN не отправляются повторно автоматически.</small></p>
-</section>
-<section class="panel">
-<h2>Задания (последние 100)</h2>
-<div class="scroll"><table><thead><tr><th>Заказ</th><th>Принтер</th><th>Статус</th><th>Версия</th></tr></thead><tbody id="jobs"></tbody></table></div>
-</section>
-<section class="panel">
-<h2>Журнал событий (последние 100)</h2>
-<div class="scroll"><table><thead><tr><th>Заказ</th><th>Событие</th><th>Из</th><th>В</th><th>Причина</th></tr></thead><tbody id="events"></tbody></table></div>
-</section>
-<p><a href="/demo">Вернуться в тестовый интерфейс</a></p>
-</main></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09121e">
+  <title>GRIT WMS · Контроль печати · Тестовый стенд</title>
+  <link rel="stylesheet" href="/synthetic/pr192/assets/printing_console.css">
+  <script defer src="/synthetic/pr192/assets/printing_queue.js"></script>
+</head>
+<body>
+  <main class="console">
+    <nav class="breadcrumb" aria-label="Навигация">
+      <a href="/demo">GRIT WMS</a><span aria-hidden="true">/</span>
+      <span>Операции</span><span aria-hidden="true">/</span><strong>Контроль печати</strong>
+    </nav>
+    <div class="heading">
+      <div>
+        <p class="eyebrow">Управление складскими операциями</p>
+        <h1>Контроль печати</h1>
+        <p class="lead">Принтеры по линиям, очередь заданий и история обработки в одном окне.</p>
+      </div>
+      <span class="environment-label">ТЕСТОВЫЙ СТЕНД</span>
+    </div>
+    <div class="safety-note" role="note">
+      <span aria-hidden="true">◈</span>
+      <p><strong>Только синтетические заказы.</strong> Виртуальная отправка не является физической печатью. USB и Xprinter не подключены.</p>
+    </div>
+
+    <section class="overview" aria-labelledby="overviewTitle">
+      <div class="section-heading">
+        <div><h2 id="overviewTitle">Обзор очереди</h2><p class="muted">Все задания в тестовой базе</p></div>
+        <button type="button" class="button secondary" id="refresh">Обновить данные</button>
+      </div>
+      <div class="metrics" aria-live="polite" aria-atomic="true">
+        <article class="metric"><span>Ожидают отправки</span><strong id="metricQueued">—</strong><small>Готовы к передаче</small></article>
+        <article class="metric"><span>Передано агенту</span><strong id="metricSubmitted">—</strong><small>Виртуальное подтверждение</small></article>
+        <article class="metric"><span>Требуют внимания</span><strong id="metricAttention">—</strong><small>Ошибки и неизвестный итог</small></article>
+        <article class="metric"><span>Всего заданий</span><strong id="metricTotal">—</strong><small>За весь тестовый сеанс</small></article>
+      </div>
+      <p class="muted small" id="lastRefresh" aria-live="polite">Загрузка данных...</p>
+    </section>
+
+    <section class="panel" aria-labelledby="printersTitle">
+      <div class="section-heading">
+        <div><h2 id="printersTitle">Принтеры и линии</h2><p class="muted">Состояние каждого принтера и последняя операция</p></div>
+      </div>
+      <div id="printerCards" class="printer-grid" aria-live="polite">
+        <div class="empty">Загрузка принтеров...</div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="agentTitle">
+      <div class="section-heading">
+        <div><h2 id="agentTitle">Виртуальный агент</h2><p class="muted">Ручная проверка передачи одного задания</p></div>
+      </div>
+      <div class="agent-controls">
+        <div class="field"><label for="printer">Тестовый принтер</label><select id="printer"><option>Загрузка...</option></select></div>
+        <button type="button" id="dispatch" class="button primary" disabled>Передать 1 тестовое задание</button>
+      </div>
+      <p class="muted small" id="agentHint">Выберите принтер с заданиями в очереди.</p>
+      <div id="status" class="feedback" role="status" aria-live="polite">Получение данных...</div>
+    </section>
+
+    <section class="panel" aria-labelledby="jobsTitle">
+      <div class="section-heading">
+        <div><h2 id="jobsTitle">Задания на печать</h2><p class="muted">Последние 100 заданий, без содержимого стикеров</p></div>
+      </div>
+      <div class="filters">
+        <div class="field"><label for="searchOrder">Номер заказа</label><input id="searchOrder" type="search" placeholder="Найти заказ" autocomplete="off"></div>
+        <div class="field"><label for="filterPrinter">Принтер</label><select id="filterPrinter"><option value="">Все принтеры</option></select></div>
+        <div class="field"><label for="filterState">Статус</label><select id="filterState">
+          <option value="">Все статусы</option>
+          <option value="QUEUED">В очереди</option>
+          <option value="SENDING">Передаётся</option>
+          <option value="SUBMITTED">Передано виртуальному агенту</option>
+          <option value="PRINTED">Отметка печати (тест)</option>
+          <option value="FAILED">Ошибка передачи</option>
+          <option value="UNKNOWN">Требует проверки</option>
+          <option value="CANCELLED">Отменено</option>
+        </select></div>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Заказ</th><th scope="col">Принтер / линии</th><th scope="col">Статус</th><th scope="col">Версия</th></tr></thead>
+        <tbody id="jobs"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+      </table></div>
+      <p class="muted small" id="filteredCount"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="eventsTitle">
+      <div class="section-heading">
+        <div><h2 id="eventsTitle">История операций</h2><p class="muted">Последние 100 событий, включая изменения статусов</p></div>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Заказ</th><th scope="col">Операция</th><th scope="col">Переход</th><th scope="col">Результат</th></tr></thead>
+        <tbody id="events"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+      </table></div>
+      <details class="technical"><summary>Технические подробности</summary>
+        <p class="muted small">Коды переходов хранятся без изменений и доступны для диагностики. Физическая печать в этой среде не подтверждается.</p>
+        <pre id="technicalEvents" aria-label="Коды последних событий"></pre>
+      </details>
+    </section>
+
+    <footer><a href="/demo">← Вернуться к тестовой панели GRIT</a><span>GRIT WMS · Изолированная демонстрация</span></footer>
+  </main>
+</body>
+</html>
