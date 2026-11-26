@@ -14,10 +14,16 @@ import sys
 import urllib.error
 import urllib.request
 
-from grit_usb_print_pilot import (
-    TEST_PRINTER, PilotError, _spooler, check_printer,
-    _send_exactly_one, _write_once, _update_journal, _utc_now,
-)
+if __package__:
+    from .grit_usb_print_pilot import (
+        TEST_PRINTER, PilotError, _spooler, check_printer,
+        _send_exactly_one, _write_once, _update_journal, _utc_now,
+    )
+else:
+    from grit_usb_print_pilot import (
+        TEST_PRINTER, PilotError, _spooler, check_printer,
+        _send_exactly_one, _write_once, _update_journal, _utc_now,
+    )
 
 PORT = 18769
 BASE_URL = "http://127.0.0.1:18769"
