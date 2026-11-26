@@ -152,17 +152,37 @@ def claim_next_virtual_job(connection_factory, *, printer_id, agent_id):
 
 
 def _accept_at_virtual_sink(connection_factory, *, job_id,printer_id,sticker):
-    """Persists only the synthetic sticker hash, never the original payload."""
+    """Double-check eligibility immediately before recording virtual acceptance.
+
+    A claim may become stale after QUEUED -> SENDING and before sink acceptance.
+    On stale data or changed sticker: mark UNKNOWN and never create a receipt or
+    automatically retry. UNKNOWN is deliberately conservative, and the test
+    sink never invokes physical hardware.
+    """
     if not _check_identifier(job_id) or not _check_identifier(printer_id):
         raise ValueError("Invalid virtual receipt identifier")
     digest=sha256(sticker.encode("utf-8")).hexdigest()
     with connection_factory() as conn:
         _verify_isolated_connection(conn)
         with conn.transaction():
-            row=conn.execute("""SELECT state,printer_id FROM synthetic_pr192_print_jobs
+            row=conn.execute("""SELECT state,printer_id,account_id,order_id,
+                                       sticker_kind
+                FROM synthetic_pr192_print_jobs
                 WHERE job_id=%s FOR UPDATE""",(job_id,)).fetchone()
-            if not row or row != ("SENDING",printer_id):
+            if not row or row[:2] != ("SENDING",printer_id):
                 raise RuntimeError("Virtual delivery requires claimed job")
+            reason,current_sticker=_validate_before_dispatch(
+                conn,account_id=row[2],order_id=row[3],kind=row[4],
+                printer_id=printer_id)
+            if reason != "ELIGIBLE" or current_sticker != sticker:
+                detail=(reason if reason != "ELIGIBLE" else
+                        "ORIGINAL_STICKER_CHANGED")
+                conn.execute("""UPDATE synthetic_pr192_print_jobs
+                  SET state='UNKNOWN',version=version+1,updated_at=now()
+                  WHERE job_id=%s""",(job_id,))
+                _audit(conn,job_id,"synthetic-virtual-agent","SENDING",
+                       "UNKNOWN","PRE_VIRTUAL_SINK_STALE:"+detail)
+                return VirtualDelivery("UNKNOWN","PRE_VIRTUAL_SINK_STALE:"+detail,job_id)
             inserted=conn.execute("""INSERT INTO synthetic_pr192_virtual_receipts
                 (job_id,printer_id,sticker_digest)
                 VALUES (%s,%s,%s) ON CONFLICT DO NOTHING
@@ -173,6 +193,7 @@ def _accept_at_virtual_sink(connection_factory, *, job_id,printer_id,sticker):
                     WHERE job_id=%s""",(job_id,)).fetchone()
                 if prev != (printer_id,digest):
                     raise RuntimeError("Virtual receipt conflict")
+            return VirtualDelivery("SENDING","VIRTUAL_SINK_ACCEPTED",job_id)
 
 
 def _change_status(connection_factory, *, job_id,agent_id,target,evidence=""):
@@ -213,8 +234,10 @@ def deliver_one_virtual(connection_factory, *, printer_id, agent_id,
         if not result.accepted:
             raise RuntimeError("Virtual known-failure status update rejected")
         return VirtualDelivery("FAILED","CERTAIN_NOT_DELIVERED",claim.job_id)
-    _accept_at_virtual_sink(connection_factory,job_id=claim.job_id,
-                            printer_id=printer_id,sticker=sticker)
+    sink=_accept_at_virtual_sink(connection_factory,job_id=claim.job_id,
+                                 printer_id=printer_id,sticker=sticker)
+    if sink.state != "SENDING":
+        return sink
     if mode=="CRASH_AFTER_ACCEPT":
         return VirtualDelivery("SENDING","SIMULATED_CRASH_AFTER_ACCEPT",claim.job_id)
     target="UNKNOWN" if mode=="UNKNOWN_AFTER_ACCEPT" else "SUBMITTED"

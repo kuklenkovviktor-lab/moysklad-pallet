@@ -17,10 +17,9 @@ fixture_spec=importlib.util.spec_from_file_location(
     Path(__file__).resolve().parent / "test_qr_autoqueue.py")
 fixture_module=importlib.util.module_from_spec(fixture_spec)
 fixture_spec.loader.exec_module(fixture_module)
-QRQueueHTTPTests=fixture_module.QRQueueHTTPTests
 from services.printing.virtual_agent import (
     deliver_one_virtual, claim_next_virtual_job, initialize_virtual_sink,
-    reconcile_stale_virtual_sending,
+    reconcile_stale_virtual_sending, _accept_at_virtual_sink,
 )
 
 if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
@@ -37,14 +36,14 @@ def connect():
 class VirtualAgentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        QRQueueHTTPTests.setUpClass()
+        fixture_module.QRQueueHTTPTests.setUpClass()
         with connect() as conn:
             initialize_virtual_sink(conn)
 
     def setUp(self):
         with connect() as conn:
             conn.execute("DELETE FROM synthetic_pr192_virtual_receipts")
-        self.fixture=QRQueueHTTPTests("test_first_scan_queues_without_worker_selecting_order")
+        self.fixture=fixture_module.QRQueueHTTPTests("test_first_scan_queues_without_worker_selecting_order")
         self.fixture.setUp()
         response=self.fixture.scan()
         self.assertEqual(response.status_code,200,response.json)
@@ -195,6 +194,45 @@ class VirtualAgentTests(unittest.TestCase):
         r=self.deliver(printer="other")
         self.assertEqual(r.state,"EMPTY")
         self.assertEqual(self.state(),"QUEUED")
+
+    def test_order_cancelled_between_claim_and_sink_accept(self):
+        claim,sticker=claim_next_virtual_job(
+            connect,printer_id="p1",agent_id="synthetic-agent-1")
+        self.assertEqual(claim.state,"SENDING")
+        self.fixture.update("UPDATE wb_fbs_orders SET wb_status='cancel'")
+        response=_accept_at_virtual_sink(
+            connect,job_id=claim.job_id,printer_id="p1",sticker=sticker)
+        self.assertEqual(response.state,"UNKNOWN")
+        self.assertIn("WB_STATUS_NOT_PICKABLE",response.reason)
+        self.assertEqual(self.receipts(),[])
+        self.assertEqual(self.state(),"UNKNOWN")
+        self.assertEqual(self.deliver().state,"EMPTY")
+
+    def test_sticker_rotated_between_claim_and_sink_accept(self):
+        claim,sticker=claim_next_virtual_job(
+            connect,printer_id="p1",agent_id="synthetic-agent-1")
+        self.assertEqual(claim.state,"SENDING")
+        self.fixture.update("""UPDATE synthetic_pr192_print_stickers
+          SET original_sticker='SYNTH-REPLACED-LABEL' WHERE order_id='o1'""")
+        response=_accept_at_virtual_sink(
+            connect,job_id=claim.job_id,printer_id="p1",sticker=sticker)
+        self.assertEqual(response.state,"UNKNOWN")
+        self.assertIn("ORIGINAL_STICKER_CHANGED",response.reason)
+        self.assertEqual(self.receipts(),[])
+        self.assertEqual(self.state(),"UNKNOWN")
+
+    def test_lines_changed_between_claim_and_sink_accept(self):
+        claim,sticker=claim_next_virtual_job(
+            connect,printer_id="p1",agent_id="synthetic-agent-1")
+        self.assertEqual(claim.state,"SENDING")
+        self.fixture.update("""UPDATE grit_line_printers
+          SET lines_json='["В"]' WHERE printer_id='p1'""")
+        response=_accept_at_virtual_sink(
+            connect,job_id=claim.job_id,printer_id="p1",sticker=sticker)
+        self.assertEqual(response.state,"UNKNOWN")
+        self.assertIn("PRINTER_DOES_NOT_COVER_ORDER",response.reason)
+        self.assertEqual(self.receipts(),[])
+        self.assertEqual(self.deliver().state,"EMPTY")
 
     def test_recent_sending_is_not_marked_stale(self):
         self.assertEqual(self.deliver("CRASH_BEFORE_SINK").state,"SENDING")

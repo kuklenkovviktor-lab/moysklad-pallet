@@ -12,7 +12,7 @@ production DB, WB API or real order labels.
 FSD/backend package:
 - services/printing/virtual_agent.py — virtual-only agent, dispatch
   prechecks, simulated sink and stale-SENDING reconciliation
-- tests/printing/test_virtual_agent.py — 21 new integration scenarios
+- tests/printing/test_virtual_agent.py — 24 agent integration scenarios (three additional post-claim changes)
 - deploy/verify_line_printer_print_queue_pg_isolated.sh — disposable PG17
   test runner extended with this suite
 
@@ -63,9 +63,16 @@ Run on HOSTKEY against a disposable Docker network and PostgreSQL 17:
 
 Existing suites (reported PASS from prior PR):
   16 isolated PG queue + 21 QR HTTP + 14 real WMS auth.
-New suite tests 21 virtual agent cases, with independent test fixtures and
+New suite tests 24 virtual agent cases, with independent test fixtures and
 fresh in-memory/temp synthetic labels. Expected final marker:
   PR192 VIRTUAL PRINT AGENT PG17 PASS
 
-**The 21 new virtual-agent tests are not yet run at PR creation.**
+**The 24-agent regression suite requires a fresh HOSTKEY isolated run after this fix.**
 All prior PASS claims belong to earlier branch versions only.
+
+
+## Follow-up hardening: post-claim changes (draft PR #203)
+
+Two checks are needed: before QUEUED -> SENDING and immediately before a virtual receipt is recorded. A changed order status, printer line assignment or sticker between transactions now moves SENDING -> UNKNOWN without recording a receipt. Manual review required; no automatic retry.
+
+The previous virtual-agent test module exposed the imported QR TestCase as a module global; `unittest.main()` discovered and executed its 21 QR tests again. The import is now accessed through its fixture module, so the virtual suite contains 24 virtual-agent tests, with the QR suite executed only in its own runner step.
