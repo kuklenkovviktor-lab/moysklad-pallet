@@ -132,9 +132,11 @@ def run_once(api, spooler, *, state_dir=None):
             "synthetic":True,"physical_print_confirmed":False,
             "label_sha256":hashlib.sha256(payload).hexdigest(),
             "created_utc":_utc_now()}
+    # An existing journal MUST NOT be modified or marked UNKNOWN on replay.
+    # No physical spooler call has happened yet for this invocation.
+    _write_once(path,record)
     spool_job_id=None
     try:
-        _write_once(path,record)  # BEFORE any physical spooler operation
         check_printer(spooler,TEST_PRINTER)  # re-check after server claim
         spool_job_id=_send_exactly_one(spooler,TEST_PRINTER,payload)
         _update_journal(path,record,"SUBMITTED_TO_WINDOWS",
