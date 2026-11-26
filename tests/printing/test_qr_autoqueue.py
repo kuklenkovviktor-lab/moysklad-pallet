@@ -192,6 +192,29 @@ class QRQueueHTTPTests(unittest.TestCase):
         self.assertEqual(sum(r.added for r in result), 1)
         self.assertEqual(self.job_count(), 1)
 
+    def test_changing_lines_without_qr_rotation_updates_selection(self):
+        self.update("""UPDATE grit_line_printers
+            SET lines_json='["В"]' WHERE printer_id='p1'""")
+        blocked=self.scan()
+        self.assertEqual(blocked.status_code,200)
+        self.assertEqual(blocked.json["queued_new"],0)
+        self.assertEqual(blocked.json["requires_review"],1)
+        self.assertEqual(self.job_count(),0)
+        self.update("""UPDATE grit_line_printers
+            SET lines_json='["А"]' WHERE printer_id='p1'""")
+        allowed=self.scan()
+        self.assertEqual(allowed.status_code,200)
+        self.assertEqual(allowed.json["queued_new"],1)
+
+    def test_new_queued_job_not_dispatched_on_rescan(self):
+        self.assertEqual(self.scan().json["queued_new"],1)
+        after=self.scan()
+        self.assertEqual(after.json["queued_new"],0)
+        with connect() as conn:
+            events=conn.execute("""SELECT event FROM synthetic_pr192_print_events
+                ORDER BY event_id""").fetchall()
+        self.assertEqual(events,[("ENQUEUE",)])
+
     def test_unbound_session_denied(self):
         with self.worker.session_transaction() as s:
             s.pop("attendance_verified")
