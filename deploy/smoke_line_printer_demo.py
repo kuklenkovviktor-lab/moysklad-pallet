@@ -107,6 +107,19 @@ assert worker("/synthetic/pr192/release", {
     "reason": "Unauthorized", "action_id": "bad-release",
     "csrf": ms["manager_csrf"]})[0] == 403
 
+# New FSD scanner integration: server-issued session CSRF and QR-only enqueue.
+scanner_session = worker("/synthetic/pr192/print-queue/session")
+assert scanner_session[0] == 200 and scanner_session[1]["synthetic"], scanner_session
+assert manager("/synthetic/pr192/print-queue/session")[0] == 401
+virtual_job = worker("/synthetic/pr192/print-queue/scan", {
+    "qr": p2["qr"], "csrf": scanner_session[1]["csrf"]})
+assert virtual_job[0] == 200 and virtual_job[1]["queued_new"] == 1, virtual_job
+assert virtual_job[1]["physical_printing"] is False
+rescan = worker("/synthetic/pr192/print-queue/scan", {
+    "qr": p2["qr"], "csrf": scanner_session[1]["csrf"]})
+assert rescan[0] == 200 and rescan[1]["already_queued"] == 1, rescan
+print("PR192 FSD WORKER SCANNER QR HTTP SMOKE PASS: WMS session, no order selection.")
+
 print("PR192 DEMO HTTP SMOKE PASS: manager, printer QR 58x40, line routing,")
 print("badge, claim, wrong SKU rejection, scan, complete, release and audit.")
 print("SYNTHETIC ONLY; no actual WB orders or physical printing.")

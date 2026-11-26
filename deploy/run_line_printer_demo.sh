@@ -4,9 +4,19 @@ set -Eeuo pipefail
 SRC="${1:?Usage: bash deploy/run_line_printer_demo.sh /source/checkout}"
 SRC="$(cd "$SRC" && pwd)"
 test -f "$SRC/line_printer_demo_app.py"
-STATE="/tmp/grit-pr192-demo.state"
+STATE="${GRIT_PR192_DEMO_STATE:-/tmp/grit-pr192-demo.state}"
+# Deliberately support only two known disposable demo state files.
+# Never follow symlinks, and never infer container names from production state.
+case "$STATE" in
+  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state) ;;
+  *) echo "Refusing unexpected synthetic demo state path" >&2; exit 2;;
+esac
+if test -L "$STATE"; then
+  echo "Refusing symlink demo state path" >&2
+  exit 2
+fi
 if test -e "$STATE"; then
-  echo "Demo already exists. Stop with bash $SRC/deploy/stop_line_printer_demo.sh"
+  echo "Demo state file already exists at $STATE; refusing to replace it."
   exit 2
 fi
 RUN="pr192demo-$(date +%s)-$$"
@@ -104,5 +114,5 @@ echo "Manager demo password: $PASS"
 echo "Worker synthetic badge: DEMO-BADGE-1"
 echo "PC tunnel: ssh -L ${PORT}:127.0.0.1:${PORT} root@141.105.66.249"
 echo "PC browser: http://127.0.0.1:${PORT}/demo"
-echo "STOP: bash $SRC/deploy/stop_line_printer_demo.sh"
+echo "STOP: GRIT_PR192_DEMO_STATE=$STATE bash $SRC/deploy/stop_line_printer_demo.sh"
 echo "No production DB, WB API or real printer jobs."

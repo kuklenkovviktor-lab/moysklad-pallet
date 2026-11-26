@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#09121e">
+<title>GRIT WMS · QR принтера · СИНТЕТИКА</title>
+<style>
+*{box-sizing:border-box}
+:root{color-scheme:dark}
+body{margin:0;background:#09121e;color:#eaf2ff;font:15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:660px;margin:0 auto;padding:20px}
+header{font-size:13px;letter-spacing:.10em;color:#85acd5;padding:12px 0}
+h1{font-size:23px;font-weight:700;margin:14px 0 8px}
+p{color:#afc1d5;line-height:1.5}
+.stage{border:1px solid #304862;border-radius:16px;background:#142437;padding:22px;margin-top:18px}
+.stage h2{margin:0 0 12px;font-size:17px;font-weight:700}
+.field{display:block;font-size:13px;color:#acbfd6;margin:16px 0 6px}
+input{width:100%;min-height:50px;padding:14px;background:#0a182a;border:1px solid #536e89;border-radius:9px;color:#fff;font-size:18px}
+input:focus{border-color:#6dadf5;outline:2px solid #305c90}
+#result{min-height:64px;margin-top:16px;padding:14px;background:#0a1a2b;border:1px solid #344961;border-radius:9px;line-height:1.5}
+#result[data-state=ok]{color:#8dedc0;border-color:#39785a}
+#result[data-state=error]{color:#ffb7b7;border-color:#8f4e4e}
+.label{color:#ffcc78;font-weight:700;letter-spacing:.04em}
+small{color:#9db6d1}
+a{color:#9fc9ff}
+</style>
+<script src="/synthetic/pr192/assets/printer_scan.js" defer></script>
+</head><body>
+<main>
+<header>GRIT WMS / FBS / МОДУЛЬ СКАНИРОВАНИЯ</header>
+<h1>QR принтера</h1>
+<p class="label">СИНТЕТИЧЕСКОЕ ДЕМО · БЕЗ ФИЗИЧЕСКОЙ ПЕЧАТИ</p>
+<section class="stage">
+<h2>Сканируй QR принтера</h2>
+<p>Бейдж и смена уже проверяются штатной авторизацией GRIT. Выбор заказов не нужен: система сама определит линии и добавит подходящие задания в очередь.</p>
+<label class="field" for="barcode">Сканер-кольцо / ТСД · QR</label>
+<input id="barcode" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="none" aria-label="Сканировать QR принтера" autofocus>
+<div id="result" role="status" aria-live="polite">Ожидание QR принтера.</div>
+</section>
+<p><small>Это отдельная проверка нового компонента, а не рабочая страница /fbs. Товарные ШК, WB-сканы и USB-печать здесь отключены. Используются только вымышленные тестовые заказы и стикеры.</small></p>
+<p><a href="/demo">Вернуться в тестовый интерфейс руководителя</a></p>
+</main>
+<script>
+document.addEventListener("DOMContentLoaded",function(){
+  if (!window.GRITPrinterScan) {
+    document.getElementById("result").textContent="Скрипт сканирования недоступен";
+    return;
+  }
+  window.GRITPrinterScan.attach(
+    document.getElementById("barcode"),
+    document.getElementById("result"));
+});
+</script>
+</body></html>
