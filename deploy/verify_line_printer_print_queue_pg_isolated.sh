@@ -3,8 +3,8 @@
 set -Eeuo pipefail
 SRC="$1"
 SRC="$(cd "$SRC" && pwd)"
-test -f "$SRC/tests/test_line_printer_pg_print_queue.py"
-test -f "$SRC/line_printer_pg_print_queue.py"
+test -f "$SRC/tests/printing/test_pg_queue.py"
+test -f "$SRC/services/printing/pg_queue.py"
 RUN="pr192queue-$(date +%s)-$$"
 NET="grit-$RUN"
 DB="grit-db-$RUN"
@@ -43,5 +43,5 @@ docker run --rm --network "$NET" --read-only --cap-drop ALL \
   -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
   -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$PG_NAME" \
   --entrypoint python "$IMAGE" \
-  /app/tests/test_line_printer_pg_print_queue.py -v
+  /app/tests/printing/test_pg_queue.py -v
 echo "PR192 PRINT QUEUE PG17 ISOLATED PASS"
