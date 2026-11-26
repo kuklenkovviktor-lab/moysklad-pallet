@@ -235,7 +235,7 @@
       $("usbState").dataset.state = "ok";
     } catch (error) {
       usbEnabled = false;
-      usbActive = true;
+      usbActive = false;
       $("usbState").textContent = "USB-стенд недоступен: " + error.message;
       $("usbState").dataset.state = "error";
     }
