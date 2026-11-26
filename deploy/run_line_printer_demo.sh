@@ -41,7 +41,13 @@ docker image inspect "$IMAGE" >/dev/null
 PASS="$(python3 -c 'import secrets; print(secrets.token_urlsafe(15))')"
 SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
 # One-time device credential scoped to this disposable synthetic demo only.
-USB_AGENT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
+USB_AGENT_TOKEN=""
+USB_EXTRA_ENV=()
+if [[ "$STATE" == "/tmp/grit-pr208-demo.state" ]]; then
+  [[ "$PORT" == "18769" ]] || { echo "PR208 USB demo requires port 18769" >&2; exit 2; }
+  USB_AGENT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
+  USB_EXTRA_ENV=(-e "GRIT_PR192_USB_AGENT_TOKEN=$USB_AGENT_TOKEN")
+fi
 CREATED=0
 cleanup_failed() {
   if [ "$CREATED" != 1 ]; then
@@ -85,7 +91,7 @@ docker run -d --name "$APP" \
   -e WMS_REQUIRE_POSTGRES=0 -e DATABASE_URL= \
   -e "GRIT_PR192_DEMO_PASSWORD=$PASS" \
   -e "GRIT_PR192_DEMO_SECRET=$SECRET" \
-  -e "GRIT_PR192_USB_AGENT_TOKEN=$USB_AGENT_TOKEN" \
+  "${USB_EXTRA_ENV[@]}" \
   --entrypoint python "$IMAGE" \
   -m gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 60 \
   --access-logfile - --error-logfile - line_printer_demo_app:app >/dev/null
@@ -115,7 +121,9 @@ echo "DEMO START PASS: isolated PostgreSQL 17 + WMS auth + browser UI"
 echo "HOSTKEY: http://127.0.0.1:${PORT}/demo"
 echo "Manager demo password: $PASS"
 echo "Worker synthetic badge: DEMO-BADGE-1"
-echo "Disposable USB agent token (enter on permitted test PC only): $USB_AGENT_TOKEN"
+if [[ -n "$USB_AGENT_TOKEN" ]]; then
+  echo "Disposable USB agent token (enter on permitted test PC only): $USB_AGENT_TOKEN"
+fi
 echo "PC tunnel: ssh -L ${PORT}:127.0.0.1:${PORT} root@141.105.66.249"
 echo "PC browser: http://127.0.0.1:${PORT}/demo"
 echo "STOP: GRIT_PR192_DEMO_STATE=$STATE bash $SRC/deploy/stop_line_printer_demo.sh"
