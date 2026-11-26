@@ -44,4 +44,14 @@ docker run --rm --network "$NET" --read-only --cap-drop ALL \
   -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$PG_NAME" \
   --entrypoint python "$IMAGE" \
   /app/tests/printing/test_pg_queue.py -v
+echo "=== SYNTHETIC QR -> AUTO-QUEUE HTTP + POSTGRESQL 17 ==="
+docker run --rm --network "$NET" --read-only --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=64m -v "$SRC:/app:ro" -w /app \
+  -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
+  -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$PG_NAME" \
+  --entrypoint python "$IMAGE" \
+  /app/tests/printing/test_qr_autoqueue.py -v
+echo "PR192 SYNTHETIC QR AUTOQUEUE PG17 PASS"
 echo "PR192 PRINT QUEUE PG17 ISOLATED PASS"
