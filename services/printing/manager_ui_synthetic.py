@@ -17,6 +17,7 @@ from services.printing.virtual_agent import deliver_one_virtual
 ROOT=Path(__file__).resolve().parents[2]
 PAGE=ROOT / "frontend/pages/printing_manager_demo/index.html"
 JS=ROOT / "frontend/features/printing_queue/ui.js"
+STYLE=ROOT / "frontend/pages/printing_manager_demo/style.css"
 
 
 def make_synthetic_printing_manager_blueprint(connection_factory, authorized_manager):
@@ -53,34 +54,85 @@ def make_synthetic_printing_manager_blueprint(connection_factory, authorized_man
                         headers={"Cache-Control":"no-store",
                                  "X-Content-Type-Options":"nosniff"})
 
+    @bp.get("/synthetic/pr192/assets/printing_console.css")
+    def monitor_style():
+        if not manager_ok():
+            return denied()
+        return Response(STYLE.read_text(encoding="utf-8"),
+                        mimetype="text/css",
+                        headers={"Cache-Control":"no-store",
+                                 "X-Content-Type-Options":"nosniff"})
+
     @bp.get("/demo/printing/state")
     def printing_state():
         if not manager_ok():
             return denied()
+        # All queries observe ONE PG snapshot; counters are for the entire
+        # synthetic queue, whereas tables intentionally display last 100 rows.
         with connection_factory() as conn:
             _verify_isolated_connection(conn)
-            printers=conn.execute("""SELECT printer_id,name,lines_json,enabled
-                FROM grit_line_printers ORDER BY name,printer_id""").fetchall()
-            jobs=conn.execute("""SELECT job_id,account_id,order_id,printer_id,
-                state,sticker_kind,version
-                FROM synthetic_pr192_print_jobs
-                WHERE account_id='synthetic'
-                ORDER BY created_at DESC,job_id DESC LIMIT 100""").fetchall()
-            events=conn.execute("""SELECT e.job_id,j.order_id,e.event,e.from_state,
-                e.to_state,e.reason
-                FROM synthetic_pr192_print_events e
-                JOIN synthetic_pr192_print_jobs j ON j.job_id=e.job_id
-                WHERE j.account_id='synthetic'
-                ORDER BY e.event_id DESC LIMIT 100""").fetchall()
+            with conn.transaction():
+                conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                printers=conn.execute("""SELECT printer_id,name,lines_json,enabled
+                    FROM grit_line_printers ORDER BY name,printer_id""").fetchall()
+                jobs=conn.execute("""SELECT job_id,order_id,printer_id,
+                    state,sticker_kind,version
+                    FROM synthetic_pr192_print_jobs
+                    WHERE account_id='synthetic'
+                    ORDER BY created_at DESC,job_id DESC LIMIT 100""").fetchall()
+                events=conn.execute("""SELECT e.job_id,j.order_id,j.printer_id,
+                    e.event,e.from_state,e.to_state,e.reason
+                    FROM synthetic_pr192_print_events e
+                    JOIN synthetic_pr192_print_jobs j ON j.job_id=e.job_id
+                    WHERE j.account_id='synthetic'
+                    ORDER BY e.event_id DESC LIMIT 100""").fetchall()
+                by_state=conn.execute("""SELECT state,count(*)::integer
+                    FROM synthetic_pr192_print_jobs
+                    WHERE account_id='synthetic'
+                    GROUP BY state""").fetchall()
+                by_printer=conn.execute("""SELECT printer_id,state,count(*)::integer
+                    FROM synthetic_pr192_print_jobs
+                    WHERE account_id='synthetic'
+                    GROUP BY printer_id,state""").fetchall()
+                most_recent=conn.execute("""SELECT DISTINCT ON (printer_id)
+                    printer_id,state,order_id
+                    FROM synthetic_pr192_print_jobs
+                    WHERE account_id='synthetic'
+                    ORDER BY printer_id,updated_at DESC,job_id DESC""").fetchall()
+
         from json import loads
+        states=("QUEUED","SENDING","SUBMITTED","PRINTED",
+                "FAILED","UNKNOWN","CANCELLED")
+        totals={state:0 for state in states}
+        totals.update(dict(by_state))
+        printer_counts={}
+        for printer_id,state,count in by_printer:
+            printer_counts.setdefault(printer_id,{}).update({state:count})
+        last={printer_id:{"state":state,"order_id":order_id}
+              for printer_id,state,order_id in most_recent}
+        printer_views=[]
+        for printer_id,name,lines_json,enabled in printers:
+            counts=printer_counts.get(printer_id,{})
+            recent=last.get(printer_id,{})
+            printer_views.append({
+                "id":printer_id,"name":name,"lines":loads(lines_json),
+                "enabled":bool(enabled),
+                "queued":counts.get("QUEUED",0),
+                "attention":counts.get("UNKNOWN",0)+counts.get("FAILED",0),
+                "total":sum(counts.values()),
+                "last_state":recent.get("state"),
+                "last_order":recent.get("order_id"),
+            })
         return jsonify(
             synthetic=True,physical_printing=False,
-            printers=[{"id":p[0],"name":p[1],"lines":loads(p[2]),"enabled":bool(p[3])}
-                      for p in printers],
-            jobs=[{"job_id":j[0],"order_id":j[2],"printer_id":j[3],
-                   "state":j[4],"kind":j[5],"version":j[6]} for j in jobs],
-            events=[{"job_id":e[0],"order_id":e[1],"event":e[2],
-                     "from":e[3],"to":e[4],"reason":e[5]} for e in events],
+            summary={**totals,"total":sum(totals.values()),
+                     "attention":totals["UNKNOWN"]+totals["FAILED"]},
+            printers=printer_views,
+            jobs=[{"job_id":j[0],"order_id":j[1],"printer_id":j[2],
+                   "state":j[3],"kind":j[4],"version":j[5]} for j in jobs],
+            events=[{"job_id":e[0],"order_id":e[1],"printer_id":e[2],
+                     "event":e[3],"from":e[4],"to":e[5],"reason":e[6]}
+                    for e in events],
             manager_csrf=session.get("pr192_manager_csrf")
         ),200,{"Cache-Control":"no-store"}
 
