@@ -21,6 +21,10 @@ from line_printer_session_gate import require_bound_terminal_identity
 from line_printer_wms_auth_adapter import make_real_wms_auth_synthetic_blueprint
 from line_printer_pg_integrated_trial import validate_locked_synthetic
 from wms import get_session_employee, init_wms_db, manager_access, db_connect
+from services.printing.pg_queue import initialize_synthetic_print_pg
+from services.printing.qr_scan import initialize_synthetic_stickers
+from services.printing.qr_http_synthetic import make_real_wms_synthetic_autoqueue_blueprint
+from services.printing.worker_ui_synthetic import make_synthetic_worker_scanner_blueprint
 
 if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
     raise RuntimeError("Refusing to start standalone demo without isolated gate")
@@ -73,6 +77,9 @@ def seed():
         initialize_lifecycle(conn)
         for statement in SCHEMA:
             conn.execute(statement)
+        # Separate synthetic queue and invented WB sticker fixture, never prod.
+        initialize_synthetic_print_pg(conn)
+        initialize_synthetic_stickers(conn)
         conn.execute("INSERT INTO employees VALUES('demo-e1',1) ON CONFLICT DO NOTHING")
         conn.execute("INSERT INTO shifts VALUES('demo-shift-1','demo-e1',NULL) ON CONFLICT DO NOTHING")
         if not conn.execute("SELECT 1 FROM activities WHERE shift_id='demo-shift-1'").fetchone():
@@ -93,6 +100,9 @@ def seed():
                 ('synthetic',%s) ON CONFLICT DO NOTHING""", (order,))
             conn.execute("""INSERT INTO wb_fbs_order_skus VALUES
                 ('synthetic',%s,%s) ON CONFLICT DO NOTHING""", (order,sku))
+            conn.execute("""INSERT INTO synthetic_pr192_print_stickers VALUES
+                ('synthetic',%s,%s) ON CONFLICT DO NOTHING""",
+                (order, "SYNTHETIC-ONLY-STICKER-"+order))
 
 
 app = Flask("grit_pr192_demo")
@@ -100,6 +110,8 @@ app.secret_key = os.environ["GRIT_PR192_DEMO_SECRET"]
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
 app.register_blueprint(make_real_wms_auth_synthetic_blueprint(pg))
 seed()
+app.register_blueprint(make_real_wms_synthetic_autoqueue_blueprint(pg))
+app.register_blueprint(make_synthetic_worker_scanner_blueprint(pg, get_session_employee))
 
 
 def csrf_ok(data):
@@ -360,6 +372,7 @@ button.secondary{background:#30435d}button:disabled{opacity:.4}
 #output{white-space:pre-wrap;background:#091525;padding:15px;border-radius:9px;min-height:45px;overflow-wrap:anywhere}
 small{color:#93a7bf}.item{border-top:1px solid #34465e;padding:12px 0}
 </style></head><body><main><h1>GRIT WMS · Принтеры по линиям</h1>
+<p><a href="/demo/worker-qr">🧪 Открыть новый экран сканирования QR принтера (только синтетика)</a></p>
 <p>ИЗОЛИРОВАННОЕ ДЕМО. Только синтетические WB-заказы. Не подключено к реальным принтерам и складу.</p>
 <div class="row"><section class="panel"><h3>Вход по демо-бейджу</h3>
 <input id="badge" value="DEMO-BADGE-1"><button onclick="login('employee')">Войти как сборщик</button></section>
