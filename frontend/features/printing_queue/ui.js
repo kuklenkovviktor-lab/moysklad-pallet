@@ -18,9 +18,11 @@
     ENQUEUE: "Добавлено в очередь",
     CLAIM: "Задание получено",
     RELEASE: "Задание освобождено",
-    VIRTUAL_AGENT: "Виртуальный агент"
+    VIRTUAL_AGENT: "Виртуальный агент",
+    USB_AGENT: "Windows-агент (тест)"
   });
   let csrf = "", busy = false, snapshot = null;
+  let usbEnabled = false, usbActive = false;
 
   function node(tag, className, content) {
     const n = document.createElement(tag);
@@ -127,7 +129,8 @@
   function updateAgent() {
     const printer = snapshot && snapshot.printers.find(p => p.id === $("printer").value);
     const ready = !!printer && printer.enabled && number(printer.queued) > 0;
-    $("dispatch").disabled = busy || !ready;
+    $("dispatch").disabled = busy || !ready || usbActive;
+    $("usbApprove").disabled = busy || !ready || !usbEnabled || usbActive;
     $("agentHint").textContent = !printer ? "Нет тестовых принтеров." :
       !printer.enabled ? "Принтер отключён." :
       !ready ? "На выбранном принтере нет заданий в очереди." :
@@ -212,6 +215,54 @@
     populatePrinters();
     renderJobs();
     renderEvents();
+    await refreshUsb();
+  }
+  async function refreshUsb() {
+    try {
+      const result = await api("/demo/printing/usb/state");
+      if (result.synthetic !== true || result.physical_printing !== false ||
+          result.enabled !== true || !Array.isArray(result.approvals)) {
+        throw new Error("Неверный ответ USB-стенда");
+      }
+      usbEnabled = true;
+      usbActive = result.approvals.some(a => a.phase === "APPROVED" || a.phase === "CLAIMED");
+      const latest = result.approvals[0];
+      $("usbState").textContent = !latest
+        ? "USB-стенд готов. Разрешённых заданий пока нет."
+        : "Последнее: " + latest.order_id + " · " + latest.phase +
+          (latest.result ? " · " + latest.result : "") +
+          ". Повторная печать после UNKNOWN запрещена.";
+      $("usbState").dataset.state = "ok";
+    } catch (error) {
+      usbEnabled = false;
+      usbActive = false;
+      $("usbState").textContent = "USB-стенд недоступен: " + error.message;
+      $("usbState").dataset.state = "error";
+    }
+    updateAgent();
+  }
+  async function approveUsb() {
+    if (busy || !usbEnabled || usbActive || !snapshot) return;
+    busy = true;
+    updateAgent();
+    try {
+      const printer_id = $("printer").value;
+      if (!printer_id || !csrf) throw new Error("Нет принтера или CSRF");
+      const result = await api("/demo/printing/usb/approve","POST",{printer_id,csrf});
+      if (result.synthetic !== true || result.physical_printing !== false) {
+        throw new Error("Отказ: не тестовая операция");
+      }
+      await refresh();
+      setStatus(result.state === "APPROVED" ?
+        "Разрешено одно синтетическое задание для Windows-агента. Бумажной печати пока НЕТ." :
+        "USB: " + (result.reason || result.state) + ". Физическая печать не запускалась.",false);
+    } catch (error) {
+      setStatus(error.message || "Ошибка разрешения USB",true);
+      await refreshUsb();
+    } finally {
+      busy = false;
+      updateAgent();
+    }
   }
   async function dispatch() {
     if (busy || !snapshot) return;
@@ -252,6 +303,8 @@
       }
     });
     $("dispatch").addEventListener("click",dispatch);
+    $("usbApprove").addEventListener("click",approveUsb);
+    $("usbRefresh").addEventListener("click",refreshUsb);
     $("printer").addEventListener("change",updateAgent);
     ["searchOrder","filterPrinter","filterState"].forEach(id => {
       $(id).addEventListener(id === "searchOrder" ? "input" : "change",() => {

@@ -27,6 +27,7 @@ from services.printing.qr_http_synthetic import make_real_wms_synthetic_autoqueu
 from services.printing.worker_ui_synthetic import make_synthetic_worker_scanner_blueprint
 from services.printing.virtual_agent import initialize_virtual_sink
 from services.printing.manager_ui_synthetic import make_synthetic_printing_manager_blueprint
+from services.printing.usb_bridge_synthetic import make_synthetic_usb_bridge_blueprint
 
 if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
     raise RuntimeError("Refusing to start standalone demo without isolated gate")
@@ -127,6 +128,9 @@ def is_manager():
 
 
 app.register_blueprint(make_synthetic_printing_manager_blueprint(pg, is_manager))
+# Optional dedicated token: old disposable demos stay virtual-only.
+if os.environ.get('GRIT_PR192_USB_AGENT_TOKEN'):
+    app.register_blueprint(make_synthetic_usb_bridge_blueprint(pg, is_manager))
 
 
 def identity():

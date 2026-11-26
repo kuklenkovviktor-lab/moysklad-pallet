@@ -24,7 +24,7 @@
     </div>
     <div class="safety-note" role="note">
       <span aria-hidden="true">◈</span>
-      <p><strong>Только синтетические заказы.</strong> Виртуальная отправка не является физической печатью. USB и Xprinter не подключены.</p>
+      <p><strong>Только синтетические заказы.</strong> Виртуальная отправка не является физической печатью. Выделенный тестовый USB-агент подключается отдельно; реальные WB-заказы недоступны.</p>
     </div>
 
     <section class="overview" aria-labelledby="overviewTitle">
@@ -60,6 +60,21 @@
       </div>
       <p class="muted small" id="agentHint">Выберите принтер с заданиями в очереди.</p>
       <div id="status" class="feedback" role="status" aria-live="polite">Получение данных...</div>
+    </section>
+
+    <section class="panel" aria-labelledby="usbTitle">
+      <div class="section-heading">
+        <div><h2 id="usbTitle">USB-печать · тестовый Xprinter</h2>
+          <p class="muted">Разрешение ровно на одно синтетическое задание для Windows-агента</p></div>
+        <span class="environment-label">ТОЛЬКО ДЕМО</span>
+      </div>
+      <p class="muted small">Это действие НЕ печатает этикетку. Оно разрешает агенту забрать одно задание из очереди выбранного принтера. Физическая отправка с Windows требует отдельного явного запуска и подтверждения.</p>
+      <div class="agent-controls">
+        <button type="button" id="usbApprove" class="button primary" disabled>Разрешить 1 задание Windows-агенту</button>
+        <button type="button" id="usbRefresh" class="button secondary">Обновить USB-статус</button>
+      </div>
+      <p id="usbState" class="feedback" role="status" aria-live="polite">USB-агент пока не проверен.</p>
+      <p class="muted small">SUBMITTED означает только подтверждение диспетчера Windows, не доказательство бумажной печати. UNKNOWN не отправлять повторно.</p>
     </section>
 
     <section class="panel" aria-labelledby="jobsTitle">

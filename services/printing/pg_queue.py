@@ -23,6 +23,8 @@ DDL = (
          updated_at timestamptz NOT NULL DEFAULT now(),
          UNIQUE(account_id,order_id,sticker_kind)
        )""",
+    """ALTER TABLE synthetic_pr192_print_jobs ADD COLUMN IF NOT EXISTS
+       delivery_transport text NOT NULL DEFAULT 'VIRTUAL'""",
     """CREATE TABLE IF NOT EXISTS synthetic_pr192_print_events (
          event_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
          action_id text NOT NULL UNIQUE,
@@ -181,6 +183,10 @@ def transition_synthetic_print_pg(connection_factory, *, job_id, action_id,
             if not row:
                 return PrintTransition(False, 'NOT_FOUND', 'UNKNOWN')
             old = row[5]
+            transport = conn.execute("SELECT delivery_transport FROM synthetic_pr192_print_jobs WHERE job_id=%s",
+                                     (job_id,)).fetchone()[0]
+            if transport == 'USB' and target == 'QUEUED':
+                return PrintTransition(False, 'USB_RETRY_FORBIDDEN', old)
             if target not in _ALLOWED[old]:
                 return PrintTransition(False, 'INVALID_TRANSITION', old)
             if authorized_locked(conn, row, target) is not True:
