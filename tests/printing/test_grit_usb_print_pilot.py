@@ -142,8 +142,10 @@ class GRITUsb58x40Tests(unittest.TestCase):
     def test_rejects_any_non_allowlisted_printer(self):
         rc,_,err=self._print(printer="FBS-XP460B")
         self.assertEqual(rc,1)
-        self.assertIn("тестовый",err)
+        self.assertIn("Нужно явно указать --printer "+pilot.TEST_PRINTER,err)
+        # Fail before touching the Windows printer/spooler or writing a claim.
         self.assertEqual(self.fake.events,[])
+        self.assertFalse(pilot._journal_file(self.dir).exists())
 
     def test_rejects_test_printer_if_default(self):
         fake=FakeSpooler(default=pilot.TEST_PRINTER)
