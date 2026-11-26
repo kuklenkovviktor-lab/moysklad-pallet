@@ -54,4 +54,14 @@ docker run --rm --network "$NET" --read-only --cap-drop ALL \
   --entrypoint python "$IMAGE" \
   /app/tests/printing/test_qr_autoqueue.py -v
 echo "PR192 SYNTHETIC QR AUTOQUEUE PG17 PASS"
+echo "=== REAL GRIT WMS SESSION + SYNTHETIC QR/PG17 ==="
+docker run --rm --network "$NET" --read-only --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=128m -v "$SRC:/app:ro" -w /app \
+  -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
+  -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$PG_NAME" \
+  --entrypoint python "$IMAGE" \
+  /app/tests/printing/test_qr_real_wms_auth.py -v
+echo "PR192 QR AUTOQUEUE REAL WMS AUTH ISOLATED PASS"
 echo "PR192 PRINT QUEUE PG17 ISOLATED PASS"
