@@ -67,12 +67,11 @@ def make_synthetic_printing_manager_blueprint(connection_factory, authorized_man
     def printing_state():
         if not manager_ok():
             return denied()
-        # All queries observe ONE PG snapshot; counters are for the entire
-        # synthetic queue, whereas tables intentionally display last 100 rows.
+        # Counters cover the entire synthetic queue; tables show last 100 rows.
+        # Never use only the paginated rows to calculate global totals.
         with connection_factory() as conn:
             _verify_isolated_connection(conn)
             with conn.transaction():
-                conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 printers=conn.execute("""SELECT printer_id,name,lines_json,enabled
                     FROM grit_line_printers ORDER BY name,printer_id""").fetchall()
                 jobs=conn.execute("""SELECT job_id,order_id,printer_id,
