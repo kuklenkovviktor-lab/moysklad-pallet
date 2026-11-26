@@ -3,7 +3,6 @@ import os
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
 
 _tmp=tempfile.TemporaryDirectory()
 os.environ.setdefault("WMS_BADGE_SECRET","synthetic-badge-secret")
@@ -15,27 +14,16 @@ os.environ.pop("DATABASE_URL",None)
 os.environ["WMS_DB_PATH"]=os.path.join(_tmp.name,"tests.db")
 
 import app
-from wms import init_wms_db, execute
-from receiving_idempotency import init_receiving_operations, claim_operation, finish_operation
+from wms import execute
+from receiving_idempotency import claim_operation, finish_operation
 
-class MobileReceivingResumeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        init_wms_db()
-        init_receiving_operations()
-        app._WMS_READY.set()
+from attendance_test_support import AttendanceAppFixture
 
+
+class MobileReceivingResumeTests(AttendanceAppFixture, unittest.TestCase):
     def setUp(self):
-        self.patcher=patch.object(app,"_start_wms_initializer")
-        self.patcher.start()
-        self.addCleanup(self.patcher.stop)
-        self.client=app.app.test_client()
-        self.employee_id="synthetic-"+uuid.uuid4().hex
-        execute("INSERT INTO employees(id,name,rate,target,active,role) VALUES(?,?,?,?,?,?)",
-                (self.employee_id,"Test receiver",2.25,1600,1,"staff"))
-        with self.client.session_transaction() as ses:
-            ses.clear()
-            ses["employee_id"]=self.employee_id
+        super().setUp()
+        self.login()
 
     def test_confirmed_only_scoped_to_employee_and_document(self):
         other="other-"+uuid.uuid4().hex
