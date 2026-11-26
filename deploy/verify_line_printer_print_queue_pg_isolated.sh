@@ -84,6 +84,7 @@ docker run --rm --network "$NET" --read-only --cap-drop ALL \
   --entrypoint python "$IMAGE" \
   /app/tests/printing/test_manager_printing_demo.py -v
 echo "PR192 MANAGER VIRTUAL PRINTING DEMO PG17 PASS"
+echo "PR192 COMMERCIAL PRINTING CONSOLE PG17 PASS"
 echo "=== VIRTUAL SINK / NO USB / POSTGRESQL17 ==="
 docker run --rm --network "$NET" --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true \

@@ -83,7 +83,7 @@ class VirtualManagerUITests(unittest.TestCase):
         response=self.manager.get("/demo/printing")
         self.assertEqual(response.status_code,200)
         data=response.get_data(as_text=True)
-        self.assertIn("Очередь виртуальной печати",data)
+        self.assertIn("Контроль печати",data)
         self.assertIn("id=\"jobs\"",data)
         self.assertIn("/synthetic/pr192/assets/printing_queue.js",data)
         self.assertEqual(response.headers.get("Cache-Control"),"no-store")
@@ -174,6 +174,104 @@ class VirtualManagerUITests(unittest.TestCase):
             count=conn.execute(
                 "SELECT count(*) FROM synthetic_pr192_virtual_receipts").fetchone()[0]
         self.assertEqual(count,0)
+
+    def test_console_page_has_product_layout_and_filters(self):
+        response=self.manager.get("/demo/printing")
+        self.assertEqual(response.status_code,200)
+        html=response.get_data(as_text=True)
+        for fragment in ("Контроль печати","id=\"metricQueued\"",
+                         "id=\"metricSubmitted\"","id=\"printerCards\"",
+                         "id=\"searchOrder\"","id=\"filterPrinter\"",
+                         "id=\"filterState\"","id=\"technicalEvents\"",
+                         "printing_console.css","ТЕСТОВЫЙ СТЕНД"):
+            self.assertIn(fragment,html)
+        self.assertNotIn("Настоящая печать выполнена",html)
+
+    def test_console_css_is_manager_only(self):
+        css=self.manager.get("/synthetic/pr192/assets/printing_console.css")
+        self.assertEqual(css.status_code,200)
+        self.assertIn("max-width: 620px",css.get_data(as_text=True))
+        self.assertIn("text/css",css.content_type)
+        self.assertEqual(css.headers.get("Cache-Control"),"no-store")
+        self.assertEqual(self.worker.get(
+            "/synthetic/pr192/assets/printing_console.css").status_code,403)
+
+    def test_console_javascript_uses_safe_text_and_translates_statuses(self):
+        response=self.manager.get(
+            "/synthetic/pr192/assets/printing_queue.js")
+        self.assertEqual(response.status_code,200)
+        source=response.get_data(as_text=True)
+        for marker in ("Передано виртуальному агенту","Требует проверки",
+                       "В очереди","printer.name","printer.lines.join",
+                       "renderJobs","renderPrinterCards","textContent",
+                       "data.summary","VIRTUAL_AGENT: \"Виртуальный агент\"","result.physical_printing !== false"):
+            self.assertIn(marker,source)
+        self.assertNotIn("innerHTML",source)
+        self.assertNotIn("PRINTED: [\"Напечатано\"",source)
+
+    def test_printer_name_and_global_counts_in_snapshot(self):
+        self.queue()
+        payload=self.state().json
+        self.assertEqual(payload["summary"]["QUEUED"],1)
+        self.assertEqual(payload["summary"]["total"],1)
+        self.assertEqual(payload["summary"]["SUBMITTED"],0)
+        self.assertEqual(payload["summary"]["attention"],0)
+        printer=next(p for p in payload["printers"] if p["id"]=="p1")
+        with pg() as conn:
+            original=conn.execute("""SELECT name,lines_json
+                 FROM grit_line_printers WHERE printer_id='p1'""").fetchone()
+        from json import loads
+        self.assertEqual(printer["name"],original[0])
+        self.assertEqual(printer["lines"],loads(original[1]))
+        self.assertEqual(printer["queued"],1)
+        self.assertEqual(printer["total"],1)
+        self.assertEqual(printer["last_state"],"QUEUED")
+        self.assertEqual(printer["last_order"],"o1")
+        self.assertTrue(printer["enabled"])
+
+    def test_full_queue_totals_are_not_limited_to_100_table_rows(self):
+        self.queue()
+        # Synthetic-only data, inserted into disposable PG17 fixture.
+        with pg() as conn:
+            conn.cursor().executemany("""INSERT INTO synthetic_pr192_print_jobs
+                (job_id,account_id,order_id,sticker_kind,printer_id,state)
+                VALUES(%s,'synthetic',%s,'synthetic-fake','p1','QUEUED')""",
+                [(f"synthetic-bulk-{i}",f"SYNTH-BULK-{i}") for i in range(100)])
+        payload=self.state().json
+        self.assertEqual(payload["summary"]["QUEUED"],101)
+        self.assertEqual(payload["summary"]["total"],101)
+        self.assertEqual(len(payload["jobs"]),100)
+        printer=next(p for p in payload["printers"] if p["id"]=="p1")
+        self.assertEqual(printer["queued"],101)
+        self.assertEqual(printer["total"],101)
+
+    def test_printer_last_status_and_audit_follow_virtual_ack(self):
+        self.queue()
+        self.assertEqual(self.dispatch().json["state"],"SUBMITTED")
+        payload=self.state().json
+        self.assertEqual(payload["summary"]["SUBMITTED"],1)
+        self.assertEqual(payload["summary"]["QUEUED"],0)
+        printer=next(p for p in payload["printers"] if p["id"]=="p1")
+        self.assertEqual(printer["queued"],0)
+        self.assertEqual(printer["last_state"],"SUBMITTED")
+        self.assertEqual(printer["last_order"],"o1")
+        self.assertEqual(payload["events"][0]["printer_id"],"p1")
+
+    def test_unknown_and_failed_count_as_attention(self):
+        self.queue()
+        with pg() as conn:
+            conn.execute("""UPDATE synthetic_pr192_print_jobs
+                SET state='UNKNOWN' WHERE order_id='o1'""")
+            conn.execute("""INSERT INTO synthetic_pr192_print_jobs
+                (job_id,account_id,order_id,sticker_kind,printer_id,state)
+                VALUES('synthetic-failure','synthetic','SYNTH-FAIL',
+                       'synthetic-fake','p1','FAILED')""")
+        payload=self.state().json
+        self.assertEqual(payload["summary"]["UNKNOWN"],1)
+        self.assertEqual(payload["summary"]["FAILED"],1)
+        self.assertEqual(payload["summary"]["attention"],2)
+        printer=next(p for p in payload["printers"] if p["id"]=="p1")
+        self.assertEqual(printer["attention"],2)
 
     def test_manager_factory_requires_isolated_pg_gate(self):
         with patch.dict(os.environ,{"GRIT_SYNTHETIC_PG_TEST":"0"}):
