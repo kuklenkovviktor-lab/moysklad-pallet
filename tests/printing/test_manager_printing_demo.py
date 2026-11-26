@@ -233,7 +233,7 @@ class VirtualManagerUITests(unittest.TestCase):
         self.queue()
         # Synthetic-only data, inserted into disposable PG17 fixture.
         with pg() as conn:
-            conn.executemany("""INSERT INTO synthetic_pr192_print_jobs
+            conn.cursor().executemany("""INSERT INTO synthetic_pr192_print_jobs
                 (job_id,account_id,order_id,sticker_kind,printer_id,state)
                 VALUES(%s,'synthetic',%s,'synthetic-fake','p1','QUEUED')""",
                 [(f"synthetic-bulk-{i}",f"SYNTH-BULK-{i}") for i in range(100)])
