@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 
-from line_printer_pg_print_queue import (
+from services.printing.pg_queue import (
     enqueue_synthetic_print_pg, initialize_synthetic_print_pg,
     read_synthetic_print_jobs, transition_synthetic_print_pg,
 )

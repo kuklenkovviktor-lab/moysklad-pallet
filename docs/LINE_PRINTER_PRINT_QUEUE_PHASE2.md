@@ -9,7 +9,7 @@
 Этот PR реализует **только offline-синтетический SQLite-контракт очереди**, без интеграции в GRIT. Существующий демо-цикл `RESERVED/COMPLETED` из PR #193 не является очередью печати и не переиспользуется как такой.
 
 Компоненты:
-- `line_printer_print_queue.py`: изолированное хранение заданий и неизменяемый журнал действий; уникальная пара `(account_id, order_id, sticker_kind)` закрепляет одно логическое печатное задание за одним принтером.
+- `services/printing/synthetic_queue.py`: изолированное хранение заданий и неизменяемый журнал действий; уникальная пара `(account_id, order_id, sticker_kind)` закрепляет одно логическое печатное задание за одним принтером.
 - `scan()`: получает **уже доверенно отобранные** заказы от вызывающего сервиса, добавляет только новые, сохраняет ранее созданные и возвращает счётчики. Повторный скан не переотправляет ничего на физическую печать.
 - `transition()`: `QUEUED → SENDING → SUBMITTED → PRINTED`, отдельные `FAILED`, `UNKNOWN`, `CANCELLED`. `SUBMITTED` означает лишь принятие очередью/спулером, не физическое подтверждение.
 - `UNKNOWN`/ `FAILED` не перезапускаются автоматически; необходим отдельный подтверждённый менеджерский разбор.
@@ -20,7 +20,7 @@
 
 Локально в отдельной среде проверено:
 ```bash
-GRIT_SYNTHETIC_PRINT_QUEUE=YES_ISOLATED python -m unittest discover -s tests -p test_line_printer_print_queue.py -v
+GRIT_SYNTHETIC_PRINT_QUEUE=YES_ISOLATED python -m unittest discover -s tests -p test_services/printing/synthetic_queue.py -v
 ```
 17/17 PASS: повторное сканирование, новые поступления, конкуренция восьми потоков с отдельными SQLite-соединениями, история и idempotency по action_id, сохранение после открытия DB заново, отсутствие авто-повтора при UNKNOWN/FAILED, terminal PRINTED, разделение аккаунтов, проверка фикстур и отказ при выключенном gate.
 

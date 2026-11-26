@@ -6,7 +6,7 @@ migration, no WB calls and no USB/Xprinter print action.
 
 ## Architecture
 
-line_printer_pg_print_queue.py creates only synthetic_pr192_print_jobs and
+services/printing/pg_queue.py creates only synthetic_pr192_print_jobs and
 synthetic_pr192_print_events in a disposable grit_pr192_synthetic_* PostgreSQL
 database. It reuses the existing _verify_isolated_connection gate. Enqueue
 checks a trusted auth callback and a per-order eligibility callback INSIDE
@@ -36,7 +36,7 @@ the row to prevent duplicate actions.
 
 ## Tests
 
-File: tests/test_line_printer_pg_print_queue.py (16 test methods).
+File: tests/test_services/printing/pg_queue.py (16 test methods).
 Cases: initial scan, duplicate scan, new arrivals on rescanning,
 8-terminal PostgreSQL concurrency, isolation by account, deny auth,
 deny eligibility, atomic rollback, evidence for printed/failed, unknown,

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 
-from line_printer_print_queue import EligibleOrder, PrintQueueError, SyntheticPrintQueue
+from services.printing.synthetic_queue import EligibleOrder, PrintQueueError, SyntheticPrintQueue
 
 
 def candidate(order):
