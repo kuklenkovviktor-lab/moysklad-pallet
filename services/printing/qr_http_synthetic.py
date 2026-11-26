@@ -22,6 +22,24 @@ def make_synthetic_autoqueue_blueprint(connection_factory, authenticated_employe
         _verify_isolated_connection(conn)
     bp = Blueprint("pr192_synthetic_autoqueue", __name__)
 
+    @bp.get("/synthetic/pr192/print-queue/session")
+    def session_token():
+        identity = require_bound_terminal_identity(
+            session, authenticated_employee())
+        if not identity:
+            return jsonify(error="TERMINAL_SESSION_REQUIRED"), 401, {
+                "Cache-Control": "no-store"
+            }
+        # Create a server-issued token only for the authenticated test worker.
+        token = session.get("pr192_print_csrf")
+        if not isinstance(token, str) or len(token) < 16:
+            token = secrets.token_urlsafe(32)
+            session["pr192_print_csrf"] = token
+        return jsonify(csrf=token, synthetic=True,
+                       physical_printing=False), 200, {
+                           "Cache-Control": "no-store"
+                       }
+
     @bp.post("/synthetic/pr192/print-queue/scan")
     def scan_printer_qr():
         identity = require_bound_terminal_identity(
