@@ -5,7 +5,7 @@ STATE="${GRIT_PR192_DEMO_STATE:-/tmp/grit-pr192-demo.state}"
 # Deliberately support only two known disposable demo state files.
 # Never follow symlinks, and never infer container names from production state.
 case "$STATE" in
-  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state) ;;
+  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state|/tmp/grit-pr205-demo.state) ;;
   *) echo "Refusing unexpected synthetic demo state path" >&2; exit 2;;
 esac
 if test -L "$STATE"; then
