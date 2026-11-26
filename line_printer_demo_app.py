@@ -25,6 +25,8 @@ from services.printing.pg_queue import initialize_synthetic_print_pg
 from services.printing.qr_scan import initialize_synthetic_stickers
 from services.printing.qr_http_synthetic import make_real_wms_synthetic_autoqueue_blueprint
 from services.printing.worker_ui_synthetic import make_synthetic_worker_scanner_blueprint
+from services.printing.virtual_agent import initialize_virtual_sink
+from services.printing.manager_ui_synthetic import make_synthetic_printing_manager_blueprint
 
 if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
     raise RuntimeError("Refusing to start standalone demo without isolated gate")
@@ -80,6 +82,7 @@ def seed():
         # Separate synthetic queue and invented WB sticker fixture, never prod.
         initialize_synthetic_print_pg(conn)
         initialize_synthetic_stickers(conn)
+        initialize_virtual_sink(conn)
         conn.execute("INSERT INTO employees VALUES('demo-e1',1) ON CONFLICT DO NOTHING")
         conn.execute("INSERT INTO shifts VALUES('demo-shift-1','demo-e1',NULL) ON CONFLICT DO NOTHING")
         if not conn.execute("SELECT 1 FROM activities WHERE shift_id='demo-shift-1'").fetchone():
@@ -121,6 +124,9 @@ def csrf_ok(data):
 
 def is_manager():
     return session.get("manager_web") is True and manager_access() and bool(session.get("pr192_manager_id"))
+
+
+app.register_blueprint(make_synthetic_printing_manager_blueprint(pg, is_manager))
 
 
 def identity():
@@ -372,7 +378,7 @@ button.secondary{background:#30435d}button:disabled{opacity:.4}
 #output{white-space:pre-wrap;background:#091525;padding:15px;border-radius:9px;min-height:45px;overflow-wrap:anywhere}
 small{color:#93a7bf}.item{border-top:1px solid #34465e;padding:12px 0}
 </style></head><body><main><h1>GRIT WMS · Принтеры по линиям</h1>
-<p><a href="/demo/worker-qr">🧪 Открыть новый экран сканирования QR принтера (только синтетика)</a></p>
+<p><a href="/demo/worker-qr">🧪 Экран сборщика · QR принтера</a> · <a href="/demo/printing">📋 Руководитель · Очередь и виртуальная печать</a></p>
 <p>ИЗОЛИРОВАННОЕ ДЕМО. Только синтетические WB-заказы. Не подключено к реальным принтерам и складу.</p>
 <div class="row"><section class="panel"><h3>Вход по демо-бейджу</h3>
 <input id="badge" value="DEMO-BADGE-1"><button onclick="login('employee')">Войти как сборщик</button></section>
