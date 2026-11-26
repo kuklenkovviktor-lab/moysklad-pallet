@@ -15,24 +15,15 @@ os.environ.pop("DATABASE_URL", None)
 os.environ["WMS_DB_PATH"] = os.path.join(_temp.name, "onix-test.db")
 
 import app
-from receiving_idempotency import init_receiving_operations, read_operation
-from wms import init_wms_db
+from receiving_idempotency import read_operation
+
+from attendance_test_support import AttendanceAppFixture
 
 
-class ReceivingConfirmationTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        init_wms_db()
-        init_receiving_operations()
-        app._WMS_READY.set()
-
+class ReceivingConfirmationTests(AttendanceAppFixture, unittest.TestCase):
     def setUp(self):
-        self.start = patch.object(app, "_start_wms_initializer")
-        self.start.start()
-        self.addCleanup(self.start.stop)
-        self.client = app.app.test_client()
-        with self.client.session_transaction() as sess:
-            sess["employee_id"] = "viktor"
+        super().setUp()
+        self.login()
         self.product = {"id": "product", "article": "SKU", "name": "Item",
                         "meta": {"href": "https://example.test/product", "type": "product"}}
         self.pack = {"name": "Палета", "quantity": 144}
@@ -270,10 +261,9 @@ class ReceivingConfirmationTests(unittest.TestCase):
             if not resume.wait(5):
                 raise TimeoutError("First device was not released")
             return {"added":144,"total":144}
+        client=app.app.test_client()
+        self.login(client)
         def first_device():
-            client=app.app.test_client()
-            with client.session_transaction() as sess:
-                sess["employee_id"]="viktor"
             results.append(client.post("/api/osz/accept",json=p))
         with patch.object(app,"normalize_sscc",return_value=p["sscc"]), \
              patch.object(app,"find_product_by_any_barcode",return_value=(self.product,self.pack)), \

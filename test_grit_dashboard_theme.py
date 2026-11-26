@@ -11,9 +11,12 @@ def test_dashboard_keeps_live_data_bindings_and_existing_controls():
         'id="todayOrders"', 'id="remaining"', 'id="receivingUnits"',
         'id="deviationCount"', 'id="progressBar"', 'id="hourlyChart"',
         'id="workers"', 'id="completedWorkers"', 'id="deviations"',
-        'id="planInput"', 'onclick="savePlan()"', 'onclick="openExitQr()',
+        'id="progressDone"', 'id="progressPlan"', 'id="wbAssemblyInfo"',
+        'href="/manager/attendance/qr"',
+        'wbAssemblyCount.remaining_orders', 'wbAssemblyCount.assembled_assembly_orders',
+        'wbAssemblyCount.assembly_orders',
         '/api/fbs/dashboard?', '/api/receiving/overview?',
-        '/api/manager/daily-plan?', '/api/operations/deviations?',
+        '/api/manager/wb-fbs/picking-queue', '/api/operations/deviations?',
     ):
         assert needle in page
 

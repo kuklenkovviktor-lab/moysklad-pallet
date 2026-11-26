@@ -32,13 +32,16 @@ def test_existing_warehouse_operations_remain_connected():
         'id="todayOrders"', 'id="remaining"', 'id="receivingUnits"',
         'id="deviationCount"', 'id="hourlyChart"', 'id="progressBar"',
         'id="workers"', 'id="completedWorkers"', 'id="deviations"',
-        'id="planInput"', 'onclick="savePlan()"', 'onclick="openExitQr()',
+        'id="progressDone"', 'id="progressPlan"', 'id="wbAssemblyInfo"',
+        'href="/manager/attendance/qr"',
+        'wbAssemblyCount.remaining_orders', 'wbAssemblyCount.assembled_assembly_orders',
+        'wbAssemblyCount.assembly_orders',
         'onclick="managerLogout()', 'function renderEmployeeShift',
         'function renderProgress', 'function renderHourly',
         "fetchWithTimeout('/api/fbs/dashboard?",
         "fetchWithTimeout('/api/receiving/overview?",
         "fetchWithTimeout('/api/fbs/hourly?",
-        'function refreshExitQr()', 'function syncWb()'
+        'function loadWbAssemblyPlan()', 'function syncWb()'
     ):
         assert token in page
 

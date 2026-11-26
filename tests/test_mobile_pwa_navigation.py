@@ -5,7 +5,6 @@ No real database or MoySklad operations are performed.
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
 
 _tmp = tempfile.TemporaryDirectory()
 os.environ.setdefault("WMS_BADGE_SECRET", "onix-pwa-test-badge")
@@ -16,22 +15,10 @@ os.environ["WMS_REQUIRE_POSTGRES"] = "0"
 os.environ.pop("DATABASE_URL", None)
 os.environ["WMS_DB_PATH"] = os.path.join(_tmp.name, "pwa-test.db")
 
-import app
-import wms
+from attendance_test_support import AttendanceAppFixture
 
 
-class MobileNavigationTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        wms.init_wms_db()
-        app._WMS_READY.set()
-
-    def setUp(self):
-        self.client = app.app.test_client()
-        startup = patch.object(app, "_start_wms_initializer")
-        startup.start()
-        self.addCleanup(startup.stop)
-
+class MobileNavigationTests(AttendanceAppFixture, unittest.TestCase):
     def test_service_worker_does_not_intercept_get_or_navigation(self):
         sw = self.client.get("/sw.js")
         self.assertEqual(sw.status_code, 200, sw.data[:300])
@@ -56,8 +43,7 @@ class MobileNavigationTests(unittest.TestCase):
         anonymous = self.client.get("/replenishment")
         self.assertEqual(anonymous.status_code, 302)
         self.assertTrue(anonymous.location.endswith("/login"), anonymous.location)
-        with self.client.session_transaction() as sess:
-            sess["employee_id"] = "denis"
+        self.login()
         active = self.client.get("/replenishment")
         self.assertEqual(active.status_code, 200, active.data[:250])
         self.assertIn("Пополнение".encode("utf-8"), active.data)
