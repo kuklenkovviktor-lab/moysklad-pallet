@@ -1,7 +1,7 @@
 """GRIT isolated Windows USB bridge: one manager-approved synthetic label per run.
 
 NEVER auto-runs, polls, retries or sends WB sticker bytes. HTTP only to
-127.0.0.1:18769 over an operator-created SSH forward. The single-claim
+127.0.0.1:18769 over SSH. The single-claim
 server marks the job SENDING before handing a ticket to this agent.
 """
 import argparse
@@ -216,6 +216,8 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
                   "; NO PRINT")
             return 0
         result,journal=run_once(device_api,device,state_dir=state_dir)
+        if result != "SUBMITTED_TO_WINDOWS":
+            raise PilotError("No eligible approval; no label submitted")
         print("USB BRIDGE RESULT:",result)
         if journal:
             print("Journal:",journal)

@@ -83,6 +83,12 @@ class WindowsBridgeFakeTests(unittest.TestCase):
         self.assertNotIn("write",self.fake.events)
         self.assertEqual(list(self.dir.iterdir()),[])
 
+    def test_empty_physical_command_is_failed_not_success(self):
+        api=FakeAPI(waiting=False)
+        self.assertEqual(agent.main(['--once','--confirm',agent.CONFIRM],
+            api=api,spooler=self.fake,state_dir=self.dir),1)
+        self.assertNotIn('write',self.fake.events)
+
     def test_rejected_claim_never_spools(self):
         api=FakeAPI(reject=True)
         state,path=agent.run_once(api,self.fake,state_dir=self.dir)
