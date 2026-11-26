@@ -215,7 +215,7 @@ class VirtualAgentTests(unittest.TestCase):
         self.fixture.update("""UPDATE synthetic_pr192_print_stickers
           SET original_sticker='SYNTH-REPLACED-LABEL' WHERE order_id='o1'""")
         response=_accept_at_virtual_sink(
-            connect,job_id=claim.job,printer_id="p1",sticker=sticker)
+            connect,job_id=claim.job_id,printer_id="p1",sticker=sticker)
         self.assertEqual(response.state,"UNKNOWN")
         self.assertIn("ORIGINAL_STICKER_CHANGED",response.reason)
         self.assertEqual(self.receipts(),[])
@@ -228,7 +228,7 @@ class VirtualAgentTests(unittest.TestCase):
         self.fixture.update("""UPDATE grit_line_printers
           SET lines_json='["В"]' WHERE printer_id='p1'""")
         response=_accept_at_virtual_sink(
-            connect,job_id=claim.job,printer_id="p1",sticker=sticker)
+            connect,job_id=claim.job_id,printer_id="p1",sticker=sticker)
         self.assertEqual(response.state,"UNKNOWN")
         self.assertIn("PRINTER_DOES_NOT_COVER_ORDER",response.reason)
         self.assertEqual(self.receipts(),[])
