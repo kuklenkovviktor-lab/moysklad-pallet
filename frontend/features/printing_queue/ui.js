@@ -17,7 +17,8 @@
     TRANSITION: "Изменение статуса",
     ENQUEUE: "Добавлено в очередь",
     CLAIM: "Задание получено",
-    RELEASE: "Задание освобождено"
+    RELEASE: "Задание освобождено",
+    VIRTUAL_AGENT: "Виртуальный агент"
   });
   let csrf = "", busy = false, snapshot = null;
 
