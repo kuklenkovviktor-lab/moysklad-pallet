@@ -204,7 +204,7 @@ class VirtualManagerUITests(unittest.TestCase):
         for marker in ("Передано виртуальному агенту","Требует проверки",
                        "В очереди","printer.name","printer.lines.join",
                        "renderJobs","renderPrinterCards","textContent",
-                       "data.summary","result.physical_printing !== false"):
+                       "data.summary","VIRTUAL_AGENT: \"Виртуальный агент\"","result.physical_printing !== false"):
             self.assertIn(marker,source)
         self.assertNotIn("innerHTML",source)
         self.assertNotIn("PRINTED: [\"Напечатано\"",source)
