@@ -8,7 +8,7 @@ STATE="${GRIT_PR192_DEMO_STATE:-/tmp/grit-pr192-demo.state}"
 # Deliberately support only two known disposable demo state files.
 # Never follow symlinks, and never infer container names from production state.
 case "$STATE" in
-  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state|/tmp/grit-pr205-demo.state|/tmp/grit-pr206-demo.state) ;;
+  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state|/tmp/grit-pr205-demo.state|/tmp/grit-pr206-demo.state|/tmp/grit-pr208-demo.state) ;;
   *) echo "Refusing unexpected synthetic demo state path" >&2; exit 2;;
 esac
 if test -L "$STATE"; then
@@ -40,6 +40,8 @@ PY
 docker image inspect "$IMAGE" >/dev/null
 PASS="$(python3 -c 'import secrets; print(secrets.token_urlsafe(15))')"
 SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
+# One-time device credential scoped to this disposable synthetic demo only.
+USB_AGENT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
 CREATED=0
 cleanup_failed() {
   if [ "$CREATED" != 1 ]; then
@@ -83,6 +85,7 @@ docker run -d --name "$APP" \
   -e WMS_REQUIRE_POSTGRES=0 -e DATABASE_URL= \
   -e "GRIT_PR192_DEMO_PASSWORD=$PASS" \
   -e "GRIT_PR192_DEMO_SECRET=$SECRET" \
+  -e "GRIT_PR192_USB_AGENT_TOKEN=$USB_AGENT_TOKEN" \
   --entrypoint python "$IMAGE" \
   -m gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 60 \
   --access-logfile - --error-logfile - line_printer_demo_app:app >/dev/null
@@ -112,7 +115,8 @@ echo "DEMO START PASS: isolated PostgreSQL 17 + WMS auth + browser UI"
 echo "HOSTKEY: http://127.0.0.1:${PORT}/demo"
 echo "Manager demo password: $PASS"
 echo "Worker synthetic badge: DEMO-BADGE-1"
+echo "Disposable USB agent token (enter on permitted test PC only): $USB_AGENT_TOKEN"
 echo "PC tunnel: ssh -L ${PORT}:127.0.0.1:${PORT} root@141.105.66.249"
 echo "PC browser: http://127.0.0.1:${PORT}/demo"
 echo "STOP: GRIT_PR192_DEMO_STATE=$STATE bash $SRC/deploy/stop_line_printer_demo.sh"
-echo "No production DB, WB API or real printer jobs."
+echo "Only synthetic manager-authorized USB demo jobs; NO PRODUCTION DB/WB API."
