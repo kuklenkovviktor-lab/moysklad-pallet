@@ -111,9 +111,11 @@ class WindowsBridgeFakeTests(unittest.TestCase):
 
     def test_repeating_same_ticket_cannot_spool_again(self):
         agent.run_once(self.api,self.fake,state_dir=self.dir)
-        with self.assertRaisesRegex(agent.PilotError,"UNKNOWN"):
+        with self.assertRaisesRegex(agent.PilotError,"Повторная печать запрещена"):
             agent.run_once(self.api,self.fake,state_dir=self.dir)
         self.assertEqual(self.fake.events.count("write"),1)
+        journal=json.loads((self.dir/(TICKET+".json")).read_text("utf-8"))
+        self.assertEqual(journal["state"],"SUBMITTED_TO_WINDOWS")
 
     def test_driver_error_becomes_unknown_no_retry(self):
         fake=FakeSpooler(fail_on="write")
