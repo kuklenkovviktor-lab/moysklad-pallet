@@ -59,6 +59,10 @@ def make_synthetic_autoqueue_blueprint(connection_factory, authenticated_employe
 
 def make_real_wms_synthetic_autoqueue_blueprint(connection_factory):
     """Existing wms.get_session_employee() auth; synthetic PG only."""
+    if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
+        raise RuntimeError("Synthetic printing endpoint is disabled")
+    with connection_factory() as conn:
+        _verify_isolated_connection(conn)
     from wms import get_session_employee
     return make_synthetic_autoqueue_blueprint(
         connection_factory, get_session_employee)
