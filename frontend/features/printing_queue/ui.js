@@ -1,103 +1,263 @@
-/* GRIT FSD printing_queue feature: synthetic-only manager dashboard.
-   No physical printing. No browser-supplied job IDs or delivery modes. */
+/* GRIT WMS: print console UX, isolated synthetic-only manager demo.
+   Never emit USB commands, infer physical PRINTED, or accept raw HTML. */
 (function () {
   "use strict";
   const $ = id => document.getElementById(id);
-  let csrf = "", busy = false;
-  const STATES = ["QUEUED","SENDING","SUBMITTED","PRINTED","FAILED","UNKNOWN","CANCELLED"];
+  const STATUS = Object.freeze({
+    QUEUED: ["В очереди", "neutral"],
+    SENDING: ["Передаётся", "warn"],
+    SUBMITTED: ["Передано виртуальному агенту", "good"],
+    PRINTED: ["Отметка печати (тест)", "warn"],
+    FAILED: ["Ошибка передачи", "error"],
+    UNKNOWN: ["Требует проверки", "error"],
+    CANCELLED: ["Отменено", "neutral"],
+    EMPTY: ["Нет ожидающих заданий", "neutral"]
+  });
+  const EVENT = Object.freeze({
+    TRANSITION: "Изменение статуса",
+    ENQUEUE: "Добавлено в очередь",
+    CLAIM: "Задание получено",
+    RELEASE: "Задание освобождено"
+  });
+  let csrf = "", busy = false, snapshot = null;
 
-  function td(value) {
-    const cell = document.createElement("td");
-    cell.textContent = value == null ? "—" : String(value);
-    return cell;
+  function node(tag, className, content) {
+    const n = document.createElement(tag);
+    if (className) n.className = className;
+    if (content !== undefined && content !== null) n.textContent = String(content);
+    return n;
   }
-  function setStatus(message, isError) {
-    const el = $("status");
-    el.textContent = message;
-    el.dataset.state = isError ? "error" : "ok";
+  function stateLabel(value) { return (STATUS[value] || [String(value || "—"), "neutral"])[0]; }
+  function stateChip(value) {
+    const style = (STATUS[value] || STATUS.EMPTY)[1];
+    return node("span", "state state-" + style, stateLabel(value));
   }
-  function renderRows(element, rows, fields) {
-    element.replaceChildren();
-    rows.forEach(item => {
-      const tr = document.createElement("tr");
-      fields.forEach(field => tr.appendChild(td(item[field])));
-      element.appendChild(tr);
+  function printerName(id) {
+    const p = snapshot && snapshot.printers.find(x => x.id === id);
+    return p ? p.name : "Неизвестный принтер";
+  }
+  function printerLines(id) {
+    const p = snapshot && snapshot.printers.find(x => x.id === id);
+    return p ? p.lines.join(", ") : "—";
+  }
+  function setStatus(message, error) {
+    $("status").textContent = message;
+    $("status").dataset.state = error ? "error" : "ok";
+  }
+  function renderEmpty(element, columns, message) {
+    const row = node("tr");
+    const cell = node("td", "", message);
+    cell.colSpan = columns;
+    row.appendChild(cell);
+    element.replaceChildren(row);
+  }
+  function number(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+  function renderTotals() {
+    const totals = snapshot.summary || {};
+    $("metricQueued").textContent = number(totals.QUEUED);
+    $("metricSubmitted").textContent = number(totals.SUBMITTED);
+    $("metricAttention").textContent = number(totals.attention);
+    $("metricTotal").textContent = number(totals.total);
+    $("lastRefresh").textContent = "Обновлено: " + new Date().toLocaleTimeString("ru-RU",
+      { hour: "2-digit", minute: "2-digit", second: "2-digit" }) +
+      " · данные по всем заданиям, таблицы показывают последние 100";
+  }
+  function printerFact(value, label) {
+    const wrap = node("div", "printer-fact");
+    wrap.append(node("strong", "", number(value)), node("span", "", label));
+    return wrap;
+  }
+  function renderPrinterCards() {
+    const region = $("printerCards");
+    region.replaceChildren();
+    if (!snapshot.printers.length) {
+      region.appendChild(node("div", "empty", "Принтеры пока не добавлены."));
+      return;
+    }
+    snapshot.printers.forEach(printer => {
+      const card = node("article", "printer-card");
+      const top = node("div", "printer-card-top");
+      const info = node("div");
+      info.append(node("div", "printer-name", printer.name),
+                  node("div", "printer-lines", "Линии: " + printer.lines.join(", ")));
+      top.append(info,node("span",printer.enabled ?
+        "state state-good" : "state state-error",
+        printer.enabled ? "Активен" : "Отключён"));
+      const facts = node("div", "printer-facts");
+      facts.append(printerFact(printer.queued, "В очереди"),
+                   printerFact(printer.attention, "Проверить"),
+                   printerFact(printer.total, "Всего"));
+      const recent = node("div", "printer-last");
+      recent.append(node("span", "", "Последнее: "));
+      recent.append(printer.last_state ? stateChip(printer.last_state) :
+                    node("span", "", "нет операций"));
+      if (printer.last_order) recent.append(node("span", "", " · " + printer.last_order));
+      card.append(top,facts,recent);
+      region.appendChild(card);
     });
-    if (!rows.length) {
-      const row = document.createElement("tr");
-      const cell = td("Нет записей");
-      cell.colSpan = fields.length;
-      row.appendChild(cell);
-      element.appendChild(row);
+  }
+  function replaceOptions(select, options) {
+    const prev = select.value;
+    select.replaceChildren(...options);
+    if ([...select.options].some(option => option.value === prev)) select.value = prev;
+  }
+  function populatePrinters() {
+    const work = snapshot.printers.map(printer => {
+      const option = node("option");
+      option.value = printer.id;
+      option.textContent = printer.name + " · " + printer.lines.join(", ") +
+        (printer.enabled ? "" : " (отключён)");
+      return option;
+    });
+    replaceOptions($("printer"),work);
+    const filterOptions = [node("option", "", "Все принтеры")];
+    filterOptions[0].value = "";
+    snapshot.printers.forEach(printer => {
+      const option = node("option", "", printer.name + " · " + printer.lines.join(", "));
+      option.value = printer.id;
+      filterOptions.push(option);
+    });
+    replaceOptions($("filterPrinter"),filterOptions);
+    updateAgent();
+  }
+  function updateAgent() {
+    const printer = snapshot && snapshot.printers.find(p => p.id === $("printer").value);
+    const ready = !!printer && printer.enabled && number(printer.queued) > 0;
+    $("dispatch").disabled = busy || !ready;
+    $("agentHint").textContent = !printer ? "Нет тестовых принтеров." :
+      !printer.enabled ? "Принтер отключён." :
+      !ready ? "На выбранном принтере нет заданий в очереди." :
+      "В очереди на этом принтере: " + number(printer.queued) +
+      ". Одна операция передаст ровно одно задание виртуальному агенту.";
+  }
+  function jobMatches(job) {
+    const filter = $("filterPrinter").value;
+    const state = $("filterState").value;
+    const search = $("searchOrder").value.trim().toLowerCase();
+    return (!filter || job.printer_id === filter) &&
+      (!state || job.state === state) &&
+      (!search || String(job.order_id).toLowerCase().includes(search));
+  }
+  function renderJobs() {
+    const rows = $("jobs");
+    rows.replaceChildren();
+    const visible = snapshot.jobs.filter(jobMatches);
+    if (!visible.length) renderEmpty(rows, 4, "По выбранным фильтрам заданий нет.");
+    visible.forEach(job => {
+      const tr = node("tr");
+      tr.appendChild(node("td", "", job.order_id));
+      const printer = node("td");
+      printer.append(node("div", "", printerName(job.printer_id)),
+                     node("div", "cell-secondary", "Линии: " + printerLines(job.printer_id)));
+      tr.append(printer,node("td"));
+      tr.lastChild.append(stateChip(job.state));
+      tr.appendChild(node("td", "", job.version));
+      rows.appendChild(tr);
+    });
+    $("filteredCount").textContent = "Показано " + visible.length +
+      " из " + snapshot.jobs.length + " последних заданий";
+  }
+  function renderEvents() {
+    const rows = $("events");
+    rows.replaceChildren();
+    if (!snapshot.events.length) renderEmpty(rows, 4, "Событий пока нет.");
+    snapshot.events.forEach(event => {
+      const tr = node("tr");
+      tr.appendChild(node("td", "", event.order_id));
+      tr.appendChild(node("td", "", EVENT[event.event] || event.event || "Событие"));
+      const path = node("td");
+      path.append(node("span", "", event.from ? stateLabel(event.from) + " → " : "Начало → "));
+      path.appendChild(stateChip(event.to));
+      tr.appendChild(path);
+      tr.appendChild(node("td", "", event.reason === "VIRTUAL_SINK_RESULT" ?
+        "Подтверждение виртуального агента" :
+        event.reason === "SYNTHETIC_QR_SCAN" ? "По QR принтера" :
+        event.reason === "VIRTUAL_CLAIM" ? "Задание взято агентом" :
+        event.reason || "—"));
+      rows.appendChild(tr);
+    });
+    // Diagnostic codes are text only, with no original stickers or credentials.
+    $("technicalEvents").textContent = snapshot.events.map(event =>
+      [event.order_id,event.event,event.from || "START",event.to,event.reason].join(" | ")
+    ).join("\n");
+  }
+  function verifySynthetic(data) {
+    if (!data || data.synthetic !== true || data.physical_printing !== false ||
+        !data.summary || !Array.isArray(data.printers) ||
+        !Array.isArray(data.jobs) || !Array.isArray(data.events)) {
+      throw new Error("Отказ: данные не из изолированного тестового стенда.");
     }
   }
   async function api(path, method, data) {
-    const res = await fetch(path, {
-      method: method || "GET", credentials: "same-origin",
-      cache: "no-store",
-      headers: data ? { "Content-Type": "application/json" } : {},
+    const res = await fetch(path,{
+      method: method || "GET", credentials: "same-origin", cache: "no-store",
+      headers: data ? {"Content-Type":"application/json"} : {},
       body: data ? JSON.stringify(data) : undefined
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Нет ответа от GRIT");
-    return json;
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || "Сервер GRIT недоступен.");
+    return payload;
   }
   async function refresh() {
     const data = await api("/demo/printing/state");
-    if (!data.synthetic || data.physical_printing !== false) {
-      throw new Error("REFUSING_NON_SYNTHETIC_DATA");
-    }
+    verifySynthetic(data);
+    snapshot = data;
     csrf = data.manager_csrf;
-    const select = $("printer");
-    const old = select.value;
-    select.replaceChildren();
-    data.printers.forEach(printer => {
-      const option = document.createElement("option");
-      option.value = printer.id;
-      option.textContent = printer.name + " · " +
-        printer.lines.join(", ") + (printer.enabled ? "" : " · ОТКЛ.");
-      select.appendChild(option);
-    });
-    if (data.printers.some(item => item.id === old)) select.value = old;
-    $("dispatch").disabled = !select.value;
-    const totals = {};
-    STATES.forEach(s => { totals[s] = 0; });
-    data.jobs.forEach(job => { if (STATES.includes(job.state)) totals[job.state]++; });
-    $("counts").textContent = STATES.map(state => state + ": " + totals[state]).join("  ·  ");
-    renderRows($("jobs"), data.jobs, ["order_id","printer_id","state","version"]);
-    renderRows($("events"), data.events, ["order_id","event","from","to","reason"]);
-    $("lastRefresh").textContent = "Показано заданий: " + data.jobs.length +
-      " · событий: " + data.events.length + " (последние 100)";
+    renderTotals();
+    renderPrinterCards();
+    populatePrinters();
+    renderJobs();
+    renderEvents();
   }
   async function dispatch() {
-    if (busy) return;
+    if (busy || !snapshot) return;
     busy = true;
-    $("dispatch").disabled = true;
+    updateAgent();
     try {
       const printer_id = $("printer").value;
-      if (!printer_id || !csrf) throw new Error("Выбери принтер и обнови данные");
-      const result = await api("/demo/printing/virtual-deliver", "POST",
-                               {printer_id, csrf});
-      if (!result.synthetic || result.physical_printing !== false) {
-        throw new Error("Получен неожиданный ответ сервера");
+      const found = snapshot.printers.find(p => p.id === printer_id);
+      if (!found || !found.enabled || !number(found.queued) || !csrf) {
+        throw new Error("На принтере нет доступного тестового задания.");
       }
-      setStatus("Виртуальный агент: " + result.state +
-                " · " + result.reason + ". Физической печати нет.",false);
+      const result = await api("/demo/printing/virtual-deliver","POST",{printer_id,csrf});
+      if (result.synthetic !== true || result.physical_printing !== false) {
+        throw new Error("Отказ: неожиданное подтверждение печати.");
+      }
       await refresh();
+      const message = result.state === "SUBMITTED"
+        ? "Задание принято виртуальным агентом. Физической печати не было."
+        : result.state === "EMPTY"
+          ? "Очередь уже пуста. Повторная передача не выполнялась."
+          : "Результат: " + stateLabel(result.state) +
+            ". Физическая печать не подтверждена.";
+      setStatus(message,false);
     } catch (error) {
-      setStatus(error.message || "Не удалось выполнить запрос",true);
+      setStatus(error.message || "Ошибка связи с тестовым сервером.",true);
     } finally {
       busy = false;
-      $("dispatch").disabled = !$("printer").value;
+      updateAgent();
     }
   }
   document.addEventListener("DOMContentLoaded",() => {
-    $("refresh").addEventListener("click",() => {
-      refresh().then(()=>setStatus("Данные очереди обновлены.",false))
-               .catch(error=>setStatus(error.message,true));
+    $("refresh").addEventListener("click", async () => {
+      try {
+        await refresh();
+        setStatus("Данные очереди обновлены.",false);
+      } catch (error) {
+        setStatus(error.message,true);
+      }
     });
     $("dispatch").addEventListener("click",dispatch);
-    refresh().then(()=>setStatus("Данные очереди загружены. Только синтетика.",false))
-             .catch(error=>setStatus(error.message,true));
+    $("printer").addEventListener("change",updateAgent);
+    ["searchOrder","filterPrinter","filterState"].forEach(id => {
+      $(id).addEventListener(id === "searchOrder" ? "input" : "change",() => {
+        if (snapshot) renderJobs();
+      });
+    });
+    refresh().then(()=>setStatus("Панель готова. Только синтетические операции.",false))
+      .catch(error=>setStatus(error.message,true));
   });
 })();
