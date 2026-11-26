@@ -124,6 +124,11 @@ print("PR192 FSD WORKER SCANNER QR HTTP SMOKE PASS: WMS session, no order select
 snapshot=manager("/demo/printing/state")
 assert snapshot[0]==200 and snapshot[1]["synthetic"],snapshot
 assert snapshot[1]["physical_printing"] is False
+assert snapshot[1]["summary"]["QUEUED"] == 1, snapshot
+assert snapshot[1]["summary"]["total"] == 1, snapshot
+printer_view = next(p for p in snapshot[1]["printers"] if p["id"] == p2["printer_id"])
+assert printer_view["name"] == "Изолированный тест: линия А", printer_view
+assert printer_view["queued"] == 1 and printer_view["last_state"] == "QUEUED", printer_view
 assert any(j["order_id"]=="SYNTH-1001" and j["state"]=="QUEUED"
            for j in snapshot[1]["jobs"]),snapshot
 assert worker("/demo/printing/state")[0]==403
@@ -135,6 +140,10 @@ acked=manager("/demo/printing/virtual-deliver",{
 assert acked[0]==200 and acked[1]["state"]=="SUBMITTED",acked
 assert acked[1]["physical_printing"] is False
 after=manager("/demo/printing/state")
+assert after[1]["summary"]["SUBMITTED"] == 1, after
+assert after[1]["summary"]["QUEUED"] == 0, after
+assert any(p["id"] == p2["printer_id"] and p["last_state"] == "SUBMITTED"
+           for p in after[1]["printers"]), after
 assert after[0]==200 and any(
     j["order_id"]=="SYNTH-1001" and j["state"]=="SUBMITTED"
     for j in after[1]["jobs"]),after
@@ -142,6 +151,7 @@ again=manager("/demo/printing/virtual-deliver",{
     "printer_id":p2["printer_id"],"csrf":ms["manager_csrf"]})
 assert again[0]==200 and again[1]["state"]=="EMPTY",again
 print("PR192 MANAGER VIRTUAL PRINTING HTTP SMOKE PASS: queued -> submitted; no USB.")
+print("PR192 COMMERCIAL PRINTING CONSOLE HTTP SMOKE PASS: names, counts, statuses.")
 
 print("PR192 DEMO HTTP SMOKE PASS: manager, printer QR 58x40, line routing,")
 print("badge, claim, wrong SKU rejection, scan, complete, release and audit.")
