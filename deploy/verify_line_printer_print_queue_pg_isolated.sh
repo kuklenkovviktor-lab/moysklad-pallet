@@ -20,6 +20,7 @@ docker image inspect "$IMAGE" >/dev/null
 docker network create --internal "$NET" >/dev/null
 docker run -d --name "$DB" --network "$NET" --network-alias pr192-db \
   --read-only --tmpfs /tmp:rw,size=32m \
+  --tmpfs /var/run/postgresql:rw,size=16m \
   --tmpfs /var/lib/postgresql/data:rw,size=256m \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=synthetic-only \
   -e POSTGRES_DB="$PG_NAME" postgres:17 >/dev/null
