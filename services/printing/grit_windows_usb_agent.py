@@ -5,6 +5,7 @@ NEVER auto-runs, polls, retries or sends WB sticker bytes. HTTP only to
 server marks the job SENDING before handing a ticket to this agent.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -15,11 +16,13 @@ import urllib.error
 import urllib.request
 
 if __package__:
+    from . import usb_agent_config
     from .grit_usb_print_pilot import (
         TEST_PRINTER, PilotError, _spooler, check_printer,
         _send_exactly_one, _write_once, _update_journal, _utc_now,
     )
 else:
+    import usb_agent_config
     from grit_usb_print_pilot import (
         TEST_PRINTER, PilotError, _spooler, check_printer,
         _send_exactly_one, _write_once, _update_journal, _utc_now,
@@ -169,6 +172,7 @@ def run_once(api, spooler, *, state_dir=None):
 def main(argv=None, *,api=None,spooler=None,state_dir=None):
     parser=argparse.ArgumentParser(description="GRIT isolated USB demo, never WB")
     mode=parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--enroll",action="store_true",help="Bind from protected HOSTKEY file over SSH, no printing")
     mode.add_argument("--ping",action="store_true",
                       help="Check localhost SSH tunnel and synthetic device token")
     mode.add_argument("--check",action="store_true",
@@ -178,11 +182,25 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
     parser.add_argument("--confirm",default="",
                         help="Required only for one physical job")
     args=parser.parse_args(argv)
+    stack=ExitStack()
     try:
         if args.once and args.confirm!=CONFIRM:
             raise PilotError("Physical command requires --confirm "+CONFIRM)
-        device_api=api if api is not None else make_api_call(
-            os.environ.get("GRIT_PR192_USB_AGENT_TOKEN",""))
+        if api is None:
+            stack.enter_context(usb_agent_config.tunnel())
+        if args.enroll:
+            config=usb_agent_config.enrollment_from_ssh()
+            bound=usb_agent_config.bind_api(make_api_call(config["token"]),config)
+            bound("GET","/synthetic/pr192/usb-agent/ping")
+            check_printer(spooler if spooler is not None else _spooler(),TEST_PRINTER)
+            usb_agent_config.save(config)
+            print("READY: current-user protected binding saved; NO PRINT")
+            return 0
+        if api is None:
+            config=usb_agent_config.load()
+            device_api=usb_agent_config.bind_api(make_api_call(config["token"]),config)
+        else:
+            device_api=api
         if args.ping:
             data=device_api("GET","/synthetic/pr192/usb-agent/ping")
             print("SYNTHETIC BRIDGE PING PASS; approvals:",data.get("waiting"))
@@ -194,7 +212,7 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
             data=device_api("GET","/synthetic/pr192/usb-agent/ping")
             if data.get("device")!=TEST_PRINTER:
                 raise PilotError("Remote device mismatch")
-            print("BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
+            print("READY; BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
                   "; NO PRINT")
             return 0
         result,journal=run_once(device_api,device,state_dir=state_dir)
@@ -204,9 +222,12 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
             print("SUBMITTED means Windows spooler ACK; NOT physical PRINTED.")
             print("Never rerun --once to fix an uncertain result.")
         return 0
-    except (PilotError,OSError,ValueError) as exc:
-        print("GRIT USB BRIDGE REFUSED:",exc,file=sys.stderr)
+    except (PilotError,OSError,ValueError,ImportError) as exc:
+        uncertain = "UNKNOWN" in str(exc) or "ACK is uncertain" in str(exc)
+        print("UNKNOWN" if uncertain else "FAILED", ": GRIT USB BRIDGE REFUSED:",exc,file=sys.stderr)
         return 1
+    finally:
+        stack.close()
 
 
 if __name__=="__main__":

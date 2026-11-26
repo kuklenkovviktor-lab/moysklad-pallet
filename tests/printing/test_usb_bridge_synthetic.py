@@ -5,6 +5,7 @@ device token, destructive claim, no-retry status, and no original stickers.
 """
 import importlib.util
 import os
+import uuid
 from pathlib import Path
 from unittest import TestCase, main, mock
 from flask import session
@@ -218,6 +219,72 @@ class UsbBridgePG17Tests(TestCase):
             with self.assertRaises(RuntimeError):
                 make_synthetic_usb_bridge_blueprint(pg,lambda: True)
 
+    def prepare(self, request_id=None, client=None, **changes):
+        data=dict(printer_id="p1",request_id=request_id or uuid.uuid4().hex,
+                  csrf="synthetic-manager-csrf-123456")
+        data.update(changes)
+        return (client or self.manager).post('/demo/printing/usb/prepare',json=data)
 
+    def test_prepare_exact_one_and_idempotent(self):
+        request_id=uuid.uuid4().hex
+        first=self.prepare(request_id)
+        self.assertEqual(first.status_code,200,first.json)
+        self.assertEqual(first.json['state'],'READY')
+        self.assertEqual(self.prepare(request_id).json,first.json)
+        with pg() as conn:
+            rows=conn.execute("SELECT state,delivery_transport FROM synthetic_pr192_print_jobs WHERE order_id=%s",
+                              (first.json['order_id'],)).fetchall()
+            approvals=conn.execute("SELECT phase FROM synthetic_pr192_usb_approvals").fetchall()
+            actor=conn.execute("SELECT actor_id FROM synthetic_pr192_print_events WHERE event='USB_TEST_APPROVAL'").fetchone()
+        self.assertEqual(rows,[('QUEUED','USB')])
+        self.assertEqual(approvals,[('APPROVED',)])
+        self.assertEqual(actor[0],'synthetic-manager-id')
+        self.assertEqual(self.prepare().status_code,409)
+
+    def test_prepare_requires_manager_and_csrf(self):
+        self.assertEqual(self.prepare(client=self.worker).status_code,403)
+        self.assertEqual(self.prepare(client=self.agent).status_code,403)
+        self.assertEqual(self.prepare(csrf='bad').status_code,403)
+        self.assertEqual(self.ping().json['waiting'],0)
+
+    def test_prepare_wrong_printer_and_missing_catalog_no_order(self):
+        self.assertEqual(self.prepare(printer_id='guessed-name').status_code,409)
+        with pg() as conn:
+            conn.execute('DELETE FROM fbs_catalog_barcodes')
+        self.assertEqual(self.prepare().status_code,409)
+        with pg() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM wb_fbs_orders WHERE order_id LIKE 'SYNTH-USB-%'").fetchone()[0],0)
+
+    def test_usb_prepared_job_cannot_go_to_virtual_sink(self):
+        ready=self.prepare().json
+        self.case.dispatch()  # Existing VIRTUAL fixture only.
+        self.assertEqual(self.case.dispatch().json['state'],'EMPTY')
+        with pg() as conn:
+            self.assertEqual(conn.execute('SELECT state FROM synthetic_pr192_print_jobs WHERE order_id=%s',
+                                          (ready['order_id'],)).fetchone()[0],'QUEUED')
+
+    def test_bound_claim_wrong_stand_or_ticket_never_consumes(self):
+        ready=self.prepare().json
+        body=dict(stand_id='wrong',ticket_id=ready['ticket_id'])
+        self.assertEqual(self.claim(body).status_code,403)
+        body.update(stand_id=ready['stand_id'],ticket_id=uuid.uuid4().hex)
+        self.assertEqual(self.claim(body).json['state'],'EMPTY')
+        self.assertEqual(self.ping().json['waiting'],1)
+
+    def test_processed_preparation_never_requeues(self):
+        from services.printing.pg_queue import transition_synthetic_print_pg
+        request_id=uuid.uuid4().hex
+        ready=self.prepare(request_id).json
+        self.assertEqual(self.claim(dict(stand_id=ready['stand_id'],ticket_id=request_id)).json['state'],'CLAIMED')
+        self.report(request_id,result='UNKNOWN',spool_id=None)
+        self.assertEqual(self.prepare(request_id).json['state'],'UNKNOWN')
+        with pg() as conn:
+            job=conn.execute('SELECT job_id FROM synthetic_pr192_usb_approvals WHERE ticket_id=%s',(request_id,)).fetchone()[0]
+        change=transition_synthetic_print_pg(pg,job_id=job,action_id=uuid.uuid4().hex,
+            actor_id='synthetic-manager-id',target='QUEUED',authorized_locked=lambda *args:True,
+            reason='reviewed synthetic attempt',evidence='REVIEWED_SAFE_TO_RETRY')
+        self.assertFalse(change.accepted)
+        self.assertEqual(change.reason,'USB_RETRY_FORBIDDEN')
+        self.assertEqual(self.claim().json['state'],'EMPTY')
 if __name__=="__main__":
     main()

@@ -127,7 +127,7 @@ def claim_next_virtual_job(connection_factory, *, printer_id, agent_id):
         with conn.transaction():
             row=conn.execute("""SELECT job_id,account_id,order_id,sticker_kind
               FROM synthetic_pr192_print_jobs
-              WHERE printer_id=%s AND state='QUEUED'
+              WHERE printer_id=%s AND state='QUEUED' AND delivery_transport='VIRTUAL'
               ORDER BY created_at,job_id
               FOR UPDATE SKIP LOCKED LIMIT 1""",
               (printer_id,)).fetchone()

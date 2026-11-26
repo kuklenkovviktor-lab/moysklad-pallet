@@ -12,6 +12,7 @@ import uuid
 from flask import Blueprint, jsonify, request, session
 from line_printer_pg_trial import _verify_isolated_connection
 from services.printing.virtual_agent import _validate_before_dispatch
+from services.printing.usb_test_preparation import prepare_locked, stand_identity
 
 WINDOWS_QUEUE = "ONIX-TEST-XP460B"
 DDL = """CREATE TABLE IF NOT EXISTS synthetic_pr192_usb_approvals (
@@ -71,6 +72,26 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
         value = body.get("csrf") if isinstance(body, dict) else None
         return (isinstance(actual, str) and len(actual) >= 16 and
                 isinstance(value, str) and secrets.compare_digest(actual, value))
+
+    @bp.post("/demo/printing/usb/prepare")
+    def prepare_test():
+        if not manager_ok():
+            return _refuse("MANAGER_REQUIRED", 403)
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or set(data) != {"printer_id", "request_id", "csrf"}:
+            return _refuse("INVALID_PREPARATION")
+        if not csrf_ok(data):
+            return _refuse("MANAGER_CSRF_REQUIRED", 403)
+        if not all(isinstance(data[k], str) for k in ("printer_id", "request_id")):
+            return _refuse("INVALID_PREPARATION")
+        try:
+            with connection_factory() as conn:
+                with conn.transaction():
+                    result = prepare_locked(conn, data["printer_id"], data["request_id"],
+                                            session["pr192_manager_id"])
+        except ValueError as exc:
+            return _refuse(str(exc), 409)
+        return jsonify(synthetic=True,physical_printing=False,**result)
 
     @bp.get("/demo/printing/usb/state")
     def manager_state():
@@ -135,6 +156,7 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
                     return jsonify(synthetic=True,physical_printing=False,
                                    state="CANCELLED",reason=eligible),200
                 ticket=uuid.uuid4().hex
+                conn.execute("UPDATE synthetic_pr192_print_jobs SET delivery_transport='USB' WHERE job_id=%s",(job_id,))
                 conn.execute("""INSERT INTO synthetic_pr192_usb_approvals
                     (ticket_id,job_id,printer_id,phase)
                     VALUES (%s,%s,%s,'APPROVED')""",(ticket,job_id,printer_id))
@@ -151,8 +173,12 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
             _verify_isolated_connection(conn)
             count=conn.execute("""SELECT count(*)::int FROM synthetic_pr192_usb_approvals
                 WHERE phase='APPROVED'""").fetchone()[0]
+            stand = stand_identity(conn)
+            approved = conn.execute("SELECT ticket_id FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'").fetchall()
         return jsonify(synthetic=True,device=WINDOWS_QUEUE,
-                       waiting=count,physical_printing=False),200,{
+                       waiting=count,stand_id=stand,
+                       ticket_id=approved[0][0] if len(approved)==1 else None,
+                       physical_printing=False),200,{
                            "Cache-Control":"no-store"}
 
     @bp.post("/synthetic/pr192/usb-agent/claim")
@@ -160,15 +186,24 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
         if not device_ok():
             return _refuse("AGENT_TOKEN_REQUIRED",403)
         data=request.get_json(silent=True)
-        if data != {}:
+        bound = isinstance(data,dict) and set(data)=={"ticket_id","stand_id"}
+        if bound and (not isinstance(data["ticket_id"],str) or
+                      not re.fullmatch("[0-9a-f]{32}",data["ticket_id"]) or
+                      not isinstance(data["stand_id"],str)):
+            return _refuse("INVALID_BINDING")
+        if data != {} and not bound:
             return _refuse("EMPTY_BODY_REQUIRED")
         with connection_factory() as conn:
             _verify_isolated_connection(conn)
             with conn.transaction():
+                if bound and data["stand_id"] != stand_identity(conn):
+                    return _refuse("WRONG_STAND",403)
                 claim=conn.execute("""SELECT ticket_id,job_id,printer_id
                     FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'
+                    AND (%s::text IS NULL OR ticket_id=%s)
                     ORDER BY approved_at,ticket_id
-                    FOR UPDATE SKIP LOCKED LIMIT 1""").fetchone()
+                    FOR UPDATE SKIP LOCKED LIMIT 1""",
+                    (data.get("ticket_id"),data.get("ticket_id"))).fetchone()
                 if not claim:
                     return jsonify(synthetic=True,physical_printing=False,
                                    state="EMPTY"),200
