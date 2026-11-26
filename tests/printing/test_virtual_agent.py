@@ -9,7 +9,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 
-from tests.printing.test_qr_autoqueue import QRQueueHTTPTests
+import importlib.util
+from pathlib import Path
+
+fixture_spec=importlib.util.spec_from_file_location(
+    "pr192_virtual_qr_fixture",
+    Path(__file__).resolve().parent / "test_qr_autoqueue.py")
+fixture_module=importlib.util.module_from_spec(fixture_spec)
+fixture_spec.loader.exec_module(fixture_module)
+QRQueueHTTPTests=fixture_module.QRQueueHTTPTests
 from services.printing.virtual_agent import (
     deliver_one_virtual, claim_next_virtual_job, initialize_virtual_sink,
     reconcile_stale_virtual_sending,
