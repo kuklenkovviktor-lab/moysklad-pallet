@@ -27,3 +27,14 @@ Previous PR #203 passed 92 unique synthetic checks. The new 13 tests and updated
 This PR does NOT change live /fbs or install scanner hook in wms.py. Final integration into existing handleScan(code) must happen AFTER durable FBS-outbox replay, and must reject printer QR while pendingProduct exists, preserving the pending WB scan. Ordinary product/WB/skip scans must remain unchanged.
 
 No real physical USB printing, no real WB sticker or external API, no production schema or routes, no automatic merge or deployment.
+## Parallel demo on an occupied HOSTKEY
+
+If existing /tmp/grit-pr192-demo.state (port 18765) exists, leave it untouched. PR204 launch supports a separate explicitly whitelisted state file and loopback port. On a fresh PR204 checkout run:
+
+    GRIT_PR192_DEMO_STATE=/tmp/grit-pr204-demo.state GRIT_PR192_DEMO_PORT=18766 bash "$DIR/deploy/run_line_printer_demo.sh" "$DIR"
+
+Open with `ssh -L 18766:127.0.0.1:18766 root@141.105.66.249` and visit http://127.0.0.1:18766/demo. Old 18765 is not stopped/replaced. To stop ONLY new PR204 demo later:
+
+    GRIT_PR192_DEMO_STATE=/tmp/grit-pr204-demo.state bash "$DIR/deploy/stop_line_printer_demo.sh"
+
+Never stop an existing demo just to free the old state path. These are synthetic ephemeral containers/DB and do not access the production database. The standalone HTTP smoke runs during start; the browser UI is not yet validated until it is opened and exercised.
