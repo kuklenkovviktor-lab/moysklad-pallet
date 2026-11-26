@@ -1,0 +1,205 @@
+"""GRIT isolated Windows USB bridge: one manager-approved synthetic label per run.
+
+NEVER auto-runs, polls, retries or sends WB sticker bytes. HTTP only to
+127.0.0.1:18769 over an operator-created SSH forward. The single-claim
+server marks the job SENDING before handing a ticket to this agent.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import urllib.error
+import urllib.request
+
+from grit_usb_print_pilot import (
+    TEST_PRINTER, PilotError, _spooler, check_printer,
+    _send_exactly_one, _write_once, _update_journal, _utc_now,
+)
+
+PORT = 18769
+BASE_URL = "http://127.0.0.1:18769"
+CONFIRM = "GRIT-BRIDGE-ONE-SYNTHETIC-LABEL"
+
+
+def build_ticket_label(ticket_id):
+    """Build a safe fixed TSPL label locally: NEVER accept TSPL from server."""
+    if not isinstance(ticket_id,str) or not re.fullmatch("[0-9a-f]{32}",ticket_id):
+        raise PilotError("Invalid synthetic claim ticket")
+    short = ticket_id[:16]
+    lines = (
+        "SIZE 58 mm,40 mm",
+        "GAP 2 mm,0 mm",
+        "DIRECTION 1",
+        "CLS",
+        "BOX 12,12,452,308,2",
+        'TEXT 20,24,"3",0,1,1,"GRIT WMS"',
+        'TEXT 20,62,"2",0,1,1,"USB DEMO ONLY"',
+        'TEXT 20,94,"2",0,1,1,"NOT WB"',
+        'TEXT 20,136,"1",0,1,1,"TICKET '+short[:8]+'"',
+        'TEXT 20,268,"2",0,1,1,"SYNTHETIC 1/1"',
+        'QRCODE 240,42,L,5,A,0,"GRIT-DEMO-'+short+'"',
+        "PRINT 1,1",
+    )
+    return ("\r\n".join(lines) + "\r\n").encode("ascii")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def make_api_call(token):
+    if not isinstance(token,str) or not 32<=len(token)<=256:
+        raise PilotError("Provide isolated demo token via GRIT_PR192_USB_AGENT_TOKEN")
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),_NoRedirect)
+
+    def api(method, path, body=None):
+        if method not in ("GET","POST") or path not in (
+            "/synthetic/pr192/usb-agent/ping",
+            "/synthetic/pr192/usb-agent/claim",
+            "/synthetic/pr192/usb-agent/report",
+        ):
+            raise PilotError("Only allowlisted loopback endpoints are permitted")
+        if method=="GET" and body is not None:
+            raise PilotError("GET request cannot contain data")
+        payload=(json.dumps(body,separators=(",",":")).encode("utf-8")
+                 if method=="POST" else None)
+        req=urllib.request.Request(
+            BASE_URL+path,data=payload,method=method,
+            headers={"X-GRIT-USB-Agent-Token":token,
+                     "Content-Type":"application/json","Accept":"application/json"})
+        try:
+            with opener.open(req,timeout=6) as res:
+                if not res.headers.get("Content-Type","").startswith("application/json"):
+                    raise PilotError("Unexpected bridge response type")
+                raw=res.read(8193)
+        except (urllib.error.HTTPError,urllib.error.URLError,
+                TimeoutError,OSError) as exc:
+            raise PilotError("Synthetic bridge is unavailable/denied; check SSH tunnel and token") from exc
+        if len(raw)>8192:
+            raise PilotError("Bridge response too large")
+        try:
+            data=json.loads(raw)
+        except (ValueError,UnicodeError) as exc:
+            raise PilotError("Invalid bridge JSON response") from exc
+        if not isinstance(data,dict) or data.get("synthetic") is not True or data.get("physical_printing") is not False:
+            raise PilotError("Refusing non-synthetic bridge response")
+        return data
+    return api
+
+
+def _journal_path(ticket_id,state_dir=None):
+    if state_dir is None:
+        base=os.environ.get("LOCALAPPDATA","")
+        if not base:
+            raise PilotError("LOCALAPPDATA is required for permanent no-retry journal")
+        state_dir=Path(base)/"GRIT-WMS"/"USB-Bridge"
+    return Path(state_dir)/(ticket_id+".json")
+
+
+def run_once(api, spooler, *, state_dir=None):
+    """One explicit approved claim -> local journal -> one RAW job -> report.
+
+    After ANY uncertain event, never take the same ticket for another print.
+    A server-side claim has no lease auto-expiration: no automatic retry.
+    """
+    port=check_printer(spooler,TEST_PRINTER)  # BEFORE remotely claiming
+    ping=api("GET","/synthetic/pr192/usb-agent/ping")
+    if ping.get("device")!=TEST_PRINTER:
+        raise PilotError("Bridge does not match allowlisted Windows printer")
+    claimed=api("POST","/synthetic/pr192/usb-agent/claim",{})
+    if claimed.get("state")=="EMPTY":
+        return "EMPTY",None
+    if claimed.get("state")=="REJECTED":
+        return "REJECTED",None
+    ticket=claimed.get("ticket_id")
+    if (claimed.get("state")!="CLAIMED" or
+        claimed.get("windows_printer")!=TEST_PRINTER):
+        raise PilotError("Unexpected bridge claim: no print")
+    payload=build_ticket_label(ticket)
+    path=_journal_path(ticket,state_dir)
+    record={"ticket_id":ticket,"state":"CLAIMED",
+            "printer":TEST_PRINTER,"usb_port":port,
+            "synthetic":True,"physical_print_confirmed":False,
+            "label_sha256":hashlib.sha256(payload).hexdigest(),
+            "created_utc":_utc_now()}
+    spool_job_id=None
+    try:
+        _write_once(path,record)  # BEFORE any physical spooler operation
+        check_printer(spooler,TEST_PRINTER)  # re-check after server claim
+        spool_job_id=_send_exactly_one(spooler,TEST_PRINTER,payload)
+        _update_journal(path,record,"SUBMITTED_TO_WINDOWS",
+                        spool_job_id=spool_job_id)
+    except Exception as exc:
+        if path.exists():
+            try:
+                _update_journal(path,record,"UNKNOWN")
+            except Exception:
+                pass
+        try:
+            api("POST","/synthetic/pr192/usb-agent/report",
+                {"ticket_id":ticket,"result":"UNKNOWN","spool_job_id":None})
+        except Exception:
+            pass  # server will keep SENDING; NEVER auto-retry
+        raise PilotError("USB send outcome UNKNOWN; do not reprint/reclaim") from exc
+    try:
+        answer=api("POST","/synthetic/pr192/usb-agent/report",
+            {"ticket_id":ticket,"result":"SUBMITTED_TO_WINDOWS",
+             "spool_job_id":spool_job_id})
+        if answer.get("state")!="SUBMITTED":
+            raise PilotError("Report not acknowledged")
+    except Exception as exc:
+        raise PilotError(
+            "Spooler received job but bridge ACK is uncertain; DO NOT PRINT AGAIN"
+        ) from exc
+    return "SUBMITTED_TO_WINDOWS",path
+
+
+def main(argv=None, *,api=None,spooler=None,state_dir=None):
+    parser=argparse.ArgumentParser(description="GRIT isolated USB demo, never WB")
+    mode=parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--ping",action="store_true",
+                      help="Check localhost SSH tunnel and synthetic device token")
+    mode.add_argument("--check",action="store_true",
+                      help="Check tunnel + dedicated USB printer without printing")
+    mode.add_argument("--once",action="store_true",
+                      help="Manually claim and print ONE preapproved synthetic job")
+    parser.add_argument("--confirm",default="",
+                        help="Required only for one physical job")
+    args=parser.parse_args(argv)
+    try:
+        if args.once and args.confirm!=CONFIRM:
+            raise PilotError("Physical command requires --confirm "+CONFIRM)
+        device_api=api if api is not None else make_api_call(
+            os.environ.get("GRIT_PR192_USB_AGENT_TOKEN",""))
+        if args.ping:
+            data=device_api("GET","/synthetic/pr192/usb-agent/ping")
+            print("SYNTHETIC BRIDGE PING PASS; approvals:",data.get("waiting"))
+            return 0
+        device=spooler if spooler is not None else _spooler()
+        port=check_printer(device,TEST_PRINTER)
+        print("LOCAL USB CHECK PASS:",TEST_PRINTER,"port:",port)
+        if args.check:
+            data=device_api("GET","/synthetic/pr192/usb-agent/ping")
+            if data.get("device")!=TEST_PRINTER:
+                raise PilotError("Remote device mismatch")
+            print("BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
+                  "; NO PRINT")
+            return 0
+        result,journal=run_once(device_api,device,state_dir=state_dir)
+        print("USB BRIDGE RESULT:",result)
+        if journal:
+            print("Journal:",journal)
+            print("SUBMITTED means Windows spooler ACK; NOT physical PRINTED.")
+            print("Never rerun --once to fix an uncertain result.")
+        return 0
+    except (PilotError,OSError,ValueError) as exc:
+        print("GRIT USB BRIDGE REFUSED:",exc,file=sys.stderr)
+        return 1
+
+
+if __name__=="__main__":
+    raise SystemExit(main())
