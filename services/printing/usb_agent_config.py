@@ -67,17 +67,22 @@ def config_path():
 def _private_directory(path):
     import win32api
     import win32con
+    import ntsecuritycon
     import win32security as sec
     path.mkdir(parents=True,exist_ok=True)
     for parent in (path, *path.parents):
         if parent.is_symlink() or (parent.stat().st_file_attributes & 0x400):
             raise ValueError("Reparse points forbidden in configuration path")
-    with sec.OpenProcessToken(win32api.GetCurrentProcess(),win32con.TOKEN_QUERY) as token:
+    token = sec.OpenProcessToken(win32api.GetCurrentProcess(),win32con.TOKEN_QUERY)
+    try:
         sid = sec.GetTokenInformation(token,sec.TokenUser)[0]
+    finally:
+        token.Close()
     acl = sec.ACL()
-    acl.AddAccessAllowedAceEx(sec.ACL_REVISION,3,win32con.FILE_ALL_ACCESS,sid)
+    acl.AddAccessAllowedAceEx(sec.ACL_REVISION,3,ntsecuritycon.FILE_ALL_ACCESS,sid)
     sec.SetNamedSecurityInfo(str(path),sec.SE_FILE_OBJECT,
-                            sec.DACL_SECURITY_INFORMATION | 0x80000000,None,None,acl,None)
+                            sec.DACL_SECURITY_INFORMATION | sec.PROTECTED_DACL_SECURITY_INFORMATION,
+                            None,None,acl,None)
 
 
 def save(data):

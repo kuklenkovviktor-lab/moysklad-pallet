@@ -43,13 +43,17 @@ SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
 # One-time device credential scoped to this disposable synthetic demo only.
 USB_AGENT_TOKEN=""
 USB_EXTRA_ENV=()
+SECRET_ENV="$(mktemp /tmp/grit-demo-secrets-XXXXXX)"
+chmod 600 "$SECRET_ENV"
+printf 'GRIT_PR192_DEMO_PASSWORD=%s\nGRIT_PR192_DEMO_SECRET=%s\n' "$PASS" "$SECRET" > "$SECRET_ENV"
 if [[ "$STATE" == "/tmp/grit-pr208-demo.state" ]]; then
   [[ "$PORT" == "18769" ]] || { echo "PR208 USB demo requires port 18769" >&2; exit 2; }
   USB_AGENT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(40))')"
-  USB_EXTRA_ENV=(-e "GRIT_PR192_USB_AGENT_TOKEN=$USB_AGENT_TOKEN")
+  printf 'GRIT_PR192_USB_AGENT_TOKEN=%s\n' "$USB_AGENT_TOKEN" >> "$SECRET_ENV"
 fi
 CREATED=0
 cleanup_failed() {
+  rm -f "$SECRET_ENV"
   if [ "$CREATED" != 1 ]; then
     docker logs "$APP" --tail 60 2>/dev/null || true
     docker rm -f "$APP" "$DB" >/dev/null 2>&1 || true
@@ -89,9 +93,7 @@ docker run -d --name "$APP" \
   -e WMS_TERMINAL_SECRET=synthetic-pr192-terminal \
   -e WMS_DB_PATH=/tmp/grit-pr192-demo.sqlite \
   -e WMS_REQUIRE_POSTGRES=0 -e DATABASE_URL= \
-  -e "GRIT_PR192_DEMO_PASSWORD=$PASS" \
-  -e "GRIT_PR192_DEMO_SECRET=$SECRET" \
-  "${USB_EXTRA_ENV[@]}" \
+  --env-file "$SECRET_ENV" \
   --entrypoint python "$IMAGE" \
   -m gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 60 \
   --access-logfile - --error-logfile - line_printer_demo_app:app >/dev/null
@@ -119,10 +121,10 @@ GRIT_PR192_DEMO_PORT="$PORT" GRIT_PR192_DEMO_PASSWORD="$PASS" \
 CREATED=1
 echo "DEMO START PASS: isolated PostgreSQL 17 + WMS auth + browser UI"
 echo "HOSTKEY: http://127.0.0.1:${PORT}/demo"
-echo "Manager demo password: $PASS"
+echo "Demo credentials are private; USB preparation uses authenticated manager login without printing secrets."
 echo "Worker synthetic badge: DEMO-BADGE-1"
 if [[ -n "$USB_AGENT_TOKEN" ]]; then
-  echo "Disposable USB agent token (enter on permitted test PC only): $USB_AGENT_TOKEN"
+  echo "USB credential is available only through protected enrollment; never copy it to a terminal."
 fi
 echo "PC tunnel: ssh -L ${PORT}:127.0.0.1:${PORT} root@141.105.66.249"
 echo "PC browser: http://127.0.0.1:${PORT}/demo"

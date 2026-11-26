@@ -62,7 +62,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def make_api_call(token):
     if not isinstance(token,str) or not 32<=len(token)<=256:
-        raise PilotError("Provide isolated demo token via GRIT_PR192_USB_AGENT_TOKEN")
+        raise PilotError("Invalid isolated credential; run --enroll")
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),_NoRedirect)
 
     def api(method, path, body=None):
