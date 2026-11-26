@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # Only removes resources named in the explicit PR192 demo state file.
 set -Eeuo pipefail
-STATE="/tmp/grit-pr192-demo.state"
+STATE="${GRIT_PR192_DEMO_STATE:-/tmp/grit-pr192-demo.state}"
+# Deliberately support only two known disposable demo state files.
+# Never follow symlinks, and never infer container names from production state.
+case "$STATE" in
+  /tmp/grit-pr192-demo.state|/tmp/grit-pr204-demo.state) ;;
+  *) echo "Refusing unexpected synthetic demo state path" >&2; exit 2;;
+esac
+if test -L "$STATE"; then
+  echo "Refusing symlink demo state path" >&2
+  exit 2
+fi
 if [ ! -f "$STATE" ]; then
   echo "No PR192 demo state found; nothing to stop."
   exit 0
