@@ -35,6 +35,10 @@ DDL = (
 
 
 def _check(conn):
+    # Without autocommit, an implicit SELECT transaction could make
+    # a later conn.transaction() only a savepoint rather than a durable COMMIT.
+    if not isinstance(conn,psycopg.Connection) or conn.autocommit is not True:
+        raise RuntimeError('AUTOCOMMIT_CONNECTION_REQUIRED')
     if os.getenv('GRIT_SYNTHETIC_PG_TEST') != 'YES_ISOLATED':
         raise RuntimeError('ISOLATED_PG_FLAG_REQUIRED')
     target=os.getenv('PR211_SYNTHETIC_DATABASE_URL','')
