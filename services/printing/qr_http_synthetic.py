@@ -11,6 +11,9 @@ from flask import Blueprint, jsonify, request, session
 from line_printer_pg_trial import _verify_isolated_connection
 from line_printer_session_gate import require_bound_terminal_identity
 from services.printing.qr_scan import scan_synthetic_printer_qr
+from services.printing.usb_bridge_synthetic import (
+    automatic_usb_enabled, auto_approve_synthetic_queue,
+)
 
 
 def make_synthetic_autoqueue_blueprint(connection_factory, authenticated_employee):
@@ -64,8 +67,22 @@ def make_synthetic_autoqueue_blueprint(connection_factory, authenticated_employe
                 "TERMINAL_NOT_ACTIVE", "QR_REVOKED_OR_PRINTER_DISABLED",
                 "AUTHORIZATION_DENIED", "INVALID_QR") else 400
             return jsonify(ok=False, error=result.reason), status
+        # If auto USB was explicitly armed in the isolated demo, create
+        # per-job approvals server-side AFTER authenticated QR enqueue.
+        # The browser never supplies job IDs, labels, or USB commands.
+        # A failure is visible; never claim that a Windows label printed.
+        auto_usb_approved = 0
+        if automatic_usb_enabled():
+            try:
+                auto_usb_approved = auto_approve_synthetic_queue(
+                    connection_factory, result.printer_id, employee_id)
+            except Exception:
+                return jsonify(ok=False, synthetic=True,
+                               physical_printing=False,
+                               error="AUTO_USB_APPROVAL_UNCERTAIN_CHECK_AUDIT"), 503
         return jsonify(
             ok=True, synthetic=True, physical_printing=False,
+            auto_usb_approved=auto_usb_approved,
             printer_id=result.printer_id,
             queued_new=result.added,
             already_queued=result.already_queued,
