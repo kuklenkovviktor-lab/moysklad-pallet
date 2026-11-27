@@ -329,6 +329,37 @@ class UsbBridgePG17Tests(TestCase):
             self.assertEqual(self.case.wms_case.wms.query_one(
                 "SELECT COUNT(*) FROM scans")[0], 0)
 
+    def test_physical_one_shot_qr_approves_exactly_one_of_two(self):
+        with pg() as conn:
+            conn.execute("""INSERT INTO wb_fbs_orders
+                VALUES ('synthetic','o2','confirm','pending')""")
+            conn.execute("""INSERT INTO wb_fbs_picking_queue
+                VALUES ('synthetic','o2')""")
+            conn.execute("""INSERT INTO wb_fbs_order_skus
+                VALUES ('synthetic','o2','SKU1')""")
+            conn.execute("""INSERT INTO synthetic_pr192_print_stickers
+                VALUES ('synthetic','o2','SYNTHETIC-ONLY-o2')""")
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR210_PHYSICAL_ONE_SHOT": "YES_ISOLATED_ONE",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            token = self.worker.get("/synthetic/pr192/print-queue/session")
+            self.assertEqual(token.status_code, 200)
+            response = self.worker.post("/synthetic/pr192/print-queue/scan",
+                json={"qr":self.case.wms_case.qr,
+                      "csrf":token.json["csrf"]})
+            self.assertEqual(response.status_code,200,response.json)
+            self.assertEqual(response.json["auto_usb_approved"],1)
+            with pg() as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT count(*) FROM synthetic_pr192_usb_approvals "
+                    "WHERE phase='APPROVED'").fetchone()[0],1)
+                self.assertEqual(conn.execute(
+                    "SELECT count(*) FROM synthetic_pr192_print_jobs "
+                    "WHERE state='QUEUED'").fetchone()[0],2)
+
     def test_auto_mode_cannot_claim_historical_manager_ticket(self):
         from services.printing.usb_test_preparation import stand_identity
         self.assertEqual(self.approve().json["state"], "APPROVED")
