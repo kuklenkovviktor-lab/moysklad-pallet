@@ -31,7 +31,7 @@ def client():
             method="POST" if body is not None else "GET")
         try:
             with opener.open(req, timeout=12) as response:
-                return response.status, json.loads(response.read())
+                return response.status, (response.read().decode('utf-8') if path == '/fbs' else json.loads(response.read()))
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read())
     return send
@@ -53,6 +53,15 @@ qr = printer["qr"]
 assert worker("/demo/login", {"mode": "employee", "badge": "DEMO-BADGE-1"})[0] == 200
 ws = worker("/demo/session")[1]
 assert ws["employee"] == "demo-e1"
+# PR209: same existing /fbs screen, not the separate demo worker-qr page.
+real_fbs = worker("/fbs")
+assert real_fbs[0] == 200 and "async function handleScan(code)" in real_fbs[1], real_fbs[0]
+assert "if(code.startsWith('GRIT-PRINTER:'))await acceptPrinterQr(code)" in real_fbs[1]
+assert "else if(pendingProduct)await acceptWb(code)" in real_fbs[1]
+assert worker("/api/auth/me")[1]["employee"]["id"] == "demo-e1"
+current = worker("/api/shift/current")
+assert current[0] == 200 and current[1]["active"], current
+print("PR209 EXISTING FBS /fbs REAL WORKER QR HTTP SMOKE PASS: no new employee page.")
 sku = "SYNTH-SKU-V"
 orders = worker("/demo/orders", {"csrf": ws["csrf"], "qr": qr})[1]
 assert "SYNTH-1003" in [o["order_id"] for o in orders["orders"]]
