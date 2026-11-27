@@ -158,6 +158,29 @@ class WindowsBridgeFakeTests(unittest.TestCase):
         self.assertEqual(self.api.claims,0)
         self.assertNotIn("write",fake.events)
 
+    def test_auto_claim_body_is_bound_to_verified_synthetic_stand(self):
+        class AutoAPI(FakeAPI):
+            def __call__(self,method,path,body=None):
+                if path.endswith("/claim"):
+                    self_body=body
+                    if self_body != {"auto":True,"stand_id":"synthetic-stand"}:
+                        raise AssertionError("Wrong auto claim binding")
+                return super().__call__(method,path,body)
+        api=AutoAPI()
+        state,path=agent.run_once(
+            api,self.fake,state_dir=self.dir,automatic_stand="synthetic-stand")
+        self.assertEqual(state,"SUBMITTED_TO_WINDOWS")
+        self.assertEqual(self.fake.events.count("write"),1)
+
+    def test_auto_mode_refuses_without_confirmation_or_test_binding(self):
+        self.assertEqual(agent.main(["--auto"],api=self.api,
+                                    spooler=self.fake,state_dir=self.dir),1)
+        self.assertEqual(agent.main(["--auto","--confirm",agent.CONFIRM],
+                                    api=self.api,spooler=self.fake,
+                                    state_dir=self.dir),1)
+        self.assertEqual(self.api.claims,0)
+        self.assertEqual(self.fake.events.count("write"),0)
+
     def test_check_and_ping_do_not_print(self):
         self.assertEqual(agent.main(["--ping"],api=self.api,
                                     spooler=self.fake,state_dir=self.dir),0)
