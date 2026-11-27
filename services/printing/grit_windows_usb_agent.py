@@ -184,12 +184,14 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
                       help="Manually claim and print ONE preapproved synthetic job")
     mode.add_argument("--auto",action="store_true",
                       help="Explicit bounded auto mode: ONLY QR-authorized synthetic tickets")
+    mode.add_argument("--auto-one",action="store_true",
+                      help="One and only one QR-approved synthetic 58x40 label, then exit")
     parser.add_argument("--confirm",default="",
                         help="Required only for one physical job")
     args=parser.parse_args(argv)
     stack=ExitStack()
     try:
-        if (args.once or args.auto) and args.confirm!=CONFIRM:
+        if (args.once or args.auto or args.auto_one) and args.confirm!=CONFIRM:
             raise PilotError("Physical command requires --confirm "+CONFIRM)
         if api is None:
             stack.enter_context(usb_agent_config.tunnel())
@@ -233,7 +235,7 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
             print("READY; BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
                   "; NO PRINT")
             return 0
-        if args.auto:
+        if args.auto or args.auto_one:
             if api is not None:
                 raise PilotError("Automatic mode requires locally bound secure SSH config")
             # The saved per-test ticket is NOT authorization for automatic mode.
@@ -248,11 +250,14 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
             submitted=0
             deadline=time.monotonic()+300
             after_last=None
-            while submitted < 16 and time.monotonic() < deadline:
+            max_jobs = 1 if args.auto_one else 16
+            while submitted < max_jobs and time.monotonic() < deadline:
                 # A new SSH tunnel is NOT opened per job.
                 result,journal=run_once(raw_api,device,state_dir=state_dir,
                                         automatic_stand=config["stand_id"])
                 if result == "EMPTY":
+                    if args.auto_one:
+                        raise PilotError("No one-shot synthetic approval; NO PRINT")
                     if after_last is not None and time.monotonic()-after_last>=12:
                         break
                     time.sleep(2)
