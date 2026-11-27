@@ -28,6 +28,8 @@ class LabelJob:
     article: str
     line: str
     page_index: int
+    product_barcode: str = ""
+    product_id: str = ""
 
 
 def _rows(conn, statement, parameters=(), adapt=lambda q: q):
@@ -147,7 +149,8 @@ def match_source_pdf(pdf_bytes, conn, *, account_id, verified_lines,
                 if not _is_58x40(doc[page_index]):
                     raise LabelSourceError('SOURCE_PAGE_NOT_58X40_MM')
                 jobs.append(LabelJob(account_id,str(order_id),code,article,
-                                     found.group(1),page_index))
+                                     found.group(1),page_index,
+                                     str(sku),str(product_id)))
         if not jobs:
             raise LabelSourceError('NO_VERIFIED_STICKERS')
         return tuple(jobs)
