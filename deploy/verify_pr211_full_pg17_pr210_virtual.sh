@@ -47,7 +47,7 @@ fi
 echo "=== PR211 ORIGINAL WB SOURCE + ENCRYPTED SQLITE CONTRACT / OFFLINE ==="
 bash "$SRC/deploy/verify_pr211_wb_source_preflight.sh" "$SRC"
 echo "=== PR211 PDF -> EXACT WB ORDER + LINE -> PG17 -> PR210 FAKE RAW USB ==="
-docker run --rm --network "$NET" --read-only --cap-drop ALL \
+docker run --rm --user 0:0 --network "$NET" --read-only --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --tmpfs /tmp:rw,size=128m -v "$SRC:/app:ro" -w /app \
     -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
