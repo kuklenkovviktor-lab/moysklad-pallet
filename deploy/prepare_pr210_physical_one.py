@@ -11,6 +11,14 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+# Executed as /app/deploy/*.py by docker exec. Resolve the existing
+# mounted /app source without depending on PYTHONPATH set by the container.
+ROOT = Path(__file__).resolve().parents[1]
+if ROOT != Path("/app"):
+    raise RuntimeError("ONLY_ISOLATED_DOCKER_APP_PATH_ALLOWED")
+sys.path.insert(0, str(ROOT))
 
 from line_printer_pg_trial import _verify_isolated_connection
 from line_printer_registry import create_printer
