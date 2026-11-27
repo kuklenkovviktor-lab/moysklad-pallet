@@ -23,6 +23,14 @@ print('PR211 PHYSICAL PDF PYTHON SYNTAX PASS',file=sys.stderr)
 AST
 IMAGE=grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4
 docker image inspect "$IMAGE" >/dev/null
+echo "=== PRE-CLAIM: STRICT PDF + EXACT WB STICKER/ORDER + FAKE USB GATE ===" >&2
+docker run --rm --user 0:0 --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --tmpfs /tmp:rw,size=64m -v "$SRC:/app:ro" -w /app \
+    -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+    --entrypoint python "$IMAGE" \
+    /app/tests/printing/test_pr211_physical_pdf_preflight.py -v 1>&2
+echo "PR211 PRE-CLAIM PRE-FLIGHT PASS" >&2
 docker image inspect postgres:17 >/dev/null
 RUN="pr211physical-$(date +%s)-$$"
 NET="grit-$RUN"
