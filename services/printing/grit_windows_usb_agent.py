@@ -214,7 +214,20 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
         port=check_printer(device,TEST_PRINTER)
         print("LOCAL USB CHECK PASS:",TEST_PRINTER,"port:",port)
         if args.check:
-            data=device_api("GET","/synthetic/pr192/usb-agent/ping")
+            if api is None:
+                # On explicitly armed automatic demo, Check validates the
+                # device/stand rather than stale single-ticket enrollment.
+                # Check is always NO PRINT, even if jobs are waiting.
+                probe=make_api_call(config["token"])
+                data=probe("GET","/synthetic/pr192/usb-agent/ping")
+                if data.get("automatic_synthetic") is True:
+                    if (data.get("stand_id")!=config["stand_id"]
+                        or data.get("device")!=TEST_PRINTER):
+                        raise PilotError("Wrong isolated stand/printer")
+                else:
+                    data=device_api("GET","/synthetic/pr192/usb-agent/ping")
+            else:
+                data=device_api("GET","/synthetic/pr192/usb-agent/ping")
             if data.get("device")!=TEST_PRINTER:
                 raise PilotError("Remote device mismatch")
             print("READY; BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
