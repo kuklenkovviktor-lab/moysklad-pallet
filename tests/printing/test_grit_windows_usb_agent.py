@@ -181,6 +181,15 @@ class WindowsBridgeFakeTests(unittest.TestCase):
         self.assertEqual(self.api.claims,0)
         self.assertEqual(self.fake.events.count("write"),0)
 
+    def test_auto_one_requires_physical_confirmation_and_secure_local_binding(self):
+        self.assertEqual(agent.main(["--auto-one"],api=self.api,
+                                    spooler=self.fake,state_dir=self.dir),1)
+        self.assertEqual(agent.main(["--auto-one","--confirm",agent.CONFIRM],
+                                    api=self.api,spooler=self.fake,
+                                    state_dir=self.dir),1)
+        self.assertEqual(self.api.claims,0)
+        self.assertEqual(self.fake.events.count("write"),0)
+
     def test_check_and_ping_do_not_print(self):
         self.assertEqual(agent.main(["--ping"],api=self.api,
                                     spooler=self.fake,state_dir=self.dir),0)
