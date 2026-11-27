@@ -115,6 +115,38 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict"
 app.register_blueprint(make_real_wms_auth_synthetic_blueprint(pg))
 seed()
 app.register_blueprint(make_real_wms_synthetic_autoqueue_blueprint(pg))
+# Expose ONLY the existing /fbs screen and the few existing WMS read/session
+# handlers needed for synthetic printer-QR browser verification. Unlike
+# registering the entire WMS blueprint, this does not expose unrelated live
+# WMS import, marketplace, worker scanning, or admin endpoints.
+# This application itself is guarded by isolated-PG env + loopback Docker port.
+import wms as existing_wms
+
+@app.get("/fbs")
+def demo_existing_fbs_screen():
+    response = existing_wms.fbs_page()
+    return response
+
+@app.get("/api/auth/me")
+def demo_existing_auth_me():
+    return existing_wms.auth_me()
+
+@app.get("/api/shift/current")
+def demo_existing_shift_current():
+    return existing_wms.current_shift_api()
+
+@app.get("/api/fbs/stats")
+def demo_existing_fbs_stats():
+    return existing_wms.stats()
+
+@app.get("/api/fbs/pending")
+def demo_existing_pending():
+    return existing_wms.fbs_pending_api()
+
+@app.post("/api/fbs/activity")
+def demo_existing_activity():
+    return existing_wms.change_activity()
+
 app.register_blueprint(make_synthetic_worker_scanner_blueprint(pg, get_session_employee))
 
 

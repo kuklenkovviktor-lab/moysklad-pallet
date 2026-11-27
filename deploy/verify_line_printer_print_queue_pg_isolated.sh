@@ -64,6 +64,16 @@ docker run --rm --network "$NET" --read-only --cap-drop ALL \
   --entrypoint python "$IMAGE" \
   /app/tests/printing/test_qr_real_wms_auth.py -v
 echo "PR192 QR AUTOQUEUE REAL WMS AUTH ISOLATED PASS"
+echo "=== PR209 ACTUAL /fbs WORKER PAGE + QR/REAL WMS SESSION / PG17 ==="
+docker run --rm --network "$NET" --read-only --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,size=128m -v "$SRC:/app:ro" -w /app \
+  -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
+  -e "PR192_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr192-db:5432/$PG_NAME" \
+  --entrypoint python "$IMAGE" \
+  /app/tests/printing/test_existing_fbs_real_wms_pg_isolated.py -v
+echo "PR209 ACTUAL FBS PRINTER QR PG17 ISOLATED PASS"
 echo "=== FSD WORKER SCANNER DEMO / REAL WMS SESSION / SYNTHETIC PG17 ==="
 docker run --rm --network "$NET" --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true \
