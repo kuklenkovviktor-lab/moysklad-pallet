@@ -24,7 +24,7 @@ ISOLATED = (
 # collector; actual DB operations are still guarded by the PG module.
 
 KEY=b'R'*32
-NOW=datetime(2026,11,27,14,0,tzinfo=timezone.utc)
+NOW=datetime.now(timezone.utc)
 
 
 def conn():
