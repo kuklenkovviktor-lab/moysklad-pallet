@@ -13,6 +13,7 @@ from flask import session
 from services.printing.usb_bridge_synthetic import (
     initialize_synthetic_usb_bridge,
     make_synthetic_usb_bridge_blueprint,
+    auto_approve_synthetic_queue,
 )
 from services.printing.virtual_agent import initialize_virtual_sink
 
@@ -286,5 +287,70 @@ class UsbBridgePG17Tests(TestCase):
         self.assertFalse(change.accepted)
         self.assertEqual(change.reason,'USB_RETRY_FORBIDDEN')
         self.assertEqual(self.claim().json['state'],'EMPTY')
+
+    def test_auto_mode_cannot_be_used_without_explicit_gate(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with pg() as conn:
+            stand = stand_identity(conn)
+        forbidden = self.claim({"auto": True, "stand_id": stand})
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(auto_approve_synthetic_queue(pg, "p1", "e1"), 0)
+        self.assertEqual(self.ping().json["waiting"], 0)
+
+    def test_fbs_qr_creates_automatic_usb_approval_without_manager(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            worker_token = self.worker.get("/synthetic/pr192/print-queue/session")
+            self.assertEqual(worker_token.status_code, 200, worker_token.json)
+            response = self.worker.post("/synthetic/pr192/print-queue/scan",
+                json={"qr":self.case.wms_case.qr,
+                      "csrf":worker_token.json["csrf"]})
+            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(response.json["auto_usb_approved"], 1)
+            self.assertEqual(response.json["queued_new"], 0)
+            with pg() as conn:
+                stand = stand_identity(conn)
+                job = conn.execute("""SELECT delivery_transport,state
+                    FROM synthetic_pr192_print_jobs WHERE order_id='o1'""").fetchone()
+            self.assertEqual(job, ("USB","QUEUED"))
+            claim = self.claim({"auto":True,"stand_id":stand})
+            self.assertEqual(claim.status_code, 200, claim.json)
+            self.assertEqual(claim.json["state"], "CLAIMED")
+            ticket = claim.json["ticket_id"]
+            self.assertEqual(self.report(ticket).json["state"], "SUBMITTED")
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"], "EMPTY")
+            self.assertEqual(self.state()["jobs"][0]["state"], "SUBMITTED")
+            # A scanned printer QR never creates a WMS product or WB count.
+            self.assertEqual(self.case.wms_case.wms.query_one(
+                "SELECT COUNT(*) FROM scans")[0], 0)
+
+    def test_auto_mode_cannot_claim_historical_manager_ticket(self):
+        from services.printing.usb_test_preparation import stand_identity
+        self.assertEqual(self.approve().json["state"], "APPROVED")
+        with pg() as conn:
+            stand = stand_identity(conn)
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"], "EMPTY")
+            self.assertEqual(self.ping().json["waiting"], 1)
+            self.assertEqual(self.claim().json["state"], "CLAIMED")
+
+    def test_auto_wrong_stand_does_not_consume(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(auto_approve_synthetic_queue(pg,"p1","e1"),1)
+            self.assertEqual(self.claim({"auto":True,"stand_id":"wrong"}).status_code,403)
+            with pg() as conn:
+                stand=stand_identity(conn)
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"],"CLAIMED")
+
 if __name__=="__main__":
     main()
