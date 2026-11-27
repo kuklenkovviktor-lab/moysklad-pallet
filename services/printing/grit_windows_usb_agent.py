@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -109,7 +110,7 @@ def _journal_path(ticket_id,state_dir=None):
     return Path(state_dir)/(ticket_id+".json")
 
 
-def run_once(api, spooler, *, state_dir=None):
+def run_once(api, spooler, *, state_dir=None, automatic_stand=None):
     """One explicit approved claim -> local journal -> one RAW job -> report.
 
     After ANY uncertain event, never take the same ticket for another print.
@@ -119,7 +120,9 @@ def run_once(api, spooler, *, state_dir=None):
     ping=api("GET","/synthetic/pr192/usb-agent/ping")
     if ping.get("device")!=TEST_PRINTER:
         raise PilotError("Bridge does not match allowlisted Windows printer")
-    claimed=api("POST","/synthetic/pr192/usb-agent/claim",{})
+    claim_body = ({"auto": True, "stand_id": automatic_stand}
+                  if automatic_stand is not None else {})
+    claimed=api("POST","/synthetic/pr192/usb-agent/claim",claim_body)
     if claimed.get("state")=="EMPTY":
         return "EMPTY",None
     if claimed.get("state")=="REJECTED":
@@ -179,12 +182,14 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
                       help="Check tunnel + dedicated USB printer without printing")
     mode.add_argument("--once",action="store_true",
                       help="Manually claim and print ONE preapproved synthetic job")
+    mode.add_argument("--auto",action="store_true",
+                      help="Explicit bounded auto mode: ONLY QR-authorized synthetic tickets")
     parser.add_argument("--confirm",default="",
                         help="Required only for one physical job")
     args=parser.parse_args(argv)
     stack=ExitStack()
     try:
-        if args.once and args.confirm!=CONFIRM:
+        if (args.once or args.auto) and args.confirm!=CONFIRM:
             raise PilotError("Physical command requires --confirm "+CONFIRM)
         if api is None:
             stack.enter_context(usb_agent_config.tunnel())
@@ -214,6 +219,39 @@ def main(argv=None, *,api=None,spooler=None,state_dir=None):
                 raise PilotError("Remote device mismatch")
             print("READY; BRIDGE DRY RUN PASS; waiting:",data.get("waiting"),
                   "; NO PRINT")
+            return 0
+        if args.auto:
+            if api is not None:
+                raise PilotError("Automatic mode requires locally bound secure SSH config")
+            # The saved per-test ticket is NOT authorization for automatic mode.
+            # Trust only the configured synthetic host/device token, isolated
+            # stand ID and explicitly armed server-side AUTO flag.
+            raw_api=make_api_call(config["token"])
+            ping=raw_api("GET","/synthetic/pr192/usb-agent/ping")
+            if (ping.get("stand_id")!=config["stand_id"]
+                or ping.get("device")!=TEST_PRINTER
+                or ping.get("automatic_synthetic") is not True):
+                raise PilotError("Isolated automatic USB mode not armed or wrong stand")
+            submitted=0
+            deadline=time.monotonic()+300
+            after_last=None
+            while submitted < 16 and time.monotonic() < deadline:
+                # A new SSH tunnel is NOT opened per job.
+                result,journal=run_once(raw_api,device,state_dir=state_dir,
+                                        automatic_stand=config["stand_id"])
+                if result == "EMPTY":
+                    if after_last is not None and time.monotonic()-after_last>=12:
+                        break
+                    time.sleep(2)
+                    continue
+                if result!="SUBMITTED_TO_WINDOWS":
+                    raise PilotError("Automatic USB claim rejected; do not retry")
+                submitted+=1
+                after_last=time.monotonic()
+                print("AUTO USB SYNTHETIC SUBMITTED:",submitted,
+                      "(Windows spool ACK only, not physically verified)",flush=True)
+            print("AUTO USB SYNTHETIC BATCH COMPLETE:",submitted,
+                  "NO RETRY; NOT WB; NOT PHYSICAL CONFIRMATION")
             return 0
         result,journal=run_once(device_api,device,state_dir=state_dir)
         if result != "SUBMITTED_TO_WINDOWS":
