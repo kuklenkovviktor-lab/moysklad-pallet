@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# PR211: read-only local fixture tests. No database/production/network/device.
+# Read-only contract + original PDF raster tests; no network / USB / live WB.
 set -Eeuo pipefail
-SRC="${1:?Usage: bash deploy/verify_pr211_wb_source_preflight.sh /checkout}"
+SRC="${1:?Usage: bash deploy/verify_pr211_wb_source_preflight.sh /tmp/grit-pr211-checkout}"
 SRC="$(cd "$SRC" && pwd)"
-test -f "$SRC/services/printing/wb_fbs_real_source_preflight.py"
-test -f "$SRC/tests/printing/test_wb_real_source_preflight.py"
-PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 python3   "$SRC/tests/printing/test_wb_real_source_preflight.py" -v
-test -f "$SRC/services/printing/wb_pdf_original_label.py"
-test -f "$SRC/tests/printing/test_wb_pdf_original_label.py"
-PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 python3 \
-  "$SRC/tests/printing/test_wb_pdf_original_label.py" -v
-echo "PR211 ORIGINAL PDF SOURCE RASTER + LINE ROUTING TESTS PASS"
-echo "PR211 REAL WB TABLE CONTRACT SYNTHETIC FIXTURES PASS"
-echo "READ-ONLY; NO PRINT; NO REAL ORDERS; NO DATABASE CONNECTION"
+for f in services/printing/wb_fbs_real_source_preflight.py \
+         services/printing/wb_pdf_original_label.py \
+         tests/printing/test_wb_real_source_preflight.py \
+         tests/printing/test_wb_pdf_original_label.py; do
+  test -f "$SRC/$f"
+done
+IMAGE="grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4"
+docker image inspect "$IMAGE" >/dev/null
+for testfile in test_wb_real_source_preflight.py test_wb_pdf_original_label.py; do
+  docker run --rm --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --tmpfs /tmp:rw,size=64m -v "$SRC:/app:ro" -w /app \
+    -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+    --entrypoint python "$IMAGE" \
+    "/app/tests/printing/$testfile" -v
+done
+echo "PR211 ORIGINAL WB PDF BITMAP + LINE ROUTING + SOURCE CONTRACT PASS"
+echo "SYNTHETIC ONLY; NO LIVE WB; NO PRODUCTION; NO PHYSICAL USB"
