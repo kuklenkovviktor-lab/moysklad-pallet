@@ -21,8 +21,8 @@ DDL = (
          job_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, order_id TEXT NOT NULL,
          printer_id TEXT NOT NULL, line TEXT NOT NULL, sticker_hash TEXT NOT NULL,
          source_hash TEXT NOT NULL, payload_hash TEXT NOT NULL,
-         cipher BYTEA NOT NULL, state TEXT NOT NULL
-             CHECK(state IN ('QUEUED','CLAIMED','SUBMITTED','UNKNOWN','BLOCKED')),
+         cipher BYTEA, state TEXT NOT NULL
+             CHECK(state IN ('STAGED','QUEUED','CLAIMED','SUBMITTED','UNKNOWN','BLOCKED')),
          ticket_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
          UNIQUE(account_id,order_id))""",
     """CREATE INDEX IF NOT EXISTS synthetic_pr211_jobs_next
@@ -77,7 +77,7 @@ def initialize(conn):
             conn.execute(stmt)
 
 
-def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None):
+def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None,require_qr=False):
     _check(conn)
     _printer(printer_id)
     _key(key)
@@ -102,7 +102,7 @@ def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None):
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('PR211-STAGE-'||%s,0))",
                      (printer_id,))
         count=conn.execute("""SELECT COUNT(*) FROM synthetic_pr211_original_jobs
-            WHERE printer_id=%s AND state IN ('QUEUED','CLAIMED','UNKNOWN')""",
+            WHERE printer_id=%s AND state IN ('STAGED','QUEUED','CLAIMED','UNKNOWN')""",
             (printer_id,)).fetchone()[0]
         if count:
             raise LabelSourceError('PRINTER_HAS_UNRESOLVED_WORK')
@@ -110,10 +110,10 @@ def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None):
             conn.execute("""INSERT INTO synthetic_pr211_original_jobs
                 (job_id,account_id,order_id,printer_id,line,sticker_hash,
                  source_hash,payload_hash,cipher,state)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'QUEUED')""",
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (job_id,job.account_id,job.order_id,printer_id,job.line,
                  hashlib.sha256(job.sticker_code.encode()).hexdigest(),
-                 source_hash,digest,ciphertext))
+                 source_hash,digest,ciphertext,'STAGED' if require_qr else 'QUEUED'))
             _audit(conn,job_id,'ORIGINAL_STAGED')
     return len(prepared)
 
@@ -243,3 +243,59 @@ def dispatch_fake_windows(conn,*,printer_id,key,device_authenticated,
     report(conn,printer_id=printer_id,ticket=ticket,
            result='SUBMITTED',device_authenticated=device_authenticated)
     return 'SUBMITTED'
+
+def approve_worker_qr(conn, *, printer_id, worker_id, shift_id, signed_qr_valid):
+    """A verified /fbs worker QR releases only this printer's staged batch.
+
+    Caller must validate current badge+active shift+picking activity and
+    actual signed printer QR against the stored printer digest on server.
+    """
+    _check(conn)
+    _printer(printer_id)
+    if (signed_qr_valid is not True or not isinstance(worker_id,str)
+            or not isinstance(shift_id,str) or not worker_id or not shift_id):
+        raise PermissionError('ACTIVE_EMPLOYEE_SHIFT_AND_PRINTER_QR_REQUIRED')
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('PR211-CLAIM-'||%s,0))",
+                     (printer_id,))
+        if conn.execute("""SELECT COUNT(*) FROM synthetic_pr211_original_jobs
+            WHERE printer_id=%s AND state IN ('CLAIMED','UNKNOWN')""",
+            (printer_id,)).fetchone()[0]:
+            raise LabelSourceError('UNRESOLVED_PRINT_NO_QR_RELEASE')
+        rows=conn.execute("""UPDATE synthetic_pr211_original_jobs
+            SET state='QUEUED' WHERE printer_id=%s AND state='STAGED'
+            RETURNING job_id""",(printer_id,)).fetchall()
+        for row in rows:
+            _audit(conn,row[0],'WORKER_QR_'+hashlib.sha256(
+                 (worker_id+'|'+shift_id).encode()).hexdigest()[:12])
+    return len(rows)
+
+
+def prune_printed_payloads(conn, *, retention_hours=24, manager_authorized):
+    """Explicit cleanup: scrub ciphertext only, keep unique order + audit.
+
+    NEVER delete in-flight/unknown jobs or automatically requeue anything.
+    """
+    _check(conn)
+    if manager_authorized is not True:
+        raise PermissionError('MANAGER_AUTH_REQUIRED')
+    if type(retention_hours) is not int or not 1 <= retention_hours <= 720:
+        raise ValueError('INVALID_RETENTION_HOURS')
+    with conn.transaction():
+        rows=conn.execute("""UPDATE synthetic_pr211_original_jobs
+            SET cipher=NULL WHERE state IN ('SUBMITTED','BLOCKED')
+              AND cipher IS NOT NULL AND created_at <
+                  NOW() - make_interval(hours => %s)
+            RETURNING job_id""",(retention_hours,)).fetchall()
+        for (job,) in rows:
+            _audit(conn,job,'CIPHERTEXT_ERASED')
+    return len(rows)
+
+
+def queue_status(conn, *, printer_id):
+    """Manager/worker presentation metadata, never return sticker or PDF."""
+    _check(conn)
+    _printer(printer_id)
+    return {state:int(count) for state,count in conn.execute(
+        """SELECT state,COUNT(*) FROM synthetic_pr211_original_jobs
+           WHERE printer_id=%s GROUP BY state""",(printer_id,)).fetchall()}
