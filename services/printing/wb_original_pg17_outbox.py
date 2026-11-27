@@ -22,7 +22,7 @@ DDL = (
          printer_id TEXT NOT NULL, line TEXT NOT NULL, sticker_hash TEXT NOT NULL,
          source_hash TEXT NOT NULL, payload_hash TEXT NOT NULL,
          cipher BYTEA NOT NULL, state TEXT NOT NULL
-             CHECK(state IN ('QUEUED','CLAIMED','SUBMITTED','UNKNOWN')),
+             CHECK(state IN ('QUEUED','CLAIMED','SUBMITTED','UNKNOWN','BLOCKED')),
          ticket_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
          UNIQUE(account_id,order_id))""",
     """CREATE INDEX IF NOT EXISTS synthetic_pr211_jobs_next
@@ -132,14 +132,47 @@ def claim(conn,*,printer_id,key,device_authenticated):
              (printer_id,)).fetchone()[0]
         if blocked:
             raise LabelSourceError('UNRESOLVED_PRINT_NO_RETRY')
-        row=conn.execute("""SELECT job_id,account_id,order_id,line,payload_hash,cipher
-            FROM synthetic_pr211_original_jobs
+        row=conn.execute("""SELECT job_id,account_id,order_id,line,payload_hash,
+                   cipher,sticker_hash FROM synthetic_pr211_original_jobs
             WHERE printer_id=%s AND state='QUEUED'
             ORDER BY created_at,job_id FOR UPDATE SKIP LOCKED LIMIT 1""",
             (printer_id,)).fetchone()
         if not row:
             return None
-        job_id,account,order,line,digest,cipher=row
+        job_id,account,order,line,digest,cipher,sticker_hash=row
+        # Production-schema source can change after PDF staging; reject
+        # cancellation, cache changes or QR/sticker revocation before claim.
+        # This check is inside the same transaction as the durable claim.
+        source=conn.execute("""SELECT o.wb_status,o.local_status,s.barcode
+            FROM wb_fbs_orders o JOIN wb_fbs_picking_queue q
+              ON q.account_id=o.account_id AND q.order_id=o.order_id
+            JOIN wb_fbs_stickers s
+              ON s.account_id=o.account_id AND s.order_id=o.order_id
+            WHERE o.account_id=%s AND o.order_id=%s FOR UPDATE OF o""",
+            (account,order)).fetchall()
+        valid=(len(source)==1 and source[0][0]=='confirm'
+               and source[0][1]=='pending'
+               and hashlib.sha256(str(source[0][2]).encode()).hexdigest()==sticker_hash)
+        if valid:
+            # Ensure the ORIGINAL SKU still maps to one active cell on the
+            # preapproved line, not a newly moved or ambiguous location.
+            mapped=conn.execute("""SELECT l.label,l.active FROM
+               wb_fbs_order_skus k
+               JOIN fbs_catalog_barcodes c ON c.barcode=k.sku
+               JOIN cell_sku_assignments a ON a.product_id=c.product_id
+               JOIN replenishment_locations l ON l.id=a.location_id
+               WHERE k.account_id=%s AND k.order_id=%s
+                 AND c.is_pack=0 AND c.quantity=1""",
+               (account,order)).fetchall()
+            valid=(len(mapped)==1 and mapped[0][1]==1
+                   and bool(re.match(r'^'+re.escape(line)+r'-?\\d',
+                                     str(mapped[0][0]).upper())))
+        if not valid:
+            conn.execute("""UPDATE synthetic_pr211_original_jobs
+                SET state='BLOCKED' WHERE job_id=%s AND state='QUEUED'""",
+                (job_id,))
+            _audit(conn,job_id,'SOURCE_CHANGED_NO_PRINT')
+            return None
         ticket=uuid.uuid4().hex
         conn.execute("""UPDATE synthetic_pr211_original_jobs SET state='CLAIMED',
             ticket_id=%s WHERE job_id=%s AND state='QUEUED'""",(ticket,job_id))
