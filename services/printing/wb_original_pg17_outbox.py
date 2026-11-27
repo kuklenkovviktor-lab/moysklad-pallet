@@ -4,6 +4,7 @@ ONLY disposable PG17 named grit_pr211_synthetic_*. No Flask routes, no
 production wiring, no physical USB. Complete transaction + one-way CLAIMED.
 """
 import hashlib
+import hmac
 import os
 import re
 import uuid
@@ -24,7 +25,9 @@ DDL = (
          source_hash TEXT NOT NULL, payload_hash TEXT NOT NULL,
          cipher BYTEA, state TEXT NOT NULL
              CHECK(state IN ('STAGED','QUEUED','CLAIMED','SUBMITTED','UNKNOWN','BLOCKED')),
-         ticket_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+         ticket_id TEXT UNIQUE,
+         claimed_device_hash TEXT NOT NULL DEFAULT '',
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
          UNIQUE(account_id,order_id))""",
     """CREATE INDEX IF NOT EXISTS synthetic_pr211_jobs_next
          ON synthetic_pr211_original_jobs(printer_id,state,created_at)""",
@@ -190,8 +193,11 @@ def claim(conn,*,printer_id,key,device_authenticated,device_id=''):
             _audit(conn,job_id,'SOURCE_CHANGED_NO_PRINT',reason='CURRENT_WB_OR_CELL_CHANGED')
             return None
         ticket=uuid.uuid4().hex
+        device_digest=hashlib.sha256(device_id.encode('utf-8')).hexdigest()
         conn.execute("""UPDATE synthetic_pr211_original_jobs SET state='CLAIMED',
-            ticket_id=%s WHERE job_id=%s AND state='QUEUED'""",(ticket,job_id))
+            ticket_id=%s,claimed_device_hash=%s
+            WHERE job_id=%s AND state='QUEUED'""",
+            (ticket,device_digest,job_id))
         _audit(conn,job_id,'CLAIMED_BEFORE_RAW',actor_id=device_id)
     # A cryptographic failure leaves durable CLAIMED, never re-queues.
     aad=f'{account}\x1f{order}\x1f{printer_id}\x1f{line}\x1f{digest}'.encode()
@@ -214,11 +220,13 @@ def report(conn,*,printer_id,ticket,result,device_authenticated,device_id=''):
             or result not in ('SUBMITTED','UNKNOWN')):
         raise ValueError('INVALID_ACK')
     with conn.transaction():
-        row=conn.execute("""SELECT job_id FROM synthetic_pr211_original_jobs
+        row=conn.execute("""SELECT job_id,claimed_device_hash
+            FROM synthetic_pr211_original_jobs
             WHERE printer_id=%s AND ticket_id=%s AND state='CLAIMED'
             FOR UPDATE""",(printer_id,ticket)).fetchone()
-        if not row:
-            raise LabelSourceError('TICKET_NOT_CLAIMED_NO_RETRY')
+        incoming=hashlib.sha256(device_id.encode('utf-8')).hexdigest()
+        if not row or not hmac.compare_digest(row[1],incoming):
+            raise LabelSourceError('TICKET_NOT_OWNED_BY_DEVICE_NO_ACK')
         conn.execute("""UPDATE synthetic_pr211_original_jobs SET state=%s
             WHERE job_id=%s AND state='CLAIMED'""",(result,row[0]))
         _audit(conn,row[0],result,actor_id=device_id,reason='WINDOWS_SPOOL_ACK_ONLY')
