@@ -248,22 +248,32 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
             return _refuse("AGENT_TOKEN_REQUIRED",403)
         data=request.get_json(silent=True)
         bound = isinstance(data,dict) and set(data)=={"ticket_id","stand_id"}
+        automatic = (isinstance(data,dict) and set(data)=={"auto","stand_id"}
+                     and data.get("auto") is True)
         if bound and (not isinstance(data["ticket_id"],str) or
                       not re.fullmatch("[0-9a-f]{32}",data["ticket_id"]) or
                       not isinstance(data["stand_id"],str)):
             return _refuse("INVALID_BINDING")
-        if data != {} and not bound:
+        if automatic and (not automatic_usb_enabled()
+                          or not isinstance(data.get("stand_id"),str)):
+            return _refuse("AUTO_USB_NOT_ARMED",403)
+        if data != {} and not bound and not automatic:
             return _refuse("EMPTY_BODY_REQUIRED")
         with connection_factory() as conn:
             _verify_isolated_connection(conn)
             with conn.transaction():
-                if bound and data["stand_id"] != stand_identity(conn):
+                if (bound or automatic) and data["stand_id"] != stand_identity(conn):
                     return _refuse("WRONG_STAND",403)
-                claim=conn.execute("""SELECT ticket_id,job_id,printer_id
-                    FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'
-                    AND (%s::text IS NULL OR ticket_id=%s)
-                    ORDER BY approved_at,ticket_id
-                    FOR UPDATE SKIP LOCKED LIMIT 1""",
+                # Automatic worker mode MUST NOT consume any historical
+                # manager-approved or one-shot physical test ticket.
+                extra = """AND EXISTS (SELECT 1 FROM synthetic_pr192_print_events e
+                     WHERE e.job_id=a.job_id AND e.event='AUTO_USB_APPROVAL')""" if automatic else ""
+                claim=conn.execute("""SELECT a.ticket_id,a.job_id,a.printer_id
+                    FROM synthetic_pr192_usb_approvals a WHERE a.phase='APPROVED'
+                    AND (%s::text IS NULL OR a.ticket_id=%s)
+                    """ + extra + """
+                    ORDER BY a.approved_at,a.ticket_id
+                    FOR UPDATE OF a SKIP LOCKED LIMIT 1""",
                     (data.get("ticket_id"),data.get("ticket_id"))).fetchone()
                 if not claim:
                     return jsonify(synthetic=True,physical_printing=False,
