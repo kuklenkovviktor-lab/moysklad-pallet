@@ -188,3 +188,33 @@ def report(conn, *, printer_id, ticket_id, result, authorized_device):
         conn.rollback()
         raise
     return result
+
+
+def deliver_one_with_bound_agent(conn, *, printer_id, key, authorized_device,
+                                 submit_raw_once):
+    """OFFLINE adapter seam for existing PR210 single-write spooler.
+
+    submit_raw_once is a trusted, caller-provided TEST spool function, NOT a
+    server-provided command or web-request body. This prototype is deliberately
+    not registered as a WMS HTTP endpoint and never selects a real USB device.
+    """
+    if not callable(submit_raw_once):
+        raise ValueError("TRUSTED_SPOOLER_CALLBACK_REQUIRED")
+    claimed=claim_one(conn,printer_id=printer_id,key=key,
+                      authorized_device=authorized_device)
+    if claimed is None:
+        return "EMPTY"
+    ticket,payload=claimed
+    try:
+        # The original PDF bitmap is passed verbatim: never turn it back into
+        # a text barcode or a hand-built imitation of a WB label.
+        submitted=submit_raw_once(payload)
+        if submitted is not True:
+            raise RuntimeError("SPOOLER_DID_NOT_ACK")
+    except Exception:
+        report(conn,printer_id=printer_id,ticket_id=ticket,
+               result="UNKNOWN",authorized_device=authorized_device)
+        raise LabelSourceError("SPOOL_OUTCOME_UNKNOWN_NO_RETRY") from None
+    report(conn,printer_id=printer_id,ticket_id=ticket,
+           result="SUBMITTED",authorized_device=authorized_device)
+    return "SUBMITTED"
