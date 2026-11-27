@@ -269,3 +269,35 @@ def make_isolated_original_print_blueprint(connection_factory, *,
             return jsonify(error='INVALID_ACK_OR_CLAIM'),409
 
     return bp
+
+def verified_wms_manager_guard():
+    """Adapter to the existing GRIT manager session, not a demo password."""
+    from wms import manager_access
+    return manager_access() is True
+
+
+def verified_wms_picking_guard():
+    """Use actual GRIT badge/attendance/open shift/picking activity checks.
+
+    Returns None on any missing or ambiguous current session. This adapter
+    is not automatically registered in app.py and does not use real data
+    unless explicitly wired by an authorized deployment.
+    """
+    from wms import get_session_employee, query_one, sql
+    emp=get_session_employee()
+    if (not emp or session.get('manager_web')
+            or session.get('attendance_verified') is not True):
+        return None
+    shift=str(session.get('employee_shift_id') or '')
+    if not shift:
+        return None
+    active=query_one(sql("""SELECT id FROM shifts WHERE id=? AND employee_id=?
+         AND ended_at IS NULL"""),(shift,emp['id']))
+    if not active:
+        return None
+    picking=query_one(sql("""SELECT 1 FROM activities
+         WHERE shift_id=? AND employee_id=? AND activity_type='picking'
+           AND ended_at IS NULL LIMIT 1"""),(shift,emp['id']))
+    if not picking:
+        return None
+    return dict(employee_id=emp['id'],shift_id=shift,picking_active=True)
