@@ -165,7 +165,7 @@ def claim(conn,*,printer_id,key,device_authenticated):
                  AND c.is_pack=0 AND c.quantity=1""",
                (account,order)).fetchall()
             valid=(len(mapped)==1 and mapped[0][1]==1
-                   and bool(re.match(r'^'+re.escape(line)+r'-?\\d',
+                   and bool(re.match(r'^'+re.escape(line)+r'-?\d',
                                      str(mapped[0][0]).upper())))
         if not valid:
             conn.execute("""UPDATE synthetic_pr211_original_jobs
