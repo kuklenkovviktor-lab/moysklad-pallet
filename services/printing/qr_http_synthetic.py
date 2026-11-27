@@ -75,7 +75,8 @@ def make_synthetic_autoqueue_blueprint(connection_factory, authenticated_employe
         if automatic_usb_enabled():
             try:
                 auto_usb_approved = auto_approve_synthetic_queue(
-                    connection_factory, result.printer_id, employee_id)
+                    connection_factory, result.printer_id, employee_id,
+                    shift_id=shift_id, qr_payload=qr)
             except Exception:
                 return jsonify(ok=False, synthetic=True,
                                physical_printing=False,
