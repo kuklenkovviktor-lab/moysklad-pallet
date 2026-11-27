@@ -5,6 +5,8 @@ SRC="${1:?Usage: bash deploy/verify_pr210_auto_usb_synthetic.sh /tmp/grit-pr210-
 SRC="$(cd "$SRC" && pwd)"
 test -f "$SRC/deploy/arm_pr210_auto_demo.py"
 test -f "$SRC/tests/printing/test_pr210_full_virtual_fbs_to_windows.py"
+test -f "$SRC/deploy/prepare_pr210_physical_one.py"
+test -f "$SRC/deploy/Run-GritUsbTest.ps1"
 python3 - "$SRC" <<'PY'
 import ast
 from pathlib import Path
@@ -16,7 +18,8 @@ for file in ("services/printing/usb_bridge_synthetic.py",
              "deploy/arm_pr210_auto_demo.py",
              "tests/printing/test_usb_bridge_synthetic.py",
              "tests/printing/test_grit_windows_usb_agent.py",
-             "tests/printing/test_pr210_full_virtual_fbs_to_windows.py"):
+             "tests/printing/test_pr210_full_virtual_fbs_to_windows.py",
+             "deploy/prepare_pr210_physical_one.py"):
     ast.parse((root/file).read_text(encoding="utf-8"),filename=file)
 print("PR210 PYTHON SYNTAX PASS")
 PY
