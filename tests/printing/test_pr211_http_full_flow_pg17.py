@@ -3,6 +3,7 @@ session + signed printer QR → server-verified device → PG17 → PR210 Window
 RAW algorithm + permanent journal on fake USB. NEVER real WB/USB/prod.
 """
 import hashlib
+import base64
 import io
 import json
 import os
@@ -221,6 +222,33 @@ class PR211ManagerWorkerDeviceHTTPTests(unittest.TestCase):
         self.assertEqual(self.conn.execute(
             'SELECT state FROM synthetic_pr211_original_jobs').fetchone()[0],
             'SUBMITTED')
+
+    def test_wb_v11_nine_char_qr_maps_to_original_printed_11digits(self):
+        qr='*'+base64.b64encode(
+            int('59298125228').to_bytes(5,'big')+b'\\x02').decode('ascii')
+        self.assertEqual(len(qr),9)
+        self.conn.execute('UPDATE wb_fbs_stickers SET barcode=%s',(qr,))
+        self.assertEqual(self.stage().status_code,200)
+        device=self.enroll()
+        self.assertEqual(self.scan().status_code,200)
+        data=self.agent_api(device)('/synthetic/pr211/agent/claim',{})
+        self.assertEqual(data['state'],'CLAIMED')
+        self.assertIn('payload_sha256',data)
+        self.assertNotIn('GRIT-DEMO',data['payload_b64'])
+
+    def test_reject_ambiguous_canonical_pdf_to_two_orders(self):
+        qr='*'+base64.b64encode(
+            int('59298125228').to_bytes(5,'big')+b'\\x02').decode('ascii')
+        self.conn.execute('INSERT INTO wb_fbs_orders VALUES(%s,%s,%s,%s,%s)',
+            ('synthetic','o2','confirm','pending',NOW.isoformat()))
+        self.conn.execute('INSERT INTO wb_fbs_picking_queue VALUES(%s,%s)',
+            ('synthetic','o2'))
+        self.conn.execute('INSERT INTO wb_fbs_stickers VALUES(%s,%s,%s)',
+            ('synthetic','o2',qr))
+        reply=self.stage()
+        self.assertEqual(reply.status_code,422)
+        self.assertEqual(self.conn.execute(
+            'SELECT COUNT(*) FROM synthetic_pr211_original_jobs').fetchone()[0],0)
 
     def test_unauthed_manager_cannot_upload_or_enroll(self):
         with self.client.session_transaction() as s:
