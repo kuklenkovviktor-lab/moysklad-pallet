@@ -9,12 +9,13 @@ for f in services/printing/wb_fbs_real_source_preflight.py \
          tests/printing/test_wb_real_source_preflight.py \
          tests/printing/test_wb_pdf_original_label.py \
          tests/printing/test_wb_original_encrypted_outbox.py \
-         tests/printing/test_pr211_wb_qr_variants.py; do
+         tests/printing/test_pr211_wb_qr_variants.py \
+         tests/printing/test_pr211_release_gates.py; do
   test -f "$SRC/$f"
 done
 IMAGE="grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4"
 docker image inspect "$IMAGE" >/dev/null
-for testfile in test_wb_real_source_preflight.py test_wb_pdf_original_label.py test_wb_original_encrypted_outbox.py test_pr211_wb_qr_variants.py; do
+for testfile in test_wb_real_source_preflight.py test_wb_pdf_original_label.py test_wb_original_encrypted_outbox.py test_pr211_wb_qr_variants.py test_pr211_release_gates.py; do
   docker run --rm --user 0:0 --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --tmpfs /tmp:rw,size=64m -v "$SRC:/app:ro" -w /app \
