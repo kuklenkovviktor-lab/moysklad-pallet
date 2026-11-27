@@ -6,7 +6,7 @@ from unittest.mock import patch
 import fitz
 
 from services.printing.wb_original_encrypted_outbox import (
-    initialize, stage_verified_pdf, claim_one, report, LabelSourceError,
+    initialize, stage_verified_pdf, claim_one, report, deliver_one_with_bound_agent, LabelSourceError,
 )
 
 KEY=b'S'*32
@@ -166,6 +166,39 @@ class EncryptedOriginalQueueTests(unittest.TestCase):
     def test_invalid_encryption_key_cannot_queue(self):
         with self.assertRaisesRegex(ValueError,'ENCRYPTION_KEY_MUST_BE_32_BYTES'):
             self.stage(key=b'short')
+
+    def test_exact_original_pdf_one_raw_spool_submit(self):
+        self.stage()
+        writes=[]
+        def fake_windows_write(raw):
+            writes.append(raw)
+            return True
+        state=deliver_one_with_bound_agent(self.db,printer_id='p1',key=KEY,
+             authorized_device=True,submit_raw_once=fake_windows_write)
+        self.assertEqual(state,'SUBMITTED')
+        self.assertEqual(len(writes),1)
+        self.assertIn(b'BITMAP 0,0,58,320,0,',writes[0])
+        self.assertEqual(writes[0].count(b'PRINT 1,1'),1)
+        self.assertEqual(deliver_one_with_bound_agent(self.db,printer_id='p1',
+             key=KEY,authorized_device=True,
+             submit_raw_once=fake_windows_write),'EMPTY')
+        self.assertEqual(len(writes),1,'never send a second label')
+
+    def test_fake_usb_failure_is_unknown_no_second_write(self):
+        self.stage()
+        calls=[]
+        def bad_fake_write(raw):
+            calls.append(len(raw))
+            raise OSError('simulated USB uncertain')
+        with self.assertRaisesRegex(LabelSourceError,'SPOOL_OUTCOME_UNKNOWN_NO_RETRY'):
+            deliver_one_with_bound_agent(self.db,printer_id='p1',key=KEY,
+                 authorized_device=True,submit_raw_once=bad_fake_write)
+        with self.assertRaisesRegex(LabelSourceError,'UNRESOLVED_CLAIM'):
+            deliver_one_with_bound_agent(self.db,printer_id='p1',key=KEY,
+                 authorized_device=True,submit_raw_once=bad_fake_write)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(self.db.execute('SELECT state FROM '
+            'synthetic_original_print_outbox').fetchone()[0],'UNKNOWN')
 
     def test_staging_refuses_unresolved_batch(self):
         self.stage()
