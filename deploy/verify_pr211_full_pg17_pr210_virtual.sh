@@ -10,6 +10,10 @@ for path in \
     services/printing/wb_original_pg17_outbox.py \
     services/printing/wb_pdf_original_label.py \
     services/printing/grit_usb_print_pilot.py \
+    services/printing/wb_original_pg17_device_auth.py \
+    services/printing/wb_original_print_http_synthetic.py \
+    services/printing/wb_original_usb_agent_synthetic.py \
+    tests/printing/test_pr211_http_full_flow_pg17.py \
     tests/printing/test_wb_original_pg17_pr210_end_to_end.py; do
     test -f "$SRC/$path"
 done
@@ -47,6 +51,7 @@ fi
 echo "=== PR211 ORIGINAL WB SOURCE + ENCRYPTED SQLITE CONTRACT / OFFLINE ==="
 bash "$SRC/deploy/verify_pr211_wb_source_preflight.sh" "$SRC"
 echo "=== PR211 PDF -> EXACT WB ORDER + LINE -> PG17 -> PR210 FAKE RAW USB ==="
+for scenario in test_wb_original_pg17_pr210_end_to_end.py test_pr211_http_full_flow_pg17.py; do
 docker run --rm --user 0:0 --network "$NET" --read-only --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --tmpfs /tmp:rw,size=128m -v "$SRC:/app:ro" -w /app \
@@ -54,6 +59,7 @@ docker run --rm --user 0:0 --network "$NET" --read-only --cap-drop ALL \
     -e GRIT_SYNTHETIC_PG_TEST=YES_ISOLATED \
     -e "PR211_SYNTHETIC_DATABASE_URL=postgresql://postgres:synthetic-only@pr211-db:5432/$PG" \
     --entrypoint python "$IMAGE" \
-    /app/tests/printing/test_wb_original_pg17_pr210_end_to_end.py -v
-echo "PR211 PG17 ORIGINAL PDF TO PR210 WINDOWS RAW FAKE-SPOOLER PASS"
+    "/app/tests/printing/$scenario" -v
+done
+echo "PR211 PDF + 9CHAR WB STICKER + WORKER QR + DEVICE AUTH + PG17 + PR210 WINDOWS RAW FAKE-SPOOLER PASS"
 echo "SYNTHETIC ONLY / NO USB / NO WB API / NO PRODUCTION DEPLOY"
