@@ -303,6 +303,53 @@ class PR211ManagerWorkerDeviceHTTPTests(unittest.TestCase):
         self.assertEqual(self.client.post(
             '/synthetic/pr211/agent/claim',json={},headers=headers).status_code,401)
 
+    def test_device_bound_to_other_printer_cannot_take_a_queue(self):
+        self.assertEqual(self.stage().status_code,200)
+        self.conn.execute('INSERT INTO grit_line_printers VALUES(%s,%s,%s,%s,%s)',
+            ('p2','Printer B','["Б"]','0'*64,1))
+        csrf=self.manager_csrf
+        r=self.client.post('/synthetic/pr211/manager/devices/enroll',
+            json={'csrf':csrf,'printer_id':'p2'})
+        self.assertEqual(r.status_code,201,r.json)
+        self.scan()
+        foreign=self.agent_api(r.json)
+        self.assertEqual(foreign('/synthetic/pr211/agent/claim',{})['state'],'EMPTY')
+        self.assertEqual(self.conn.execute('SELECT state FROM '
+            'synthetic_pr211_original_jobs').fetchone()[0],'QUEUED')
+
+    def test_retention_never_deletes_queued_or_unknown_payload(self):
+        self.assertEqual(self.stage().status_code,200)
+        self.conn.execute("""UPDATE synthetic_pr211_original_jobs
+             SET created_at=NOW()-INTERVAL '48 hours'""")
+        r=self.client.post('/synthetic/pr211/manager/retention',
+            json={'csrf':self.manager_csrf,'hours':24})
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(r.json['erased'],0)
+        self.assertIsNotNone(self.conn.execute(
+            'SELECT cipher FROM synthetic_pr211_original_jobs').fetchone()[0])
+
+    def test_retention_erases_only_acked_cipher_preserves_audit(self):
+        self.stage()
+        device=self.enroll()
+        self.scan()
+        api=self.agent_api(device)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(submit_one_synthetic_claim(
+                api,FakeWin32(),journal_dir=tmp),'SUBMITTED_TO_WINDOWS')
+        self.conn.execute("""UPDATE synthetic_pr211_original_jobs
+             SET created_at=NOW()-INTERVAL '48 hours'""")
+        r=self.client.post('/synthetic/pr211/manager/retention',
+            json={'csrf':self.manager_csrf,'hours':24})
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(r.json['erased'],1)
+        self.assertIsNone(self.conn.execute(
+            'SELECT cipher FROM synthetic_pr211_original_jobs').fetchone()[0])
+        self.assertEqual(self.conn.execute(
+            'SELECT COUNT(*) FROM synthetic_pr211_original_jobs').fetchone()[0],1)
+        self.assertIn('CIPHERTEXT_ERASED',
+            [v[0] for v in self.conn.execute(
+                'SELECT event FROM synthetic_pr211_original_events')])
+
     def test_agent_payload_not_accessible_without_credential(self):
         self.stage()
         self.scan()
