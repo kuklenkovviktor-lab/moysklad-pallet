@@ -8,9 +8,23 @@ test -f "$SRC/wms.py"
 test -f "$SRC/tests/printing/test_existing_fbs_printer_qr.cjs"
 test -f "$SRC/tests/printing/test_existing_fbs_real_wms_pg_isolated.py"
 test -f "$SRC/deploy/verify_line_printer_print_queue_pg_isolated.sh"
-if ! command -v node >/dev/null 2>&1; then
-  echo "BLOCKED: Node.js required for FBS scanner test. No deploy performed." >&2
-  exit 2
+# Use a disposable Node container if Node is not installed on HOSTKEY.
+# Keep the repository readonly; no volumes except checkout, no network for JS.
+if command -v node >/dev/null 2>&1; then
+  js_test() { node "$SRC/tests/printing/test_existing_fbs_printer_qr.cjs"; }
+else
+  command -v docker >/dev/null 2>&1 || {
+    echo "BLOCKED: neither Node.js nor Docker available; no deploy performed." >&2
+    exit 2
+  }
+  js_test() {
+    docker run --rm --network none --read-only --cap-drop ALL \
+      --security-opt no-new-privileges:true \
+      --tmpfs /tmp:rw,size=16m \
+      --user 65534:65534 \
+      -v "$SRC:/app:ro" -w /app \
+      node:22-alpine node tests/printing/test_existing_fbs_printer_qr.cjs
+  }
 fi
 python3 - "$SRC" <<'PY'
 import ast
