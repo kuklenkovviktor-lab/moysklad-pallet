@@ -13,8 +13,24 @@ try {
         # PREPARATION NEVER PRINTS. A durable PG stand marker forbids retries.
         py -m services.printing.grit_windows_usb_agent --check
         if ($LASTEXITCODE -ne 0) { throw 'PhysicalOne: check failed; NO PRINT' }
-        $remote = 'APP=$(sed -n "s/^APP=//p" /tmp/grit-pr208-demo.state); case "$APP" in grit-ui-pr192demo-*) docker exec "$APP" python /app/deploy/prepare_pr210_physical_one.py ;; *) exit 1 ;; esac'
-        & ssh grit $remote
+        # Stream an isolated shell script over SSH stdin: no remote-shell
+        # quote escaping and no manager/demo secret exposed to Windows.
+        # The repository is updated ONLY if it is the /tmp PR210 checkout
+        # mounted read-only into the designated synthetic demo container.
+        $remote = @'
+set -Eeuo pipefail
+STATE=/tmp/grit-pr208-demo.state
+test -f "$STATE"
+test ! -L "$STATE"
+APP=$(sed -n 's/^APP=//p' "$STATE")
+case "$APP" in grit-ui-pr192demo-*) ;; *) exit 1 ;; esac
+SRC=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}{{end}}{{end}}' "$APP")
+case "$SRC" in /tmp/grit-pr210-*) ;; *) exit 1 ;; esac
+test "$(git -C "$SRC" branch --show-current)" = "feature/pr210-auto-usb-synthetic-from-fbs"
+git -C "$SRC" pull --ff-only
+docker exec "$APP" python /app/deploy/prepare_pr210_physical_one.py
+'@
+        $remote | & ssh grit 'bash -s'
         if ($LASTEXITCODE -ne 0) { throw 'PhysicalOne: remote synthetic preparation refused; NO PRINT. NEVER RETRY' }
         py -m services.printing.grit_windows_usb_agent --auto-one --confirm GRIT-BRIDGE-ONE-SYNTHETIC-LABEL
         if ($LASTEXITCODE -ne 0) { throw 'PhysicalOne: UNKNOWN/FAILED; NEVER RETRY' }
