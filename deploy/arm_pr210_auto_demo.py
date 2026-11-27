@@ -50,13 +50,21 @@ def main():
     # verified its loopback port, dedicated network, PG17 and synthetic gate.
     # Never switch to a hardcoded image tag or a production container.
     image_tag = app["Config"].get("Image", "")
+    image_id = app.get("Image", "")
+    # The isolated PR208 refresh runs the app by image digest, so Docker
+    # legitimately reports Config.Image=sha256:... instead of a release tag.
+    # Accept ONLY a known-form release tag OR the exact currently-running ID.
     if (not isinstance(image_tag, str)
-            or not re.fullmatch(r"grit-wms:release-[0-9a-f]{40}", image_tag)
-            or not isinstance(app.get("Image"), str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", app["Image"])):
-        raise RuntimeError("Unexpected non-release demo image; refuses upgrade")
-    if docker("image", "inspect", app["Image"]) == "":
-        raise RuntimeError("Existing isolated image unavailable")
+            or not isinstance(image_id, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)
+            or not (re.fullmatch(r"grit-wms:release-[0-9a-f]{40}", image_tag)
+                    or image_tag == image_id)):
+        raise RuntimeError("Unexpected isolated demo image reference; refuses upgrade")
+    inspected = json.loads(docker("image", "inspect", image_id))
+    if (len(inspected) != 1 or inspected[0].get("Id") != image_id):
+        raise RuntimeError("Existing isolated image digest mismatch")
+    if not app.get("Config", {}).get("Cmd") or "line_printer_demo_app:app" not in app["Config"]["Cmd"]:
+        raise RuntimeError("Existing isolated demo app command mismatch")
     if not (ROOT/"line_printer_demo_app.py").is_file():
         raise RuntimeError("PR210 source missing")
     import fcntl
