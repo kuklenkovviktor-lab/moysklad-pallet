@@ -37,7 +37,7 @@ for name in ("wms.py", "line_printer_demo_app.py",
     ast.parse((root/name).read_text(encoding="utf-8"),filename=name)
 print("PR209 PYTHON SYNTAX PASS")
 PY
-node "$SRC/tests/printing/test_existing_fbs_printer_qr.cjs"
+js_test
 echo "PR209 FBS EXISTING UI JS PASS"
 bash "$SRC/deploy/verify_line_printer_print_queue_pg_isolated.sh" "$SRC"
 echo "PR209 EXISTING FBS QR + ISOLATED PG17 REGRESSIONS PASS"
