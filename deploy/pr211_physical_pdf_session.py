@@ -89,7 +89,18 @@ def connection(dsn):
 
 def require_http(resp, name, code=200):
     if resp.status_code!=code or not isinstance(resp.json,dict):
-        raise RuntimeError(name+'_HTTP_'+str(resp.status_code))
+        # Emit only the server's fixed refusal reason; never print PDF,
+        # device tokens, QR values or untrusted response bodies.
+        payload=resp.get_json(silent=True)
+        reason=payload.get('error','UNKNOWN') if isinstance(payload,dict) else 'UNKNOWN'
+        allowed={'PDF_STICKER_NOT_UNIQUELY_LINKED_TO_WB_ORDER',
+                 'PDF_STICKER_LAYOUT_UNVERIFIED','STALE_WB_ORDER_SNAPSHOT',
+                 'CATALOG_PRODUCT_OR_PACK_MISMATCH','WRONG_PRINTER_LINE',
+                 'CELL_UNVERIFIED_OR_AMBIGUOUS','SOURCE_PAGE_NOT_58X40_MM',
+                 'PDF_PRODUCT_BARCODE_DIFFERS_FROM_WB_SKU',
+                 'INVALID_ACCOUNT_ID','SERVER_VERIFIED_PRINTER_LINES_REQUIRED'}
+        safe=reason if reason in allowed else 'UNSPECIFIED'
+        raise RuntimeError(name+'_HTTP_'+str(resp.status_code)+'_'+safe)
     return resp.json
 
 
