@@ -353,6 +353,31 @@ class UsbBridgePG17Tests(TestCase):
                 shift_id="s1", qr_payload=self.case.wms_case.qr),0)
             self.assertEqual(self.ping().json["waiting"],0)
 
+    def test_auto_refuses_revoked_signed_qr_before_approval(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            with pg() as conn:
+                conn.execute("UPDATE grit_line_printers SET token_digest=%s WHERE printer_id='p1'",
+                             ("0"*64,))
+            self.assertEqual(auto_approve_synthetic_queue(
+                pg,"p1","e1",shift_id="s1",qr_payload=self.case.wms_case.qr),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
+    def test_auto_refuses_closed_shift_before_approval(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            with pg() as conn:
+                conn.execute("UPDATE shifts SET ended_at='closed' WHERE id='s1'")
+            self.assertEqual(auto_approve_synthetic_queue(
+                pg,"p1","e1",shift_id="s1",qr_payload=self.case.wms_case.qr),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
     def test_auto_wrong_stand_does_not_consume(self):
         from services.printing.usb_test_preparation import stand_identity
         with mock.patch.dict(os.environ, {
