@@ -22,6 +22,8 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS synthetic_pr211_original_jobs (
          job_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, order_id TEXT NOT NULL,
          printer_id TEXT NOT NULL, line TEXT NOT NULL, sticker_hash TEXT NOT NULL,
+         source_sku TEXT NOT NULL, source_product_id TEXT NOT NULL,
+         source_article TEXT NOT NULL,
          source_hash TEXT NOT NULL, payload_hash TEXT NOT NULL,
          cipher BYTEA, state TEXT NOT NULL
              CHECK(state IN ('STAGED','QUEUED','CLAIMED','SUBMITTED','UNKNOWN','BLOCKED')),
@@ -118,10 +120,12 @@ def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None,require
         for job_id,job,digest,ciphertext in prepared:
             conn.execute("""INSERT INTO synthetic_pr211_original_jobs
                 (job_id,account_id,order_id,printer_id,line,sticker_hash,
+                 source_sku,source_product_id,source_article,
                  source_hash,payload_hash,cipher,state)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (job_id,job.account_id,job.order_id,printer_id,job.line,
                  hashlib.sha256(job.sticker_code.encode()).hexdigest(),
+                 job.product_barcode,job.product_id,job.article,
                  source_hash,digest,ciphertext,'STAGED' if require_qr else 'QUEUED'))
             _audit(conn,job_id,'ORIGINAL_STAGED')
     return len(prepared)
@@ -142,13 +146,14 @@ def claim(conn,*,printer_id,key,device_authenticated,device_id=''):
         if blocked:
             raise LabelSourceError('UNRESOLVED_PRINT_NO_RETRY')
         row=conn.execute("""SELECT job_id,account_id,order_id,line,payload_hash,
-                   cipher,sticker_hash FROM synthetic_pr211_original_jobs
+                   cipher,sticker_hash,source_sku,source_product_id,source_article
+                   FROM synthetic_pr211_original_jobs
             WHERE printer_id=%s AND state='QUEUED'
             ORDER BY created_at,job_id FOR UPDATE SKIP LOCKED LIMIT 1""",
             (printer_id,)).fetchone()
         if not row:
             return None
-        job_id,account,order,line,digest,cipher,sticker_hash=row
+        job_id,account,order,line,digest,cipher,sticker_hash,source_sku,source_pid,source_article=row
         # Production-schema source can change after PDF staging; reject
         # cancellation, cache changes or QR/sticker revocation before claim.
         # This check is inside the same transaction as the durable claim.
@@ -173,16 +178,24 @@ def claim(conn,*,printer_id,key,device_authenticated,device_id=''):
             except (ValueError,TypeError,OverflowError,AttributeError):
                 valid=False
         if valid:
-            # Ensure the ORIGINAL SKU still maps to one active cell on the
-            # preapproved line, not a newly moved or ambiguous location.
-            mapped=conn.execute("""SELECT l.label,l.active FROM
-               wb_fbs_order_skus k
-               JOIN fbs_catalog_barcodes c ON c.barcode=k.sku
-               JOIN cell_sku_assignments a ON a.product_id=c.product_id
-               JOIN replenishment_locations l ON l.id=a.location_id
-               WHERE k.account_id=%s AND k.order_id=%s
-                 AND c.is_pack=0 AND c.quantity=1""",
+            # Re-read exact SKU, product ID, article and non-pack unit mapping,
+            # rejecting any mutation after original PDF staging, even if the
+            # replacement product happens to live on the same warehouse line.
+            current=conn.execute("""SELECT k.sku,c.product_id,c.article,
+                   c.quantity,c.is_pack FROM wb_fbs_order_skus k
+               LEFT JOIN fbs_catalog_barcodes c ON c.barcode=k.sku
+               WHERE k.account_id=%s AND k.order_id=%s""",
                (account,order)).fetchall()
+            valid=(len(current)==1 and current[0][0]==source_sku
+                   and current[0][1]==source_pid
+                   and str(current[0][2] or '').strip().casefold()
+                       ==source_article.strip().casefold()
+                   and current[0][3] == 1 and current[0][4]==0)
+        if valid:
+            mapped=conn.execute("""SELECT l.label,l.active
+               FROM cell_sku_assignments a JOIN replenishment_locations l
+               ON l.id=a.location_id WHERE a.product_id=%s""",
+               (source_pid,)).fetchall()
             valid=(len(mapped)==1 and mapped[0][1]==1
                    and bool(re.match(r'^'+re.escape(line)+r'-?\d',
                                      str(mapped[0][0]).upper())))
