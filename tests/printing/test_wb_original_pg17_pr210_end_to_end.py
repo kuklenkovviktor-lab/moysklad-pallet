@@ -250,6 +250,33 @@ class OriginalPdfPG17WindowsEndToEnd(unittest.TestCase):
             'SELECT state FROM synthetic_pr211_original_jobs').fetchone()[0],
             'BLOCKED')
 
+    def test_order_sku_replaced_same_line_after_staging_blocks(self):
+        self.stage()
+        self.db.execute("UPDATE wb_fbs_order_skus SET sku='OTHER-SKU'")
+        self.db.execute("INSERT INTO fbs_catalog_barcodes VALUES(%s,%s,%s,%s,%s)",
+            ('OTHER-SKU','p1','SYNTH-ART',1,0))
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+
+    def test_catalog_article_replaced_same_line_after_staging_blocks(self):
+        self.stage()
+        self.db.execute("UPDATE fbs_catalog_barcodes SET article='OTHER-ARTICLE'")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+
+    def test_product_id_reassigned_same_line_after_staging_blocks(self):
+        self.stage()
+        self.db.execute("UPDATE fbs_catalog_barcodes SET product_id='p2'")
+        self.db.execute("UPDATE cell_sku_assignments SET product_id='p2'")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+
     def test_reject_non_autocommit_connection(self):
         with psycopg.connect(DSN,autocommit=False) as unsafe:
             with self.assertRaisesRegex(RuntimeError,'AUTOCOMMIT_CONNECTION'):
