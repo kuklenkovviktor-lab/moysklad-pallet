@@ -30,7 +30,7 @@ TEST_SKU='2050291804984'
 TEST_ARTICLE='SYNTH-ART'
 TEST_STICKER='59298125228'
 PRINTER='p1'
-KEY=b'GRIT-PR211-PHYSICAL-SYNTH-32-KEY!'
+KEY=b'GRIT-PR211-PHYSICAL-SYNTH-32-KEY'
 # Genuine Code128 B/C stripe decomposition for the INVENTED numeric label
 # generated offline with code128 encoder. NOT a real WB label or WB API barcode.
 CODE128_PATTERN='BaAbCbCcBaAaCbBbAaAbAaDbCbAaBbBbCaAbAaDaCaCaAbBbBbBaBbBcCaAaB'
