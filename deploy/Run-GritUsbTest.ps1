@@ -30,7 +30,7 @@ test "$(git -C "$SRC" branch --show-current)" = "feature/pr210-auto-usb-syntheti
 git -C "$SRC" pull --ff-only
 docker exec "$APP" python /app/deploy/prepare_pr210_physical_one.py
 '@
-        $remote | & ssh grit 'bash -s'
+        $remote | & ssh grit "tr -d '\r' | bash -s"
         if ($LASTEXITCODE -ne 0) { throw 'PhysicalOne: remote synthetic preparation refused; NO PRINT. NEVER RETRY' }
         py -m services.printing.grit_windows_usb_agent --auto-one --confirm GRIT-BRIDGE-ONE-SYNTHETIC-LABEL
         if ($LASTEXITCODE -ne 0) { throw 'PhysicalOne: UNKNOWN/FAILED; NEVER RETRY' }
