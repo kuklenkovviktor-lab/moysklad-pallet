@@ -20,9 +20,14 @@ real employee data, customer data, printer hardware or network access in tests.
    `WB <11 digit>` text structure. The nine-character / `*` sticker variants
    **must not be assumed compatible**. Test the parser separately on synthetic
    representative files. No actual warehouse PDF is required or permitted.
-2. Replace disposable SQLite outbox with **PostgreSQL 17 transactional store**,
-   migration planning and locking. Never attach the prototype tables directly
-   to production.
+2. **Disposable PostgreSQL 17 queue prototype now implemented** in
+   `services/printing/wb_original_pg17_outbox.py`: advisory locking,
+   unique per-order staging, authorized-device seam, durable CLAIMED,
+   AES-256-GCM, and original TSPL bitmap. It calls the **same**
+   `_send_exactly_one` RAW spool function copied unchanged from PR210, through
+   a **fake** Windows spooler. Production PG migration, real HTTP/device
+   authentication, permissions and retention are NOT implemented.
+   Never attach these synthetic tables directly to production.
 3. Bind staging and claiming to existing GRIT employee/shift session,
    manager upload role, signed printer QR, explicit printer-id→USB-device
    allowlist, scoped device token and double-check of current order status.
@@ -55,3 +60,21 @@ bash "$DIR/deploy/verify_pr211_wb_source_preflight.sh" "$DIR"
 This runs synthetic-only source, raster, encrypted queue and fake raw
 submission tests without an API token or attached printer. A green result
 does **not** authorize production deployment.
+
+## One full PG17 + PR210 virtual command (new)
+
+```bash
+DIR=$(mktemp -d /tmp/grit-pr211-XXXXXX)
+git clone -q --depth 1 --branch feature/pr211-wb-real-source-preflight \
+  https://github.com/kuklenkovviktor-lab/moysklad-pallet.git "$DIR"
+bash "$DIR/deploy/verify_pr211_full_pg17_pr210_virtual.sh" "$DIR"
+```
+
+This command creates only a disposable internal Docker network and PostgreSQL17
+with tmpfs storage. It runs the earlier source contract suite and eight new
+PG17 tests covering original bitmap handoff through PR210 RAW spooler with
+fake Windows device, concurrent claims, replay, and UNKNOWN.
+Cleanup occurs on exit.
+
+**No HOSTKEY execution evidence has been collected yet for these new tests.**
+Do not label PG17 + PR210 virtual E2E PASS until final PASS line appears.
