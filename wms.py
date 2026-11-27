@@ -1716,15 +1716,50 @@ async function acceptWb(code){
  if(result)await refresh();
  return result;
 }
+// Single existing /fbs scanner handles printer QR; NO additional worker page or module.
+// This provisional backend is deliberately isolated to the disposable synthetic demo.
+// The real WMS must never send a printer QR through WB/product scan endpoints.
+async function acceptPrinterQr(code){
+ if(pendingProduct){
+  showTsdError('Сначала заверши текущую пару: товар и стикер WB. QR принтера не изменил заказ.');
+  return false;
+ }
+ const auth=await fetch('/synthetic/pr192/print-queue/session',{
+  method:'GET',credentials:'same-origin',cache:'no-store',
+  headers:{'Accept':'application/json'}
+ });
+ let ticket;
+ try{ticket=await auth.json()}catch(e){throw Error('Изолированная очередь принтера недоступна')}
+ if(!auth.ok||ticket.synthetic!==true||!ticket.csrf){
+  throw Error('Очередь принтера недоступна. Заказ и состояние сканирования не изменены.');
+ }
+ const response=await fetch('/synthetic/pr192/print-queue/scan',{
+  method:'POST',credentials:'same-origin',cache:'no-store',
+  headers:{'Content-Type':'application/json','Accept':'application/json'},
+  body:JSON.stringify({qr:code,csrf:ticket.csrf})
+ });
+ let data;
+ try{data=await response.json()}catch(e){throw Error('Нет подтверждения сервера для QR принтера')}
+ if(!response.ok||data.ok!==true||data.synthetic!==true||data.physical_printing!==false){
+  throw Error('QR принтера не подтверждён. Никаких заказов не засчитано.');
+ }
+ beep(true);
+ const resultEl=document.getElementById('result');
+ resultEl.style.color='';
+ resultEl.textContent='✅ Принтер принят · в очереди: '+Number(data.queued_new||0)+
+   ' новых, '+Number(data.already_queued||0)+' ранее добавленных. Бумажная печать не подтверждена.';
+ return true;
+}
 async function handleScan(code){
  code=(code||'').trim();if(!code||busy||!shiftId)return;
  busy=true;
  try{
   if(queuedFbsScan()){await retryFbsOutbox();await refresh();return}
-  if(pendingProduct && /^97[0-9]{22}$/.test(code))await acceptSkipQr(code);
+  if(code.startsWith('GRIT-PRINTER:'))await acceptPrinterQr(code);
+  else if(pendingProduct && /^97[0-9]{22}$/.test(code))await acceptSkipQr(code);
   else if(pendingProduct)await acceptWb(code);
   else await acceptProduct(code);
- }catch(e){showTsdError('Нет подтверждения сервера. Обнови связь; ожидающий товар сохранён.')}finally{
+ }catch(e){showTsdError(e && e.message ? e.message : 'Нет подтверждения сервера. Обнови связь; ожидающий товар сохранён.')}finally{
   setTimeout(()=>{busy=false;const el=document.getElementById('barcode');el.value='';el.focus()},60);
  }
 }
