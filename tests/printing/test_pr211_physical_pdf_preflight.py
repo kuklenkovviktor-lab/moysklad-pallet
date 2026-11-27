@@ -67,6 +67,46 @@ class SyntheticSourcePDFTests(TestCase):
             decode_claim(envelope)
 
 
+class RealSourceMatchingAgainstSQLite(TestCase):
+    def test_unmocked_pdf_matching_numeric_wb_code_to_order(self):
+        import sqlite3
+        from services.printing.wb_pdf_original_label import match_source_pdf
+        from datetime import datetime, timezone
+        now=datetime.now(timezone.utc)
+        with sqlite3.connect(':memory:') as conn:
+            conn.executescript("""
+              CREATE TABLE wb_fbs_orders(account_id TEXT,order_id TEXT,
+                wb_status TEXT,local_status TEXT,synced_at TEXT);
+              CREATE TABLE wb_fbs_stickers(account_id TEXT,order_id TEXT,barcode TEXT);
+              CREATE TABLE wb_fbs_picking_queue(account_id TEXT,order_id TEXT);
+              CREATE TABLE wb_fbs_order_skus(account_id TEXT,order_id TEXT,sku TEXT);
+              CREATE TABLE fbs_catalog_barcodes(barcode TEXT,product_id TEXT,
+                article TEXT,quantity FLOAT,is_pack INTEGER);
+              CREATE TABLE replenishment_locations(id TEXT,label TEXT,active INTEGER);
+              CREATE TABLE cell_sku_assignments(location_id TEXT,product_id TEXT);
+            """)
+            conn.execute('INSERT INTO wb_fbs_orders VALUES (?,?,?,?,?)',
+                ('synthetic','o1','confirm','pending',now.isoformat()))
+            conn.execute('INSERT INTO wb_fbs_stickers VALUES (?,?,?)',
+                ('synthetic','o1',TEST_STICKER))
+            conn.execute('INSERT INTO wb_fbs_picking_queue VALUES (?,?)',
+                ('synthetic','o1'))
+            conn.execute('INSERT INTO wb_fbs_order_skus VALUES (?,?,?)',
+                ('synthetic','o1',TEST_SKU))
+            conn.execute('INSERT INTO fbs_catalog_barcodes VALUES (?,?,?,?,?)',
+                (TEST_SKU,'p1',TEST_ARTICLE,1,0))
+            conn.execute('INSERT INTO replenishment_locations VALUES (?,?,?)',
+                ('l1','А-05-1',1))
+            conn.execute('INSERT INTO cell_sku_assignments VALUES (?,?)',
+                ('l1','p1'))
+            jobs=match_source_pdf(pdf_bytes(),conn,account_id='synthetic',
+                verified_lines=('А',),clock=now)
+            self.assertEqual(len(jobs),1)
+            self.assertEqual(jobs[0].sticker_code,TEST_STICKER)
+            self.assertEqual(jobs[0].line,'А')
+            self.assertEqual(jobs[0].page_index,1)
+
+
 class FakeWindows:
     PRINTER_ENUM_LOCAL=2
     PRINTER_ENUM_CONNECTIONS=4
