@@ -238,6 +238,18 @@ class OriginalPdfPG17WindowsEndToEnd(unittest.TestCase):
             key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
         self.assertEqual(len(device.writes),0)
 
+    def test_sync_cache_stale_after_staging_blocks_before_usb(self):
+        self.stage()
+        self.db.execute("""UPDATE wb_fbs_orders
+            SET synced_at='2026-01-01T00:00:00+00:00'""")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+        self.assertEqual(self.db.execute(
+            'SELECT state FROM synthetic_pr211_original_jobs').fetchone()[0],
+            'BLOCKED')
+
     def test_reject_non_autocommit_connection(self):
         with psycopg.connect(DSN,autocommit=False) as unsafe:
             with self.assertRaisesRegex(RuntimeError,'AUTOCOMMIT_CONNECTION'):
