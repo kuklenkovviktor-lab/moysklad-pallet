@@ -350,6 +350,25 @@ class PR211ManagerWorkerDeviceHTTPTests(unittest.TestCase):
             [v[0] for v in self.conn.execute(
                 'SELECT event FROM synthetic_pr211_original_events')])
 
+    def test_second_agent_on_same_printer_cannot_ack_first_agent_ticket(self):
+        self.assertEqual(self.stage().status_code,200)
+        d1=self.enroll()
+        d2=self.enroll()
+        self.assertEqual(self.scan().status_code,200)
+        first=self.agent_api(d1)('/synthetic/pr211/agent/claim',{})
+        self.assertEqual(first['state'],'CLAIMED')
+        headers={'X-GRIT-Device-ID':d2['device_id'],
+                 'Authorization':'Bearer '+d2['token']}
+        rejected=self.client.post('/synthetic/pr211/agent/report',
+            json={'ticket_id':first['ticket_id'],'result':'SUBMITTED'},
+            headers=headers)
+        self.assertEqual(rejected.status_code,409)
+        self.assertEqual(self.conn.execute('SELECT state FROM '
+            'synthetic_pr211_original_jobs').fetchone()[0],'CLAIMED')
+        owned=self.agent_api(d1)('/synthetic/pr211/agent/report',
+            {'ticket_id':first['ticket_id'],'result':'SUBMITTED'})
+        self.assertEqual(owned['state'],'SUBMITTED')
+
     def test_agent_payload_not_accessible_without_credential(self):
         self.stage()
         self.scan()
