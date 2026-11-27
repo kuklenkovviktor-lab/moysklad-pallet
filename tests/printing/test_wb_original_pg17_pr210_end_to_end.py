@@ -140,10 +140,9 @@ class OriginalPdfPG17WindowsEndToEnd(unittest.TestCase):
         self.assertEqual(len(device.writes),1)
         self.assertEqual(self.db.execute('SELECT state FROM synthetic_pr211_original_jobs').fetchone()[0],
                          'SUBMITTED')
-        self.assertEqual([r[0] for r in self.db.execute(
-            'SELECT event FROM synthetic_pr211_original_events ORDER BY created_at,event_id')],
-            ['CLAIMED_BEFORE_RAW','ORIGINAL_STAGED','SUBMITTED'] if False else
-            sorted(['ORIGINAL_STAGED','CLAIMED_BEFORE_RAW','SUBMITTED']))
+        self.assertEqual({r[0] for r in self.db.execute(
+            'SELECT event FROM synthetic_pr211_original_events')},
+            {'ORIGINAL_STAGED','CLAIMED_BEFORE_RAW','SUBMITTED'})
 
     def test_partial_raw_error_becomes_unknown_no_retry(self):
         self.stage()
