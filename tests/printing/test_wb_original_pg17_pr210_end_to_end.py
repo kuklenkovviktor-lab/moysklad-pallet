@@ -211,6 +211,33 @@ class OriginalPdfPG17WindowsEndToEnd(unittest.TestCase):
             self.stage()
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM synthetic_pr211_original_jobs').fetchone()[0],1)
 
+    def test_cancelled_after_staging_blocks_before_usb(self):
+        self.stage()
+        self.db.execute("UPDATE wb_fbs_orders SET wb_status='canceled'")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+        self.assertEqual(self.db.execute(
+            'SELECT state FROM synthetic_pr211_original_jobs').fetchone()[0],
+            'BLOCKED')
+
+    def test_sticker_changed_after_staging_blocks_before_usb(self):
+        self.stage()
+        self.db.execute("UPDATE wb_fbs_stickers SET barcode='REVOKED'")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+
+    def test_product_moved_after_staging_blocks_before_usb(self):
+        self.stage()
+        self.db.execute("UPDATE replenishment_locations SET label='Б-07-1'")
+        device=FakeWindowsSpooler()
+        self.assertEqual(dispatch_fake_windows(self.db,printer_id='p1',
+            key=KEY,device_authenticated=True,fake_spooler=device),'EMPTY')
+        self.assertEqual(len(device.writes),0)
+
     def test_reject_non_autocommit_connection(self):
         with psycopg.connect(DSN,autocommit=False) as unsafe:
             with self.assertRaisesRegex(RuntimeError,'AUTOCOMMIT_CONNECTION'):
