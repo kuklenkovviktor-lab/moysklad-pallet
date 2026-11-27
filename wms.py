@@ -1750,8 +1750,11 @@ async function acceptPrinterQr(code){
  beep(true);
  const resultEl=document.getElementById('result');
  resultEl.style.color='';
- resultEl.textContent='✅ Принтер принят · в очереди: '+Number(data.queued_new||0)+
-   ' новых, '+Number(data.already_queued||0)+' ранее добавленных. Бумажная печать не подтверждена.';
+ const approved=Number(data.auto_usb_approved||0);
+ resultEl.textContent='✅ QR принтера принят · в очереди: '+Number(data.queued_new||0)+
+   ' новых, '+Number(data.already_queued||0)+' ранее добавленных'+
+   (approved>0?' · USB-отправка разрешена: '+approved:'')+
+   '. Печать на бумаге пока не подтверждена.';
  return true;
 }
 async function handleScan(code){

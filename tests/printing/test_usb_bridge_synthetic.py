@@ -13,6 +13,7 @@ from flask import session
 from services.printing.usb_bridge_synthetic import (
     initialize_synthetic_usb_bridge,
     make_synthetic_usb_bridge_blueprint,
+    auto_approve_synthetic_queue,
 )
 from services.printing.virtual_agent import initialize_virtual_sink
 
@@ -286,5 +287,141 @@ class UsbBridgePG17Tests(TestCase):
         self.assertFalse(change.accepted)
         self.assertEqual(change.reason,'USB_RETRY_FORBIDDEN')
         self.assertEqual(self.claim().json['state'],'EMPTY')
+
+    def test_auto_mode_cannot_be_used_without_explicit_gate(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with pg() as conn:
+            stand = stand_identity(conn)
+        forbidden = self.claim({"auto": True, "stand_id": stand})
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(auto_approve_synthetic_queue(pg, "p1", "e1",
+            shift_id="s1", qr_payload=self.case.wms_case.qr), 0)
+        self.assertEqual(self.ping().json["waiting"], 0)
+
+    def test_fbs_qr_creates_automatic_usb_approval_without_manager(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            worker_token = self.worker.get("/synthetic/pr192/print-queue/session")
+            self.assertEqual(worker_token.status_code, 200, worker_token.json)
+            response = self.worker.post("/synthetic/pr192/print-queue/scan",
+                json={"qr":self.case.wms_case.qr,
+                      "csrf":worker_token.json["csrf"]})
+            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(response.json["auto_usb_approved"], 1)
+            self.assertEqual(response.json["queued_new"], 0)
+            with pg() as conn:
+                stand = stand_identity(conn)
+                job = conn.execute("""SELECT delivery_transport,state
+                    FROM synthetic_pr192_print_jobs WHERE order_id='o1'""").fetchone()
+            self.assertEqual(job, ("USB","QUEUED"))
+            claim = self.claim({"auto":True,"stand_id":stand})
+            self.assertEqual(claim.status_code, 200, claim.json)
+            self.assertEqual(claim.json["state"], "CLAIMED")
+            ticket = claim.json["ticket_id"]
+            self.assertEqual(self.report(ticket).json["state"], "SUBMITTED")
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"], "EMPTY")
+            self.assertEqual(self.state()["jobs"][0]["state"], "SUBMITTED")
+            # A scanned printer QR never creates a WMS product or WB count.
+            self.assertEqual(self.case.wms_case.wms.query_one(
+                "SELECT COUNT(*) FROM scans")[0], 0)
+
+    def test_physical_one_shot_qr_approves_exactly_one_of_two(self):
+        with pg() as conn:
+            conn.execute("""INSERT INTO wb_fbs_orders
+                VALUES ('synthetic','o2','confirm','pending')""")
+            conn.execute("""INSERT INTO wb_fbs_picking_queue
+                VALUES ('synthetic','o2')""")
+            conn.execute("""INSERT INTO wb_fbs_order_skus
+                VALUES ('synthetic','o2','SKU1')""")
+            conn.execute("""INSERT INTO synthetic_pr192_print_stickers
+                VALUES ('synthetic','o2','SYNTHETIC-ONLY-o2')""")
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR210_PHYSICAL_ONE_SHOT": "YES_ISOLATED_ONE",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            token = self.worker.get("/synthetic/pr192/print-queue/session")
+            self.assertEqual(token.status_code, 200)
+            response = self.worker.post("/synthetic/pr192/print-queue/scan",
+                json={"qr":self.case.wms_case.qr,
+                      "csrf":token.json["csrf"]})
+            self.assertEqual(response.status_code,200,response.json)
+            self.assertEqual(response.json["auto_usb_approved"],1)
+            with pg() as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT count(*) FROM synthetic_pr192_usb_approvals "
+                    "WHERE phase='APPROVED'").fetchone()[0],1)
+                self.assertEqual(conn.execute(
+                    "SELECT count(*) FROM synthetic_pr192_print_jobs "
+                    "WHERE state='QUEUED'").fetchone()[0],2)
+
+    def test_auto_mode_cannot_claim_historical_manager_ticket(self):
+        from services.printing.usb_test_preparation import stand_identity
+        self.assertEqual(self.approve().json["state"], "APPROVED")
+        with pg() as conn:
+            stand = stand_identity(conn)
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"], "EMPTY")
+            self.assertEqual(self.ping().json["waiting"], 1)
+            self.assertEqual(self.claim().json["state"], "CLAIMED")
+
+    def test_auto_never_routes_unbound_printer_to_test_xprinter(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(auto_approve_synthetic_queue(pg,"other-printer","e1",
+                shift_id="s1", qr_payload=self.case.wms_case.qr),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
+    def test_auto_refuses_revoked_signed_qr_before_approval(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            with pg() as conn:
+                conn.execute("UPDATE grit_line_printers SET token_digest=%s WHERE printer_id='p1'",
+                             ("0"*64,))
+            self.assertEqual(auto_approve_synthetic_queue(
+                pg,"p1","e1",shift_id="s1",qr_payload=self.case.wms_case.qr),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
+    def test_auto_refuses_closed_shift_before_approval(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            with pg() as conn:
+                conn.execute("UPDATE shifts SET ended_at='closed' WHERE id='s1'")
+            self.assertEqual(auto_approve_synthetic_queue(
+                pg,"p1","e1",shift_id="s1",qr_payload=self.case.wms_case.qr),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
+    def test_auto_wrong_stand_does_not_consume(self):
+        from services.printing.usb_test_preparation import stand_identity
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(auto_approve_synthetic_queue(pg,"p1","e1",
+                shift_id="s1", qr_payload=self.case.wms_case.qr),1)
+            self.assertEqual(self.claim({"auto":True,"stand_id":"wrong"}).status_code,403)
+            with pg() as conn:
+                stand=stand_identity(conn)
+            self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"],"CLAIMED")
+
 if __name__=="__main__":
     main()

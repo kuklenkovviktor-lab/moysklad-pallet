@@ -33,6 +33,78 @@ def initialize_synthetic_usb_bridge(conn):
         conn.execute(DDL)
 
 
+
+def automatic_usb_enabled():
+    """Only one explicitly bound synthetic printer can auto-use test Xprinter."""
+    bound = os.environ.get("GRIT_PR210_USB_PRINTER_ID", "")
+    return (os.environ.get("GRIT_SYNTHETIC_PG_TEST") == "YES_ISOLATED"
+            and os.environ.get("GRIT_PR210_AUTO_USB_SYNTHETIC") == "YES_EXPLICIT"
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", bound) is not None
+            and 32 <= len(os.environ.get("GRIT_PR192_USB_AGENT_TOKEN", "")) <= 256)
+
+
+def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id, *,
+                                     shift_id, qr_payload):
+    """Turn at most 16 existing, revalidated synthetic QUEUED jobs into USB
+    approvals after a verified printer QR scan. No direct printing, no retry.
+
+    The caller MUST first validate the employee/shift and signed printer QR via
+    scan_synthetic_printer_qr; actor and printer come from trusted server session.
+    """
+    if not automatic_usb_enabled():
+        return 0
+    if printer_id != os.environ["GRIT_PR210_USB_PRINTER_ID"]:
+        return 0
+    if (not isinstance(printer_id, str) or
+        not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", printer_id) or
+        not isinstance(actor_id, str) or not 0 < len(actor_id) <= 160):
+        raise ValueError("INVALID_AUTO_USB_IDENTITY")
+    # Revalidate the ORIGINAL signed QR and actual employee/shift under the
+    # SAME PG transaction that grants USB permissions. A QR rotation, inactive
+    # shift or revoked badge after initial enqueue must fail closed.
+    from services.printing.qr_scan import _authorized_identity, _current_printer
+    # Optional one-shot gate ONLY for the pre-authorized isolated physical
+    # synthetic acceptance. The normal demo retains its 16-job ceiling.
+    one_shot = os.environ.get("GRIT_PR210_PHYSICAL_ONE_SHOT") == "YES_ISOLATED_ONE"
+    approval_limit = 1 if one_shot else 16
+    count = 0
+    with connection_factory() as conn:
+        _verify_isolated_connection(conn)
+        with conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('GRIT-USB-ONE-APPROVAL',0))")
+            if (not _authorized_identity(conn, actor_id, shift_id)
+                or _current_printer(conn, printer_id, qr_payload) is None):
+                return 0
+            for job in conn.execute("""SELECT j.job_id,j.account_id,j.order_id,j.sticker_kind
+                FROM synthetic_pr192_print_jobs j
+                WHERE j.printer_id=%s AND j.account_id='synthetic'
+                  AND j.state='QUEUED' AND j.delivery_transport='VIRTUAL'
+                  AND NOT EXISTS (SELECT 1 FROM synthetic_pr192_usb_approvals a
+                      WHERE a.job_id=j.job_id)
+                ORDER BY j.created_at,j.job_id
+                FOR UPDATE OF j SKIP LOCKED LIMIT %s""", (printer_id, approval_limit)).fetchall():
+                job_id, account_id, order_id, kind = job
+                verdict, _ = _validate_before_dispatch(
+                    conn, account_id=account_id, order_id=order_id,
+                    kind=kind, printer_id=printer_id)
+                if verdict != "ELIGIBLE":
+                    continue
+                ticket = uuid.uuid4().hex
+                conn.execute("""UPDATE synthetic_pr192_print_jobs
+                    SET delivery_transport='USB',version=version+1,updated_at=now()
+                    WHERE job_id=%s""", (job_id,))
+                conn.execute("""INSERT INTO synthetic_pr192_usb_approvals
+                    (ticket_id,job_id,printer_id,phase)
+                    VALUES (%s,%s,%s,'APPROVED')""", (ticket,job_id,printer_id))
+                conn.execute("""INSERT INTO synthetic_pr192_print_events
+                    (action_id,job_id,actor_id,event,from_state,to_state,reason)
+                    VALUES (%s,%s,%s,'AUTO_USB_APPROVAL','QUEUED','QUEUED',
+                            'AUTHENTICATED_PRINTER_QR_SYNTHETIC_ONLY')""",
+                    (uuid.uuid4().hex,job_id,actor_id))
+                count += 1
+    return count
+
+
 def _audit(conn, job_id, old, new, reason):
     conn.execute("""INSERT INTO synthetic_pr192_print_events
       (action_id,job_id,actor_id,event,from_state,to_state,reason)
@@ -177,6 +249,7 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
             approved = conn.execute("SELECT ticket_id FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'").fetchall()
         return jsonify(synthetic=True,device=WINDOWS_QUEUE,
                        waiting=count,stand_id=stand,
+                       automatic_synthetic=automatic_usb_enabled(),
                        ticket_id=approved[0][0] if len(approved)==1 else None,
                        physical_printing=False),200,{
                            "Cache-Control":"no-store"}
@@ -187,23 +260,36 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
             return _refuse("AGENT_TOKEN_REQUIRED",403)
         data=request.get_json(silent=True)
         bound = isinstance(data,dict) and set(data)=={"ticket_id","stand_id"}
+        automatic = (isinstance(data,dict) and set(data)=={"auto","stand_id"}
+                     and data.get("auto") is True)
         if bound and (not isinstance(data["ticket_id"],str) or
                       not re.fullmatch("[0-9a-f]{32}",data["ticket_id"]) or
                       not isinstance(data["stand_id"],str)):
             return _refuse("INVALID_BINDING")
-        if data != {} and not bound:
+        if automatic and (not automatic_usb_enabled()
+                          or not isinstance(data.get("stand_id"),str)):
+            return _refuse("AUTO_USB_NOT_ARMED",403)
+        if data != {} and not bound and not automatic:
             return _refuse("EMPTY_BODY_REQUIRED")
         with connection_factory() as conn:
             _verify_isolated_connection(conn)
             with conn.transaction():
-                if bound and data["stand_id"] != stand_identity(conn):
+                if (bound or automatic) and data["stand_id"] != stand_identity(conn):
                     return _refuse("WRONG_STAND",403)
-                claim=conn.execute("""SELECT ticket_id,job_id,printer_id
-                    FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'
-                    AND (%s::text IS NULL OR ticket_id=%s)
-                    ORDER BY approved_at,ticket_id
-                    FOR UPDATE SKIP LOCKED LIMIT 1""",
-                    (data.get("ticket_id"),data.get("ticket_id"))).fetchone()
+                # Automatic worker mode MUST NOT consume any historical
+                # manager-approved or one-shot physical test ticket.
+                extra = """AND a.printer_id=%s
+                    AND EXISTS (SELECT 1 FROM synthetic_pr192_print_events e
+                     WHERE e.job_id=a.job_id AND e.event='AUTO_USB_APPROVAL')""" if automatic else ""
+                claim=conn.execute("""SELECT a.ticket_id,a.job_id,a.printer_id
+                    FROM synthetic_pr192_usb_approvals a WHERE a.phase='APPROVED'
+                    AND (%s::text IS NULL OR a.ticket_id=%s)
+                    """ + extra + """
+                    ORDER BY a.approved_at,a.ticket_id
+                    FOR UPDATE OF a SKIP LOCKED LIMIT 1""",
+                    ((data.get("ticket_id"),data.get("ticket_id"),
+                      os.environ["GRIT_PR210_USB_PRINTER_ID"]) if automatic else
+                     (data.get("ticket_id"),data.get("ticket_id")))).fetchone()
                 if not claim:
                     return jsonify(synthetic=True,physical_printing=False,
                                    state="EMPTY"),200
