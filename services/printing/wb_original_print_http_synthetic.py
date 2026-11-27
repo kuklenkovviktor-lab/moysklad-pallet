@@ -41,6 +41,16 @@ def make_isolated_original_print_blueprint(connection_factory, *,
         raise ValueError('TRUSTED_SESSION_GUARDS_REQUIRED')
     bp=Blueprint('pr211_original_synthetic','pr211_original_synthetic')
 
+    @bp.after_request
+    def no_cache_secrets(response):
+        # JSON payload may contain the one-time device token or original
+        # WB source bitmap. Never cache these HTTP responses anywhere.
+        response.headers['Cache-Control']='no-store, private'
+        response.headers['Pragma']='no-cache'
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='no-referrer'
+        return response
+
     def manager():
         return manager_guard() is True
 
