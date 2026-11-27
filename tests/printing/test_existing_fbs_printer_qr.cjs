@@ -15,7 +15,7 @@ assert(code.includes("if(code.startsWith('GRIT-PRINTER:'))await acceptPrinterQr(
 assert(code.includes("else if(pendingProduct)await acceptWb(code);"));
 assert(code.includes("else await acceptProduct(code);"));
 
-async function trial({ pending = null, authStatus = 200, scanStatus = 200, scanPayload = null, input = "GRIT-PRINTER:1:demo-printer:synthetic-test-token" } = {}) {
+async function trial({ pending = null, outbox = false, authStatus = 200, scanStatus = 200, scanPayload = null, input = "GRIT-PRINTER:1:demo-printer:synthetic-test-token" } = {}) {
   const requests = [], beeps = [], errors = [], accepted = [];
   const element = { textContent: "", style: {}, value: "", focus() {} };
   const sandbox = {
@@ -26,7 +26,7 @@ async function trial({ pending = null, authStatus = 200, scanStatus = 200, scanP
     setTimeout(callback) { callback(); },
     beep(value) { beeps.push(value); },
     showTsdError(text) { errors.push(text); },
-    queuedFbsScan() { return null; },
+    queuedFbsScan() { return outbox ? { request_id: "synthetic-pending" } : null; },
     acceptProduct(code) { accepted.push(["product", code]); },
     acceptWb(code) { accepted.push(["wb", code]); },
     acceptSkipQr(code) { accepted.push(["skip", code]); },
@@ -73,6 +73,16 @@ async function trial({ pending = null, authStatus = 200, scanStatus = 200, scanP
   assert.equal(pending.accepted.length, 0);
   assert.match(pending.errors[0], /Сначала заверши/);
 
+  const pendingOutbox = await trial({outbox: true});
+  assert.equal(pendingOutbox.requests.length, 0,
+    "printer QR must not trigger queued WB outbox network replay");
+  assert.equal(pendingOutbox.accepted.length, 0);
+  assert.match(pendingOutbox.errors[0], /неподтверждённый WB-скан/);
+
+  const aim = await trial({input: "]Q3GRIT-PRINTER:1:demo-printer:synthetic-test-token"});
+  assert.equal(aim.requests.length, 2, "HID scanner AIM marker must be recognized");
+  assert.equal(JSON.parse(aim.requests[1].opts.body).qr.startsWith("GRIT-PRINTER:"), true);
+
   const denied = await trial({authStatus: 401});
   assert.equal(denied.requests.length, 1);
   assert.equal(denied.accepted.length, 0);
@@ -99,5 +109,5 @@ async function trial({ pending = null, authStatus = 200, scanStatus = 200, scanP
   assert.equal(wb.accepted.length, 1);
   assert.equal(wb.accepted[0][0], "wb");
 
-  console.log("PR209 EXISTING FBS SCANNER PRINTER QR SYNTHETIC PASS: 7 scenarios, NO USB/NETWORK");
+  console.log("PR209 EXISTING FBS SCANNER PRINTER QR SYNTHETIC PASS: 9 scenarios, NO USB/NETWORK");
 })().catch(e => {console.error(e);process.exitCode = 1;});
