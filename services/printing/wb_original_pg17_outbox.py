@@ -31,6 +31,8 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS synthetic_pr211_original_events (
          event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES
          synthetic_pr211_original_jobs(job_id), event TEXT NOT NULL,
+         actor_hash TEXT NOT NULL DEFAULT '',
+         reason TEXT NOT NULL DEFAULT '',
          created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
 )
 
@@ -65,10 +67,13 @@ def _printer(pid):
         raise ValueError('INVALID_PRINTER_ID')
 
 
-def _audit(conn,job_id,event):
+def _audit(conn,job_id,event,*,actor_id='',reason=''):
+    actor_hash=(hashlib.sha256(actor_id.encode('utf-8')).hexdigest()[:32]
+                if isinstance(actor_id,str) and actor_id else '')
     conn.execute("""INSERT INTO synthetic_pr211_original_events
-        (event_id,job_id,event) VALUES (%s,%s,%s)""",
-        (uuid.uuid4().hex,job_id,event))
+        (event_id,job_id,event,actor_hash,reason)
+        VALUES (%s,%s,%s,%s,%s)""",
+        (uuid.uuid4().hex,job_id,event,actor_hash,str(reason)[:120]))
 
 
 def initialize(conn):
@@ -119,7 +124,7 @@ def stage(conn,pdf,*,account_id,printer_id,verified_lines,key,clock=None,require
     return len(prepared)
 
 
-def claim(conn,*,printer_id,key,device_authenticated):
+def claim(conn,*,printer_id,key,device_authenticated,device_id=''):
     _check(conn)
     _printer(printer_id)
     _key(key)
@@ -182,12 +187,12 @@ def claim(conn,*,printer_id,key,device_authenticated):
             conn.execute("""UPDATE synthetic_pr211_original_jobs
                 SET state='BLOCKED' WHERE job_id=%s AND state='QUEUED'""",
                 (job_id,))
-            _audit(conn,job_id,'SOURCE_CHANGED_NO_PRINT')
+            _audit(conn,job_id,'SOURCE_CHANGED_NO_PRINT',reason='CURRENT_WB_OR_CELL_CHANGED')
             return None
         ticket=uuid.uuid4().hex
         conn.execute("""UPDATE synthetic_pr211_original_jobs SET state='CLAIMED',
             ticket_id=%s WHERE job_id=%s AND state='QUEUED'""",(ticket,job_id))
-        _audit(conn,job_id,'CLAIMED_BEFORE_RAW')
+        _audit(conn,job_id,'CLAIMED_BEFORE_RAW',actor_id=device_id)
     # A cryptographic failure leaves durable CLAIMED, never re-queues.
     aad=f'{account}\x1f{order}\x1f{printer_id}\x1f{line}\x1f{digest}'.encode()
     try:
@@ -200,7 +205,7 @@ def claim(conn,*,printer_id,key,device_authenticated):
     return ticket,payload
 
 
-def report(conn,*,printer_id,ticket,result,device_authenticated):
+def report(conn,*,printer_id,ticket,result,device_authenticated,device_id=''):
     _check(conn)
     _printer(printer_id)
     if device_authenticated is not True:
@@ -216,7 +221,7 @@ def report(conn,*,printer_id,ticket,result,device_authenticated):
             raise LabelSourceError('TICKET_NOT_CLAIMED_NO_RETRY')
         conn.execute("""UPDATE synthetic_pr211_original_jobs SET state=%s
             WHERE job_id=%s AND state='CLAIMED'""",(result,row[0]))
-        _audit(conn,row[0],result)
+        _audit(conn,row[0],result,actor_id=device_id,reason='WINDOWS_SPOOL_ACK_ONLY')
     return result
 
 
@@ -267,8 +272,8 @@ def approve_worker_qr(conn, *, printer_id, worker_id, shift_id, signed_qr_valid)
             SET state='QUEUED' WHERE printer_id=%s AND state='STAGED'
             RETURNING job_id""",(printer_id,)).fetchall()
         for row in rows:
-            _audit(conn,row[0],'WORKER_QR_'+hashlib.sha256(
-                 (worker_id+'|'+shift_id).encode()).hexdigest()[:12])
+            _audit(conn,row[0],'WORKER_PRINTER_QR_RELEASE',
+                   actor_id=worker_id+'|'+shift_id,reason='SIGNED_QR_AND_ACTIVE_PICKING')
     return len(rows)
 
 
@@ -289,7 +294,7 @@ def prune_printed_payloads(conn, *, retention_hours=24, manager_authorized):
                   NOW() - make_interval(hours => %s)
             RETURNING job_id""",(retention_hours,)).fetchall()
         for (job,) in rows:
-            _audit(conn,job,'CIPHERTEXT_ERASED')
+            _audit(conn,job,'CIPHERTEXT_ERASED',reason='EXPLICIT_MANAGER_RETENTION')
     return len(rows)
 
 
