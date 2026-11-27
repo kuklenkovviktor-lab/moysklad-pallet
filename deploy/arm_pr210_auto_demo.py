@@ -27,12 +27,24 @@ def main():
     if not re.fullmatch(r"/tmp/grit-pr21[0-9]-[A-Za-z0-9_-]+",str(ROOT)):
         # A path outside the known temp test-checkout convention is refused.
         raise RuntimeError("Refusing non-temporary PR210 source checkout")
-    values, app, env, _ = inspect_demo()
+    values, app, env, pg_name = inspect_demo()
     if env.get("GRIT_PR210_AUTO_USB_SYNTHETIC") == "YES_EXPLICIT":
         raise RuntimeError("Isolated demo already auto-armed; refusing duplicate swap")
     token = env.get("GRIT_PR192_USB_AGENT_TOKEN", "")
     if not 32 <= len(token) <= 256:
         raise RuntimeError("Existing device token missing; never generate a replacement silently")
+    # Bind automatic USB dispatch ONLY to the exact synthetic printer whose
+    # single physical ticket Windows previously acknowledged on this stand.
+    # Refuse ambiguous or absent binding; never route every virtual printer
+    # to one physical Xprinter.
+    selected = docker("exec",values["DB"],"psql","-U","postgres",
+                      "-d",pg_name,"-Atc",
+                      "SELECT DISTINCT printer_id FROM synthetic_pr192_usb_approvals "
+                      "WHERE phase='REPORTED' AND result='SUBMITTED_TO_WINDOWS'")
+    selected_ids = [item.strip() for item in selected.splitlines() if item.strip()]
+    if len(selected_ids)!=1 or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}",selected_ids[0]):
+        raise RuntimeError("Need exactly one proven synthetic Xprinter ID; refuses ambiguous USB binding")
+    selected_printer = selected_ids[0]
     if app["Config"].get("Image") != "grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4":
         raise RuntimeError("Unexpected demo image; refuses upgrade")
     if not (ROOT/"line_printer_demo_app.py").is_file():
@@ -49,7 +61,8 @@ def main():
         fd, filename = tempfile.mkstemp(prefix="grit-pr210-env-",dir=PRIVATE)
         os.chmod(filename,0o600)
         try:
-            env = dict(env, GRIT_PR210_AUTO_USB_SYNTHETIC="YES_EXPLICIT")
+            env = dict(env, GRIT_PR210_AUTO_USB_SYNTHETIC="YES_EXPLICIT",
+                       GRIT_PR210_USB_PRINTER_ID=selected_printer)
             with os.fdopen(fd,"w") as secret_file:
                 for key,val in env.items():
                     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*",key) or "\n" in val:
@@ -102,7 +115,7 @@ def main():
         finally:
             Path(filename).unlink(missing_ok=True)
     print("PR210 ISOLATED DEMO AUTO MODE ARMED: preserved PG17, USB token and stand.")
-    print("Only synthetic printer QR can approve automatic USB jobs.")
+    print("Only the previously tested synthetic printer can dispatch USB jobs.")
     print("No live WB, production, main merge, or physical printing happened.")
 
 
