@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+from flask import session as flask_session
 
 if os.getenv("GRIT_SYNTHETIC_PG_TEST") != "YES_ISOLATED":
     raise SystemExit("Isolated PostgreSQL required")
@@ -54,11 +55,20 @@ class VirtualFbsToWindowsAcceptance(unittest.TestCase):
             "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": FAKE_TOKEN,
         }):
-            # Existing /fbs page, existing badge-bound WMS worker session.
-            self.case.app.register_blueprint(self.wms.wms_bp)
-            fbs = self.worker.get("/fbs")
-            self.assertEqual(fbs.status_code, 200, fbs.data[:200])
-            self.assertIn("async function handleScan(code)", fbs.get_data(as_text=True))
+            # The USB fixture has already handled an HTTP request while
+            # seeding a queued job. Flask forbids registering a blueprint
+            # AFTER the first request. Exercise the genuine WMS /fbs handler
+            # under the already authenticated worker session in a request
+            # context; test_existing_fbs_real_wms_pg_isolated.py separately
+            # verifies the original /fbs HTTP route before first request.
+            with self.worker.session_transaction() as saved:
+                worker_session = dict(saved)
+            with self.case.app.test_request_context("/fbs"):
+                flask_session.update(worker_session)
+                fbs = self.wms.fbs_page()
+            self.assertIsInstance(fbs, str)
+            self.assertIn("async function handleScan(code)", fbs)
+            self.assertIn("GRIT-PRINTER:", fbs)
             # No test manager login or manually approved USB ticket.
             with fixture.pg() as conn:
                 stand = stand_identity(conn)
