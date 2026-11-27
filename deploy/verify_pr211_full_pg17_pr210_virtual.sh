@@ -17,6 +17,27 @@ for path in \
     tests/printing/test_wb_original_pg17_pr210_end_to_end.py; do
     test -f "$SRC/$path"
 done
+# Syntax gate BEFORE launching a DB container. Does not import app.py,
+# touch production or make network requests.
+python3 - "$SRC" <<'PR211AST'
+import ast
+import pathlib
+import sys
+root=pathlib.Path(sys.argv[1])
+for name in (
+    'app.py',
+    'services/printing/pr211_registration.py',
+    'services/printing/wb_original_print_http_synthetic.py',
+    'services/printing/wb_original_pg17_device_auth.py',
+    'services/printing/wb_original_pg17_outbox.py',
+    'services/printing/wb_original_usb_agent_synthetic.py',
+    'services/printing/wb_pdf_original_label.py',
+    'tests/printing/test_pr211_http_full_flow_pg17.py',
+    'tests/printing/test_pr211_wb_qr_variants.py',
+):
+    ast.parse((root/name).read_text(encoding='utf-8'),filename=name)
+print('PR211 PYTHON AST SYNTAX PASS')
+PR211AST
 IMAGE="grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4"
 docker image inspect "$IMAGE" >/dev/null
 docker image inspect postgres:17 >/dev/null
