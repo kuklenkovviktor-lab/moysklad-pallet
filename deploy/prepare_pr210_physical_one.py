@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from line_printer_pg_trial import _verify_isolated_connection
 from line_printer_registry import create_printer
+from line_printer_routing import route_order_to_printer
 from services.printing.usb_test_preparation import stand_identity
 
 
@@ -76,6 +77,42 @@ def main():
                 raise RuntimeError("BOUND_PRINTER_MISSING_OR_DISABLED")
             name, lines_json, _ = printer
             lines = tuple(json.loads(lines_json))
+            # Create exactly one NEW invented order for the physical check.
+            # It has a real catalogue+cell mapping within the isolated demo,
+            # but no actual WB source label or customer data.
+            candidates = conn.execute("""SELECT c.barcode,c.product_id,l.label,l.active
+                 FROM fbs_catalog_barcodes c
+                 JOIN cell_sku_assignments a ON a.product_id=c.product_id
+                 JOIN replenishment_locations l ON l.id=a.location_id
+                 WHERE c.is_pack=0 AND c.quantity=1
+                 ORDER BY c.barcode,l.label""").fetchall()
+            mapped = None
+            for sku, product_id, label, active in candidates:
+                assessment = route_order_to_printer(
+                    dict(order_id="SYNTH-PR210-PHYSICAL-ONE",
+                         wb_status="confirm", local_status="pending",
+                         products=[product_id]),
+                    dict(printer_id=printer_id,enabled=True,lines=lines),
+                    [dict(product_id=product_id,label=label,
+                          active=active == 1,confirmed=True)])
+                if assessment.accepted:
+                    mapped = sku
+                    break
+            if not mapped:
+                raise RuntimeError("NO_SYNTHETIC_PRODUCT_IN_BOUND_PRINTER_LINES")
+            order_id = "SYNTH-PR210-ONE-" + stand_id[:16]
+            conn.execute("""INSERT INTO wb_fbs_orders
+                 (account_id,order_id,wb_status,local_status)
+                 VALUES('synthetic',%s,'confirm','pending')""", (order_id,))
+            conn.execute("""INSERT INTO wb_fbs_picking_queue
+                 (account_id,order_id) VALUES('synthetic',%s)""", (order_id,))
+            conn.execute("""INSERT INTO wb_fbs_order_skus
+                 (account_id,order_id,sku) VALUES('synthetic',%s,%s)""",
+                 (order_id,mapped))
+            conn.execute("""INSERT INTO synthetic_pr192_print_stickers
+                 (account_id,order_id,original_sticker)
+                 VALUES('synthetic',%s,%s)""",
+                 (order_id,"SYNTHETIC-NOT-WB-"+stand_id[:16]))
             rotated, qr = create_printer(printer_id, name, lines)
             conn.execute("""UPDATE grit_line_printers SET token_digest=%s
                   WHERE printer_id=%s""", (rotated.token_digest, printer_id))
