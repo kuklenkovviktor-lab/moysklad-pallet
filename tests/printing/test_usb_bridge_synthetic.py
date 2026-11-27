@@ -301,6 +301,7 @@ class UsbBridgePG17Tests(TestCase):
         from services.printing.usb_test_preparation import stand_identity
         with mock.patch.dict(os.environ, {
             "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
         }):
             worker_token = self.worker.get("/synthetic/pr192/print-queue/session")
@@ -334,6 +335,7 @@ class UsbBridgePG17Tests(TestCase):
             stand = stand_identity(conn)
         with mock.patch.dict(os.environ, {
             "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
         }):
             self.assertEqual(self.claim({"auto":True,"stand_id":stand}).json["state"], "EMPTY")
@@ -344,6 +346,7 @@ class UsbBridgePG17Tests(TestCase):
         from services.printing.usb_test_preparation import stand_identity
         with mock.patch.dict(os.environ, {
             "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
         }):
             self.assertEqual(auto_approve_synthetic_queue(pg,"p1","e1"),1)
