@@ -105,7 +105,11 @@ def select_wb_fbs_candidates(conn, *, printer_lines, max_orders=100,
                 problem = "SKU_NOT_UNIQUELY_MAPPED"
                 break
             product_id, qty, is_pack = matches[0]
-            if not product_id or float(qty) != 1.0 or int(is_pack) != 0:
+            try:
+                unit = bool(product_id) and float(qty) == 1.0 and int(is_pack) == 0
+            except (ValueError, TypeError, OverflowError):
+                unit = False
+            if not unit:
                 problem = "PACK_OR_INVALID_UNIT"
                 break
             products.add(str(product_id))
@@ -120,7 +124,11 @@ def select_wb_fbs_candidates(conn, *, printer_lines, max_orders=100,
             FROM cell_sku_assignments a
             JOIN replenishment_locations l ON l.id=a.location_id
             WHERE a.product_id=? ORDER BY l.id""", (product,), adapt)
-        if len(assignments) != 1 or int(assignments[0][1]) != 1:
+        try:
+            one_active = len(assignments) == 1 and int(assignments[0][1]) == 1
+        except (ValueError, TypeError, OverflowError):
+            one_active = False
+        if not one_active:
             refused("CELL_MISSING_AMBIGUOUS_OR_INACTIVE")
             continue
         line = _line(assignments[0][0])
