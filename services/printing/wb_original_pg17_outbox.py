@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import psycopg
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from wb_qr_codec import canonical_wb_sticker
 from services.printing.wb_pdf_original_label import (
     match_source_pdf, source_page_to_tspl, LabelSourceError,
 )
@@ -153,7 +154,7 @@ def claim(conn,*,printer_id,key,device_authenticated):
             (account,order)).fetchall()
         valid=(len(source)==1 and source[0][0]=='confirm'
                and source[0][1]=='pending'
-               and hashlib.sha256(str(source[0][2]).encode()).hexdigest()==sticker_hash)
+               and hashlib.sha256(canonical_wb_sticker(source[0][2]).encode()).hexdigest()==sticker_hash)
         if valid:
             try:
                 updated=source[0][3]
