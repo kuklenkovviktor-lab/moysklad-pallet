@@ -15,10 +15,14 @@ from services.printing.wb_original_pg17_outbox import (
 )
 
 DSN=os.environ.get('PR211_SYNTHETIC_DATABASE_URL','')
-if (os.environ.get('GRIT_SYNTHETIC_PG_TEST')!='YES_ISOLATED'
-        or not DSN.startswith(
-          'postgresql://postgres:synthetic-only@pr211-db:5432/grit_pr211_synthetic_')):
-    raise SystemExit('ONLY_DISPOSABLE_PR211_POSTGRESQL_ALLOWED')
+ISOLATED = (
+    os.environ.get('GRIT_SYNTHETIC_PG_TEST') == 'YES_ISOLATED'
+    and DSN.startswith(
+        'postgresql://postgres:synthetic-only@pr211-db:5432/grit_pr211_synthetic_')
+)
+# During generic pytest discovery, skip rather than killing the entire CI
+# collector; actual DB operations are still guarded by the PG module.
+
 KEY=b'R'*32
 NOW=datetime(2026,11,27,14,0,tzinfo=timezone.utc)
 
@@ -84,6 +88,7 @@ DDL=(
 )
 
 
+@unittest.skipUnless(ISOLATED, 'Disposable PostgreSQL 17 runner required')
 class OriginalPdfPG17WindowsEndToEnd(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
