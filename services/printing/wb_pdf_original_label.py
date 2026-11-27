@@ -92,7 +92,7 @@ def match_source_pdf(pdf_bytes, conn, *, account_id, verified_lines,
         mapped = {}
         for candidate in candidates:
             canonical = canonical_wb_sticker(candidate[4])
-            if isinstance(canonical,str) and re.fullmatch(r'\\d{11}',canonical):
+            if isinstance(canonical,str) and re.fullmatch(r'\d{11}',canonical):
                 mapped.setdefault(canonical,[]).append(candidate)
         jobs, seen_orders = [], set()
         for product in report['products']:
