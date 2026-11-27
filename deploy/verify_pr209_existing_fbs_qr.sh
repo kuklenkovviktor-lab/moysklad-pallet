@@ -21,7 +21,6 @@ else
     docker run --rm --network none --read-only --cap-drop ALL \
       --security-opt no-new-privileges:true \
       --tmpfs /tmp:rw,size=16m \
-      --user 65534:65534 \
       -v "$SRC:/app:ro" -w /app \
       node:22-alpine node tests/printing/test_existing_fbs_printer_qr.cjs
   }
