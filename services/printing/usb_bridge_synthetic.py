@@ -35,9 +35,11 @@ def initialize_synthetic_usb_bridge(conn):
 
 
 def automatic_usb_enabled():
-    """Only an explicitly armed, isolated synthetic demo can auto-approve jobs."""
+    """Only one explicitly bound synthetic printer can auto-use test Xprinter."""
+    bound = os.environ.get("GRIT_PR210_USB_PRINTER_ID", "")
     return (os.environ.get("GRIT_SYNTHETIC_PG_TEST") == "YES_ISOLATED"
             and os.environ.get("GRIT_PR210_AUTO_USB_SYNTHETIC") == "YES_EXPLICIT"
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", bound) is not None
             and 32 <= len(os.environ.get("GRIT_PR192_USB_AGENT_TOKEN", "")) <= 256)
 
 
@@ -49,6 +51,8 @@ def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id):
     scan_synthetic_printer_qr; actor and printer come from trusted server session.
     """
     if not automatic_usb_enabled():
+        return 0
+    if printer_id != os.environ["GRIT_PR210_USB_PRINTER_ID"]:
         return 0
     if (not isinstance(printer_id, str) or
         not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", printer_id) or
@@ -266,7 +270,8 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
                     return _refuse("WRONG_STAND",403)
                 # Automatic worker mode MUST NOT consume any historical
                 # manager-approved or one-shot physical test ticket.
-                extra = """AND EXISTS (SELECT 1 FROM synthetic_pr192_print_events e
+                extra = """AND a.printer_id=%s
+                    AND EXISTS (SELECT 1 FROM synthetic_pr192_print_events e
                      WHERE e.job_id=a.job_id AND e.event='AUTO_USB_APPROVAL')""" if automatic else ""
                 claim=conn.execute("""SELECT a.ticket_id,a.job_id,a.printer_id
                     FROM synthetic_pr192_usb_approvals a WHERE a.phase='APPROVED'
@@ -274,7 +279,9 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
                     """ + extra + """
                     ORDER BY a.approved_at,a.ticket_id
                     FOR UPDATE OF a SKIP LOCKED LIMIT 1""",
-                    (data.get("ticket_id"),data.get("ticket_id"))).fetchone()
+                    ((data.get("ticket_id"),data.get("ticket_id"),
+                      os.environ["GRIT_PR210_USB_PRINTER_ID"]) if automatic else
+                     (data.get("ticket_id"),data.get("ticket_id")))).fetchone()
                 if not claim:
                     return jsonify(synthetic=True,physical_printing=False,
                                    state="EMPTY"),200
