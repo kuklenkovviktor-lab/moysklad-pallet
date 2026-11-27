@@ -89,7 +89,7 @@ def make_isolated_original_print_blueprint(connection_factory, *,
             raise AuthenticationFailed('DEVICE_AUTH_FAILED')
         pid=authenticate(conn,device_id=device,bearer_token=header[7:])
         printer(conn,pid)  # refuse revoked/disabled printer
-        return pid
+        return pid,device
 
     @bp.get('/synthetic/pr211/manager/session')
     def manager_session():
@@ -232,9 +232,9 @@ def make_isolated_original_print_blueprint(connection_factory, *,
         try:
             with connection_factory() as conn:
                 _check(conn)
-                pid=agent_printer(conn)
+                pid,device_id=agent_printer(conn)
                 result=claim(conn,printer_id=pid,key=key,
-                             device_authenticated=True)
+                             device_authenticated=True,device_id=device_id)
             if result is None:
                 return jsonify(synthetic=True,state='EMPTY',
                                physical_printing=False)
@@ -254,13 +254,13 @@ def make_isolated_original_print_blueprint(connection_factory, *,
         try:
             with connection_factory() as conn:
                 _check(conn)
-                pid=agent_printer(conn)
+                pid,device_id=agent_printer(conn)
                 data=request.get_json(silent=True) or {}
                 if not isinstance(data,dict):
                     return jsonify(error='INVALID_ACK'),400
                 state=report(conn,printer_id=pid,
                              ticket=data.get('ticket_id'),result=data.get('result'),
-                             device_authenticated=True)
+                             device_authenticated=True,device_id=device_id)
             return jsonify(synthetic=True,state=state,
                            physical_printing=False)
         except AuthenticationFailed:
