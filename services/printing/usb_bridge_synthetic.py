@@ -63,6 +63,10 @@ def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id, *,
     # SAME PG transaction that grants USB permissions. A QR rotation, inactive
     # shift or revoked badge after initial enqueue must fail closed.
     from services.printing.qr_scan import _authorized_identity, _current_printer
+    # Optional one-shot gate ONLY for the pre-authorized isolated physical
+    # synthetic acceptance. The normal demo retains its 16-job ceiling.
+    one_shot = os.environ.get("GRIT_PR210_PHYSICAL_ONE_SHOT") == "YES_ISOLATED_ONE"
+    approval_limit = 1 if one_shot else 16
     count = 0
     with connection_factory() as conn:
         _verify_isolated_connection(conn)
@@ -78,7 +82,7 @@ def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id, *,
                   AND NOT EXISTS (SELECT 1 FROM synthetic_pr192_usb_approvals a
                       WHERE a.job_id=j.job_id)
                 ORDER BY j.created_at,j.job_id
-                FOR UPDATE OF j SKIP LOCKED LIMIT 16""", (printer_id,)).fetchall():
+                FOR UPDATE OF j SKIP LOCKED LIMIT %s""", (printer_id, approval_limit)).fetchall():
                 job_id, account_id, order_id, kind = job
                 verdict, _ = _validate_before_dispatch(
                     conn, account_id=account_id, order_id=order_id,
