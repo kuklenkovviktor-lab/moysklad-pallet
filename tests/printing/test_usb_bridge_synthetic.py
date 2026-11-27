@@ -342,6 +342,15 @@ class UsbBridgePG17Tests(TestCase):
             self.assertEqual(self.ping().json["waiting"], 1)
             self.assertEqual(self.claim().json["state"], "CLAIMED")
 
+    def test_auto_never_routes_unbound_printer_to_test_xprinter(self):
+        with mock.patch.dict(os.environ, {
+            "GRIT_PR210_AUTO_USB_SYNTHETIC": "YES_EXPLICIT",
+            "GRIT_PR210_USB_PRINTER_ID": "p1",
+            "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
+        }):
+            self.assertEqual(auto_approve_synthetic_queue(pg,"other-printer","e1"),0)
+            self.assertEqual(self.ping().json["waiting"],0)
+
     def test_auto_wrong_stand_does_not_consume(self):
         from services.printing.usb_test_preparation import stand_identity
         with mock.patch.dict(os.environ, {
