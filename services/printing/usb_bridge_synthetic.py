@@ -33,6 +33,66 @@ def initialize_synthetic_usb_bridge(conn):
         conn.execute(DDL)
 
 
+
+def automatic_usb_enabled():
+    """Only an explicitly armed, isolated synthetic demo can auto-approve jobs."""
+    return (os.environ.get("GRIT_SYNTHETIC_PG_TEST") == "YES_ISOLATED"
+            and os.environ.get("GRIT_PR210_AUTO_USB_SYNTHETIC") == "YES_EXPLICIT"
+            and 32 <= len(os.environ.get("GRIT_PR192_USB_AGENT_TOKEN", "")) <= 256)
+
+
+def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id):
+    """Turn at most 16 existing, revalidated synthetic QUEUED jobs into USB
+    approvals after a verified printer QR scan. No direct printing, no retry.
+
+    The caller MUST first validate the employee/shift and signed printer QR via
+    scan_synthetic_printer_qr; actor and printer come from trusted server session.
+    """
+    if not automatic_usb_enabled():
+        return 0
+    if (not isinstance(printer_id, str) or
+        not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", printer_id) or
+        not isinstance(actor_id, str) or not 0 < len(actor_id) <= 160):
+        raise ValueError("INVALID_AUTO_USB_IDENTITY")
+    count = 0
+    with connection_factory() as conn:
+        _verify_isolated_connection(conn)
+        with conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('GRIT-USB-ONE-APPROVAL',0))")
+            printer = conn.execute("""SELECT enabled FROM grit_line_printers
+                WHERE printer_id=%s FOR SHARE""", (printer_id,)).fetchone()
+            if not printer or printer[0] != 1:
+                return 0
+            for job in conn.execute("""SELECT j.job_id,j.account_id,j.order_id,j.sticker_kind
+                FROM synthetic_pr192_print_jobs j
+                WHERE j.printer_id=%s AND j.account_id='synthetic'
+                  AND j.state='QUEUED' AND j.delivery_transport='VIRTUAL'
+                  AND NOT EXISTS (SELECT 1 FROM synthetic_pr192_usb_approvals a
+                      WHERE a.job_id=j.job_id)
+                ORDER BY j.created_at,j.job_id
+                FOR UPDATE OF j SKIP LOCKED LIMIT 16""", (printer_id,)).fetchall():
+                job_id, account_id, order_id, kind = job
+                verdict, _ = _validate_before_dispatch(
+                    conn, account_id=account_id, order_id=order_id,
+                    kind=kind, printer_id=printer_id)
+                if verdict != "ELIGIBLE":
+                    continue
+                ticket = uuid.uuid4().hex
+                conn.execute("""UPDATE synthetic_pr192_print_jobs
+                    SET delivery_transport='USB',version=version+1,updated_at=now()
+                    WHERE job_id=%s""", (job_id,))
+                conn.execute("""INSERT INTO synthetic_pr192_usb_approvals
+                    (ticket_id,job_id,printer_id,phase)
+                    VALUES (%s,%s,%s,'APPROVED')""", (ticket,job_id,printer_id))
+                conn.execute("""INSERT INTO synthetic_pr192_print_events
+                    (action_id,job_id,actor_id,event,from_state,to_state,reason)
+                    VALUES (%s,%s,%s,'AUTO_USB_APPROVAL','QUEUED','QUEUED',
+                            'AUTHENTICATED_PRINTER_QR_SYNTHETIC_ONLY')""",
+                    (uuid.uuid4().hex,job_id,actor_id))
+                count += 1
+    return count
+
+
 def _audit(conn, job_id, old, new, reason):
     conn.execute("""INSERT INTO synthetic_pr192_print_events
       (action_id,job_id,actor_id,event,from_state,to_state,reason)
@@ -177,6 +237,7 @@ def make_synthetic_usb_bridge_blueprint(connection_factory, manager_authorized):
             approved = conn.execute("SELECT ticket_id FROM synthetic_pr192_usb_approvals WHERE phase='APPROVED'").fetchall()
         return jsonify(synthetic=True,device=WINDOWS_QUEUE,
                        waiting=count,stand_id=stand,
+                       automatic_synthetic=automatic_usb_enabled(),
                        ticket_id=approved[0][0] if len(approved)==1 else None,
                        physical_printing=False),200,{
                            "Cache-Control":"no-store"}
