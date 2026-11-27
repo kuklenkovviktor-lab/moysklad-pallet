@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import re
 import fitz
 from fbs_pdf_labels import parse_wb_labels
+from wb_qr_codec import canonical_wb_sticker
 
 MAX_BYTES = 25 * 1024 * 1024
 MAX_PAGES = 10000
@@ -76,23 +77,33 @@ def match_source_pdf(pdf_bytes, conn, *, account_id, verified_lines,
         report = parse_wb_labels(doc)
         if not report or not report['valid_structure']:
             raise LabelSourceError('PDF_STICKER_LAYOUT_UNVERIFIED')
+        # The actual WB FBS v11 API stores the 9-character QR ("*"+base64),
+        # while original printed Code128 PDF pages often show 11 decimal digits.
+        # Compare normalized semantic identity, NEVER replace PDF artwork.
+        candidates = _rows(conn, """SELECT o.order_id,o.wb_status,o.local_status,
+                    o.synced_at,s.barcode
+                FROM wb_fbs_stickers s JOIN wb_fbs_orders o
+                    ON o.account_id=s.account_id AND o.order_id=s.order_id
+                JOIN wb_fbs_picking_queue q
+                    ON q.account_id=o.account_id AND q.order_id=o.order_id
+                WHERE o.account_id=?""", (account_id,), adapt)
+        mapped = {}
+        for candidate in candidates:
+            canonical = canonical_wb_sticker(candidate[4])
+            if isinstance(canonical,str) and re.fullmatch(r'\\d{11}',canonical):
+                mapped.setdefault(canonical,[]).append(candidate)
         jobs, seen_orders = [], set()
         for product in report['products']:
             article = product['article']
             for label in product['stickers']:
                 code = label['barcode']
-                matched = _rows(conn, """SELECT o.order_id,o.wb_status,o.local_status,
-                        o.synced_at,s.barcode
-                    FROM wb_fbs_stickers s JOIN wb_fbs_orders o
-                      ON o.account_id=s.account_id AND o.order_id=s.order_id
-                    JOIN wb_fbs_picking_queue q
-                      ON q.account_id=o.account_id AND q.order_id=o.order_id
-                    WHERE o.account_id=? AND s.barcode=?""", (account_id,code),adapt)
+                matched = mapped.get(code,[])
                 if len(matched) != 1:
                     raise LabelSourceError('PDF_STICKER_NOT_UNIQUELY_LINKED_TO_WB_ORDER')
                 order_id, wb_state, local_state, synchronized, saved_code = matched[0]
                 if (order_id in seen_orders or wb_state != 'confirm'
-                        or local_state != 'pending' or saved_code != code):
+                        or local_state != 'pending'
+                        or canonical_wb_sticker(saved_code) != code):
                     raise LabelSourceError('DUPLICATE_OR_BLOCKED_ORDER')
                 seen_orders.add(order_id)
                 try:
