@@ -45,8 +45,18 @@ def main():
     if len(selected_ids)!=1 or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}",selected_ids[0]):
         raise RuntimeError("Need exactly one proven synthetic Xprinter ID; refuses ambiguous USB binding")
     selected_printer = selected_ids[0]
-    if app["Config"].get("Image") != "grit-wms:release-1cdc36f60f549ba5a86f0ded0d728f2ae368eed4":
-        raise RuntimeError("Unexpected demo image; refuses upgrade")
+    # PR208 may have refreshed the isolated demo from a different release.
+    # Trust only the CURRENT already-isolated container image after inspect_demo()
+    # verified its loopback port, dedicated network, PG17 and synthetic gate.
+    # Never switch to a hardcoded image tag or a production container.
+    image_tag = app["Config"].get("Image", "")
+    if (not isinstance(image_tag, str)
+            or not re.fullmatch(r"grit-wms:release-[0-9a-f]{40}", image_tag)
+            or not isinstance(app.get("Image"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", app["Image"])):
+        raise RuntimeError("Unexpected non-release demo image; refuses upgrade")
+    if docker("image", "inspect", app["Image"]) == "":
+        raise RuntimeError("Existing isolated image unavailable")
     if not (ROOT/"line_printer_demo_app.py").is_file():
         raise RuntimeError("PR210 source missing")
     import fcntl
