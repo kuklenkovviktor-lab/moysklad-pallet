@@ -1720,6 +1720,10 @@ async function acceptWb(code){
 // This provisional backend is deliberately isolated to the disposable synthetic demo.
 // The real WMS must never send a printer QR through WB/product scan endpoints.
 async function acceptPrinterQr(code){
+ if(queuedFbsScan()){
+  showTsdError('Есть неподтверждённый WB-скан. QR принтера не изменил заказ. Дождись подтверждения.');
+  return false;
+ }
  if(pendingProduct){
   showTsdError('Сначала заверши текущую пару: товар и стикер WB. QR принтера не изменил заказ.');
   return false;
@@ -1751,11 +1755,15 @@ async function acceptPrinterQr(code){
  return true;
 }
 async function handleScan(code){
- code=(code||'').trim();if(!code||busy||!shiftId)return;
+ code=(code||'').trim();
+ // HID QR scanners may prepend the AIM ]Q3 symbology marker.
+ // Strip it ONLY for printer QR; never modify a WB sticker or a product barcode.
+ if(code.startsWith(']Q3GRIT-PRINTER:'))code=code.slice(3);
+ if(!code||busy||!shiftId)return;
  busy=true;
  try{
-  if(queuedFbsScan()){await retryFbsOutbox();await refresh();return}
   if(code.startsWith('GRIT-PRINTER:'))await acceptPrinterQr(code);
+  else if(queuedFbsScan()){await retryFbsOutbox();await refresh();return}
   else if(pendingProduct && /^97[0-9]{22}$/.test(code))await acceptSkipQr(code);
   else if(pendingProduct)await acceptWb(code);
   else await acceptProduct(code);
