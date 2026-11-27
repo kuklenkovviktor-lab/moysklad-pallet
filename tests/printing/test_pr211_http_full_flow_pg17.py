@@ -383,6 +383,39 @@ class PR211ManagerWorkerDeviceHTTPTests(unittest.TestCase):
         self.assertNotIn(device['token'],r.get_data(as_text=True))
         self.assertNotIn('payload_b64',r.get_data(as_text=True))
 
+    def test_lost_server_ack_after_windows_submission_never_reprints(self):
+        self.stage()
+        device=self.enroll()
+        self.scan()
+        normal=self.agent_api(device)
+        def unreliable(path,body):
+            if path.endswith('/report'):
+                raise TimeoutError('synthetic lost report ACK')
+            return normal(path,body)
+        with tempfile.TemporaryDirectory() as tmp:
+            win=FakeWin32()
+            with self.assertRaisesRegex(PilotError,'SERVER_ACK_UNKNOWN_NO_RETRY'):
+                submit_one_synthetic_claim(unreliable,win,journal_dir=tmp)
+            self.assertEqual(len(win.writes),1)
+            with self.assertRaises(RuntimeError):
+                submit_one_synthetic_claim(unreliable,win,journal_dir=tmp)
+            self.assertEqual(len(win.writes),1)
+        self.assertEqual(self.conn.execute('SELECT state FROM '
+            'synthetic_pr211_original_jobs').fetchone()[0],'CLAIMED')
+
+    def test_tampered_original_bitmap_digest_is_refused_without_spool(self):
+        self.stage()
+        device=self.enroll()
+        self.scan()
+        api=self.agent_api(device)
+        from services.printing.wb_original_usb_agent_synthetic import decode_claim
+        response=api('/synthetic/pr211/agent/claim',{})
+        response['payload_sha256']='0'*64
+        with self.assertRaisesRegex(PilotError,'DIGEST_MISMATCH'):
+            decode_claim(response)
+        self.assertEqual(self.conn.execute('SELECT state FROM '
+            'synthetic_pr211_original_jobs').fetchone()[0],'CLAIMED')
+
     def test_fake_usb_error_unknown_and_no_reprint(self):
         self.stage()
         device=self.enroll()
