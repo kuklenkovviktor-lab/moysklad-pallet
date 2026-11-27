@@ -143,7 +143,8 @@ def claim(conn,*,printer_id,key,device_authenticated):
         # Production-schema source can change after PDF staging; reject
         # cancellation, cache changes or QR/sticker revocation before claim.
         # This check is inside the same transaction as the durable claim.
-        source=conn.execute("""SELECT o.wb_status,o.local_status,s.barcode
+        source=conn.execute("""SELECT o.wb_status,o.local_status,
+                   s.barcode,o.synced_at
             FROM wb_fbs_orders o JOIN wb_fbs_picking_queue q
               ON q.account_id=o.account_id AND q.order_id=o.order_id
             JOIN wb_fbs_stickers s
@@ -153,6 +154,15 @@ def claim(conn,*,printer_id,key,device_authenticated):
         valid=(len(source)==1 and source[0][0]=='confirm'
                and source[0][1]=='pending'
                and hashlib.sha256(str(source[0][2]).encode()).hexdigest()==sticker_hash)
+        if valid:
+            try:
+                updated=source[0][3]
+                if not isinstance(updated,datetime):
+                    updated=datetime.fromisoformat(str(updated).replace('Z','+00:00'))
+                age=(datetime.now(timezone.utc)-updated.astimezone(timezone.utc)).total_seconds()
+                valid=(updated.tzinfo is not None and 0<=age<=180)
+            except (ValueError,TypeError,OverflowError,AttributeError):
+                valid=False
         if valid:
             # Ensure the ORIGINAL SKU still maps to one active cell on the
             # preapproved line, not a newly moved or ambiguous location.
