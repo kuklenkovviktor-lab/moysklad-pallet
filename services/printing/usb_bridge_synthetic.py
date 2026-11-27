@@ -43,7 +43,8 @@ def automatic_usb_enabled():
             and 32 <= len(os.environ.get("GRIT_PR192_USB_AGENT_TOKEN", "")) <= 256)
 
 
-def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id):
+def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id, *,
+                                     shift_id, qr_payload):
     """Turn at most 16 existing, revalidated synthetic QUEUED jobs into USB
     approvals after a verified printer QR scan. No direct printing, no retry.
 
@@ -58,14 +59,17 @@ def auto_approve_synthetic_queue(connection_factory, printer_id, actor_id):
         not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", printer_id) or
         not isinstance(actor_id, str) or not 0 < len(actor_id) <= 160):
         raise ValueError("INVALID_AUTO_USB_IDENTITY")
+    # Revalidate the ORIGINAL signed QR and actual employee/shift under the
+    # SAME PG transaction that grants USB permissions. A QR rotation, inactive
+    # shift or revoked badge after initial enqueue must fail closed.
+    from services.printing.qr_scan import _authorized_identity, _current_printer
     count = 0
     with connection_factory() as conn:
         _verify_isolated_connection(conn)
         with conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('GRIT-USB-ONE-APPROVAL',0))")
-            printer = conn.execute("""SELECT enabled FROM grit_line_printers
-                WHERE printer_id=%s FOR SHARE""", (printer_id,)).fetchone()
-            if not printer or printer[0] != 1:
+            if (not _authorized_identity(conn, actor_id, shift_id)
+                or _current_printer(conn, printer_id, qr_payload) is None):
                 return 0
             for job in conn.execute("""SELECT j.job_id,j.account_id,j.order_id,j.sticker_kind
                 FROM synthetic_pr192_print_jobs j
