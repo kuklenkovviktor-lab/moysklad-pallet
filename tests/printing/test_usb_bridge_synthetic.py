@@ -294,7 +294,8 @@ class UsbBridgePG17Tests(TestCase):
             stand = stand_identity(conn)
         forbidden = self.claim({"auto": True, "stand_id": stand})
         self.assertEqual(forbidden.status_code, 403)
-        self.assertEqual(auto_approve_synthetic_queue(pg, "p1", "e1"), 0)
+        self.assertEqual(auto_approve_synthetic_queue(pg, "p1", "e1",
+            shift_id="s1", qr_payload=self.case.wms_case.qr), 0)
         self.assertEqual(self.ping().json["waiting"], 0)
 
     def test_fbs_qr_creates_automatic_usb_approval_without_manager(self):
@@ -348,7 +349,8 @@ class UsbBridgePG17Tests(TestCase):
             "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
         }):
-            self.assertEqual(auto_approve_synthetic_queue(pg,"other-printer","e1"),0)
+            self.assertEqual(auto_approve_synthetic_queue(pg,"other-printer","e1",
+                shift_id="s1", qr_payload=self.case.wms_case.qr),0)
             self.assertEqual(self.ping().json["waiting"],0)
 
     def test_auto_wrong_stand_does_not_consume(self):
@@ -358,7 +360,8 @@ class UsbBridgePG17Tests(TestCase):
             "GRIT_PR210_USB_PRINTER_ID": "p1",
             "GRIT_PR192_USB_AGENT_TOKEN": TOKEN,
         }):
-            self.assertEqual(auto_approve_synthetic_queue(pg,"p1","e1"),1)
+            self.assertEqual(auto_approve_synthetic_queue(pg,"p1","e1",
+                shift_id="s1", qr_payload=self.case.wms_case.qr),1)
             self.assertEqual(self.claim({"auto":True,"stand_id":"wrong"}).status_code,403)
             with pg() as conn:
                 stand=stand_identity(conn)
