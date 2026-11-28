@@ -117,5 +117,72 @@ class StickerRepairTests(unittest.TestCase):
         self.assertEqual(wb.normalize_api_sticker("60227855344"),"60227855344")
 
 
+class ManagerStickerDiagnosisTests(unittest.TestCase):
+    def setUp(self):
+        from flask import Flask
+        self.app=Flask("synthetic-wb-sticker-diagnostics")
+        self.app.secret_key="synthetic-session-secret"
+
+    def diagnose(self, *, own=0, other=0, pdf=0,
+                 sticker="*Dc5xlawC", allowed=True, authorized=True):
+        from flask import session
+        def q(sql,params=()):
+            if "FROM wb_fbs_stickers" in sql and "account_id<>?" in sql:
+                return (other,)
+            if "FROM wb_fbs_stickers" in sql:
+                return (own,)
+            if "FROM pdf_fbs_orders" in sql:
+                return (1,) if pdf else None
+            raise AssertionError("Unexpected diagnostic SQL")
+        with self.app.test_request_context(
+            "/api/wb-v11/diagnose-sticker",method="POST",
+            headers={"X-CSRF-Token":"test-csrf"},
+            json={"sticker":sticker}):
+            session["wb_fbs_v11_csrf"]="test-csrf"
+            with patch.object(wb,"manager_access",return_value=authorized), \\
+                 patch.object(wb,"_allowed",return_value=allowed), \\
+                 patch.object(wb,"init_schema"), \\
+                 patch.object(wb,"_account",return_value="acct-demo"), \\
+                 patch("wms.query_one",side_effect=q):
+                result=wb.manager_wb_diagnose_sticker_v11()
+            return result if isinstance(result,tuple) else (result,200)
+
+    def test_known_current_account_qr(self):
+        response,status=self.diagnose(own=1)
+        self.assertEqual(status,200)
+        self.assertEqual(response.json["reason"],"IN_SELECTED_ACCOUNT")
+        self.assertEqual(response.headers["Cache-Control"],"no-store")
+
+    def test_qr_in_different_account_is_detected_not_accepted(self):
+        response,status=self.diagnose(other=1)
+        self.assertEqual(status,200)
+        self.assertEqual(response.json["reason"],"STICKER_IN_OTHER_ACCOUNT")
+        self.assertFalse(response.json["account_has_match"])
+
+    def test_qr_in_pdf_only_is_not_accepted_as_wb_api(self):
+        response,status=self.diagnose(pdf=1)
+        self.assertEqual(status,200)
+        self.assertEqual(response.json["reason"],"PDF_REGISTRY_ONLY")
+        self.assertFalse(response.json["account_has_match"])
+
+    def test_missing_valid_qr_is_explicitly_diagnosed(self):
+        response,status=self.diagnose()
+        self.assertEqual(status,200)
+        self.assertEqual(response.json["reason"],"NOT_IN_WB_API_CACHE")
+
+    def test_linear_code_is_not_treated_as_9char_api_qr(self):
+        response,status=self.diagnose(sticker="60227855344")
+        self.assertEqual(status,200)
+        self.assertEqual(response.json["reason"],"NOT_A_NINE_CHARACTER_WB_QR")
+
+    def test_manager_permission_is_required(self):
+        response,status=self.diagnose(authorized=False)
+        self.assertEqual(status,403)
+
+    def test_disabled_api_mode_does_not_fake_a_match(self):
+        response,status=self.diagnose(allowed=False)
+        self.assertEqual(status,503)
+
+
 if __name__=="__main__":
     unittest.main()
