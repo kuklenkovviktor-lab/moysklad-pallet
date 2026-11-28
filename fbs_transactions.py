@@ -73,7 +73,11 @@ def commit_scan(shift_id, employee_id, barcode, product_barcode, article, name, 
             raise ValueError('Повторный ШК товара вместо этикетки WB')
         if pending:
             article, name = pending[1] or article, pending[2] or name
-        v11 = os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
+        # PDF orders take precedence over API-v1.1 at commit time too.
+        # Recheck inside the transaction to prevent a verified PDF scan from
+        # being rejected later by the unrelated API sticker catalog.
+        from wms import pdf_picking_active
+        v11 = os.getenv("WB_FBS_V11_ENABLED", "0") == "1" and not pdf_picking_active(shift_id, employee_id)
         if v11:
             from wb_fbs_sync_v11 import verify_pair
             account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
