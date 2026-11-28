@@ -956,7 +956,7 @@ def worker_loop(account_id, client, stop=None):
                 elif name == "status":
                     sync_status_once(account_id, client)
                 elif name == "stickers":
-                    _sync_missing_stickers_once_unlocked(account_id, client)
+                    sync_missing_stickers_once(account_id, client)
                 elif name == "catalog" and client.content_token:
                     sync_catalog_once(account_id, client)
                 elif name == "full":
