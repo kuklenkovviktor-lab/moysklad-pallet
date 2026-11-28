@@ -635,7 +635,7 @@ def manager_wb_diagnose_sticker_v11():
         reason="IN_SELECTED_ACCOUNT"
     elif own > 1:
         reason="DUPLICATE_CURRENT_ACCOUNT"
-     elif pdf_match:
+    elif pdf_match:
         reason="PDF_REGISTRY_ONLY"
     elif not qr_valid:
         reason="NOT_A_NINE_CHARACTER_WB_QR"
