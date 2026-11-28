@@ -123,6 +123,13 @@ app.register_blueprint(ozon_fbo_bp)
 app.register_blueprint(fbo_picking_bp)
 app.register_blueprint(route_lab_bp)
 
+# PR211 original-WB printer integration is STRICTLY OFF by default.
+# This is the existing GRIT application, not a second demo server.
+# Even an explicit switch is refused unless the database is a disposable
+# synthetic PostgreSQL 17 and the test encryption key is supplied.
+from services.printing.pr211_registration import register_pr211_isolated
+_PR211_ORIGINAL_PRINT_ISOLATED = register_pr211_isolated(app)
+
 _TERMINAL_RECHECK_JS = """<script>
 (function(){
   let checking=false, left=false;
