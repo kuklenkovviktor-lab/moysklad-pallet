@@ -3794,6 +3794,8 @@ def fbs_wb_unscanned_hints():
         return jsonify(error="Требуется вход по бейджу"), 401
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         return jsonify(available=False, reason="WB FBS API выключен")
+    if os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower() != "api":
+        return jsonify(available=False, reason="WB API-подсказки недоступны в PDF-режиме")
     shift_id = str(request.args.get("shift_id") or "").strip()
     barcode = str(request.args.get("barcode") or "").strip()
     if not shift_id or not barcode or len(barcode) > 128:
