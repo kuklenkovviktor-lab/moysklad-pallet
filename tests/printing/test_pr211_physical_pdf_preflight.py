@@ -19,7 +19,7 @@ from services.printing.wb_original_usb_agent_synthetic import (
     validate_original_bitmap, decode_claim,
 )
 from deploy.pr211_physical_pdf_session import (
-    KEY,pdf_bytes,TEST_STICKER,TEST_ARTICLE,TEST_SKU,CODE128_PATTERN,
+    KEY,pdf_bytes,TEST_STICKER,TEST_ARTICLE,TEST_SKU,QR_MATRIX,TEST_QR_CODE,
 )
 from deploy.pr211_physical_usb_client import execute, PilotError
 
@@ -50,7 +50,32 @@ class SyntheticSourcePDFTests(TestCase):
         self.assertEqual(validate_original_bitmap(raw),raw)
         self.assertNotIn(b'GRIT-DEMO-',raw)
         self.assertEqual(len(KEY),32)
-        self.assertEqual(len(CODE128_PATTERN),61)
+        self.assertEqual(len(QR_MATRIX),29)
+        self.assertEqual(TEST_QR_CODE,'*Dc5xlawC')
+        from wb_qr_codec import canonical_wb_sticker
+        self.assertEqual(canonical_wb_sticker(TEST_QR_CODE),TEST_STICKER)
+
+    def test_pdf_contains_real_2d_qr_and_not_linear_barcode(self):
+        # Structural check is independent of text extraction. QR consists of
+        # 29x29 squares with finder patterns and mandatory quiet zone.
+        self.assertEqual(len(QR_MATRIX),29)
+        self.assertTrue(all(len(row)==29 for row in QR_MATRIX))
+        self.assertTrue(all(row=='0'*29 for row in QR_MATRIX[:4]))
+        self.assertEqual(QR_MATRIX[4][4:11],'1111111')
+        self.assertEqual(QR_MATRIX[4][18:25],'1111111')
+        self.assertEqual(QR_MATRIX[24][4:11],'1111111')
+        self.assertEqual(TEST_QR_CODE,'*Dc5xlawC')
+        doc=fitz.open(stream=pdf_bytes(),filetype='pdf')
+        try:
+            # A literal sticker page has hundreds of vector QR modules and
+            # only the original printed decimal human-readable WB number.
+            page=doc[1]
+            black_rectangles=page.get_drawings()
+            self.assertGreater(len(black_rectangles),100)
+            self.assertEqual(page.get_text('text',sort=True).strip(),
+                             'WB '+TEST_STICKER)
+        finally:
+            doc.close()
 
     def test_encoded_claim_accepts_only_matching_source_hash(self):
         raw=source_page_to_tspl(pdf_bytes(),1)
@@ -157,9 +182,9 @@ class OnceOnlyFakeUsbTests(TestCase):
                    kind='ORIGINAL_PDF_BITMAP_SYNTHETIC_ONLY',
                    ticket_id='a'*32,payload_sha256=hashlib.sha256(raw).hexdigest(),
                    payload_b64=base64.b64encode(raw).decode('ascii'))
-        response=json.dumps(dict(kind='PR211_SYNTHETIC_PHYSICAL_PDF',
+        response=json.dumps(dict(kind='PR211_SYNTHETIC_PHYSICAL_QR_PDF',
             order='SYNTH-PR211-PDF-PHYSICAL-1',sticker=TEST_STICKER,
-            line='А',claim=claim))
+            line='А',qr_payload=TEST_QR_CODE,symbol='QR',claim=claim))
         fake=FakeWindows()
         with tempfile.TemporaryDirectory() as tmp:
             marker=Path(tmp)/'one.json'
