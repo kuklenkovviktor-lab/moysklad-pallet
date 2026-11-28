@@ -243,6 +243,71 @@ class WBApiMockTests(unittest.TestCase):
                 self.assertEqual(len(http.calls), 1)
                 http.assert_consumed(self)
 
+    def test_http_diagnostics_never_include_token_body_or_raw_request_id(self):
+        import io
+        from contextlib import redirect_stdout
+        client, http = self.client([("GET", "/api/v3/orders/new", response(
+            403, {"secret": "PRIVATE-BODY"}, {"X-Request-Id": "PRIVATE-HEADER"}))])
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(requests.HTTPError):
+            client.new_orders()
+        value = output.getvalue()
+        self.assertIn('"status": 403', value)
+        self.assertIn('/api/v3/orders/new', value)
+        for secret in ('synthetic-token', 'PRIVATE-BODY', 'PRIVATE-HEADER'):
+            self.assertNotIn(secret, value)
+        with self.assertRaises(requests.HTTPError):
+            client.new_orders()
+        self.assertEqual(len(http.calls), 1)
+
+    def test_long_retry_after_does_not_retry_early(self):
+        client, http = self.client([("GET", "/api/v3/orders/new", response(
+            429, headers={"Retry-After": "120"}))])
+        with patch.object(self.sync.time, "sleep") as sleep:
+            for _ in range(2):
+                with self.assertRaises(requests.HTTPError):
+                    client.new_orders()
+            sleep.assert_not_called()
+        self.assertEqual(len(http.calls), 1)
+
+    def test_4054_statuses_use_five_bounded_batches(self):
+        ids = list(range(900000, 904054))
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": [
+                {"id": oid, "supplierStatus": "confirm"} for oid in ids[offset:offset+1000]]}))
+            for offset in range(0, len(ids), 1000)])
+        with patch.object(self.sync.time, "sleep") as sleep:
+            result = client.statuses(ids)
+        self.assertEqual(len(result), 4054)
+        self.assertEqual([len(call[2]['json']['orders']) for call in http.calls], [1000,1000,1000,1000,54])
+        self.assertEqual(sleep.call_count, 4)
+        http.assert_consumed(self)
+
+    def test_locally_complete_confirm_is_refreshed_and_delivery_observed_once(self):
+        self.seed()
+        self.wms.execute("UPDATE wb_fbs_orders SET local_status='complete'")
+        client, http = self.client([("POST", "/api/v3/orders/status", response(
+            payload={"orders": [{"id": 84500123, "supplierStatus": "complete"}]}))])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.wms.query_one("SELECT wb_status,local_status FROM wb_fbs_orders"),
+                         ("complete", "complete"))
+        self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM wb_fbs_delivery_observations")[0], 1)
+        http.assert_consumed(self)
+
+    def test_missing_completed_confirm_remains_refreshable(self):
+        self.seed()
+        self.wms.execute("UPDATE wb_fbs_orders SET local_status='complete'")
+        client, http = self.client([
+            ("POST", "/api/v3/orders/status", response(payload={"orders": []})),
+            ("POST", "/api/v3/orders/status", response(payload={"orders": [
+                {"id": 84500123, "supplierStatus": "confirm"}]})),
+        ])
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.sync.sync_status_once(ACCOUNT, client)
+        self.assertEqual(self.wms.query_one("SELECT wb_status FROM wb_fbs_orders")[0], "confirm")
+        http.assert_consumed(self)
+
     def test_429_retries_with_retry_after_then_recovers(self):
         client, http = self.client([
             ("GET", "/api/v3/orders/new", response(429, headers={"Retry-After": "2"})),
