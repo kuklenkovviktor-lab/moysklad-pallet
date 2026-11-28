@@ -110,6 +110,10 @@ def init_schema():
             expected_skus TEXT NOT NULL, scanned_barcode TEXT NOT NULL,
             scanned_sticker TEXT NOT NULL, result TEXT NOT NULL,
             reason TEXT, created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS wb_fbs_sticker_repair_attempts (
+            account_id TEXT NOT NULL, order_id TEXT NOT NULL,
+            attempted_at TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY(account_id,order_id))""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_sync_runs (
             run_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
             started_at TEXT NOT NULL, finished_at TEXT, sync_type TEXT,
@@ -679,20 +683,25 @@ def _sync_missing_stickers_once_unlocked(account_id, client):
     Do NOT fabricate a sticker, infer its QR from printed digits, or accept
     an order when WB API does not return a verified barcode.
     """
-    from wms import query_all
+    from wms import query_all, execute
     init_schema()
+    retry_before = datetime.fromtimestamp(
+        time.time() - 300, timezone.utc).isoformat()
     missing = query_all("""SELECT o.order_id
         FROM wb_fbs_orders o
         JOIN wb_fbs_picking_queue q
           ON q.account_id=o.account_id AND q.order_id=o.order_id
         LEFT JOIN wb_fbs_stickers s
           ON s.account_id=o.account_id AND s.order_id=o.order_id
+        LEFT JOIN wb_fbs_sticker_repair_attempts r
+          ON r.account_id=o.account_id AND r.order_id=o.order_id
         WHERE o.account_id=?
           AND o.local_status='pending'
           AND o.wb_status IN ('confirm','complete')
           AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')
-        ORDER BY o.synced_at DESC,o.order_id DESC
-        LIMIT 100""", (account_id,))
+          AND (r.attempted_at IS NULL OR r.attempted_at<=?)
+        ORDER BY r.attempted_at ASC,o.synced_at DESC,o.order_id DESC
+        LIMIT 100""", (account_id,retry_before))
     if not missing:
         return {"missing_checked": 0, "stickers_received": 0}
     # A malformed order ID must NOT be passed to the WB API as a different
@@ -701,14 +710,36 @@ def _sync_missing_stickers_once_unlocked(account_id, client):
            if str(row[0]).isdigit() and str(int(row[0])) == str(row[0])]
     if not ids:
         return {"missing_checked": len(missing), "stickers_received": 0}
+    # Persist retry checkpoints BEFORE contacting WB. If WB has not yet
+    # published the sticker, the same order will not be hammered every
+    # 30 seconds; old missing orders also get a turn in subsequent batches.
+    now = utcnow()
+    for order_id in ids:
+        execute("""INSERT INTO wb_fbs_sticker_repair_attempts
+            (account_id,order_id,attempted_at,attempt_count)
+            VALUES(?,?,?,1)
+            ON CONFLICT(account_id,order_id) DO UPDATE SET
+            attempted_at=excluded.attempted_at,
+            attempt_count=wb_fbs_sticker_repair_attempts.attempt_count+1""",
+            (account_id,str(order_id),now))
     response = client.stickers(ids)
     allowed = {str(order_id) for order_id in ids}
-    verified = [item for item in (response or [])
-                if isinstance(item,dict)
-                and str(item.get('orderId') or '') in allowed
-                and _clean(item.get('barcode'))]
-    # ingest_stickers additionally locks the parent order row and applies
-    # the existing account-scoped uniqueness/transaction rules.
+    from wb_qr_codec import QR_DATA_RE, canonical_wb_sticker
+    verified = []
+    for item in response or []:
+        if not isinstance(item,dict) or str(item.get('orderId') or '') not in allowed:
+            continue
+        raw = normalize_api_sticker(item.get('barcode'))
+        # Only authoritative 9-symbol WB API QRs enter this repair path.
+        # Never treat the printed numeric Code128 or malformed payload
+        # as a replacement for an API-sourced sticker.
+        if not QR_DATA_RE.fullmatch(raw):
+            continue
+        numeric = canonical_wb_sticker(raw)
+        if not (isinstance(numeric,str) and numeric.isdigit()
+                and len(numeric)==11):
+            continue
+        verified.append(dict(item,barcode=raw))
     count = ingest_stickers(account_id, verified) if verified else 0
     return {"missing_checked": len(ids), "stickers_received": count}
 
