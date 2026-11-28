@@ -4421,6 +4421,25 @@ def pdf_picking_active(shift_id, employee_id):
     return bool(valid_shift and query_one("SELECT 1 FROM pdf_fbs_orders LIMIT 1"))
 
 
+def fbs_selected_source(shift_id, employee_id):
+    """Single fail-closed source decision shared by product + sticker scans.
+
+    When WB v1.1 is enabled, the old default remains authoritative WB API.
+    A separate explicit server-side `WB_FBS_SOURCE_MODE=pdf` is required to
+    use a previously imported PDF instead; never infer mode from a globally
+    populated PDF table when API mode is enabled.
+    """
+    pdf_enabled = pdf_picking_active(shift_id, employee_id)
+    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
+        return "pdf" if pdf_enabled else "legacy"
+    source = os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower()
+    if source == "api":
+        return "wb_api"
+    if source == "pdf":
+        return "pdf" if pdf_enabled else "unavailable"
+    return "unavailable"
+
+
 @wms_bp.get("/manager/fbs-skip")
 def manager_fbs_skip_page():
     ensure_db()
@@ -4565,13 +4584,16 @@ def fbs_scan():
         except ValueError:
             return jsonify(error="Неверный номер операции"), 400
     from fbs_transactions import replay, commit_scan
-    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1" and (request_id or pdf_picking_active(shift_id, employee["id"])):
+    source = fbs_selected_source(shift_id, employee["id"])
+    if source == "unavailable":
+        return jsonify(error="Источник FBS недоступен: выбран PDF, но нет загруженного PDF для активной смены, либо неверная конфигурация.", reason="fbs_source_unavailable"), 409
+    if source != "wb_api" and (request_id or source == "pdf"):
         from wb_qr_codec import canonical_wb_sticker
         barcode = canonical_wb_sticker(barcode)
 
-    # WB FBS v1.1 is opt-in. The product is already pending on this terminal;
-    # the *second* scan identifies the WB order. No legacy article fallback.
-    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+    # Exact WB API cache is authoritative ONLY for explicitly selected WB mode.
+    # Never mix it with the independent imported PDF registry.
+    if source == "wb_api":
         from wb_fbs_sync_v11 import verify_pair, log_verification, normalize_api_sticker
         barcode = normalize_api_sticker(barcode)
         from fbs_skip_authorization import pending_for_shift
@@ -4645,7 +4667,7 @@ def fbs_scan():
 
     # Only normalize at the WB-sticker stage; the earlier item scan stays raw.
     # The printed Code128 is decimal, while the QR contains WB's Base64 form.
-    pdf_control = pdf_picking_active(shift_id, employee["id"])
+    pdf_control = source == "pdf"
     from fbs_skip_authorization import pending_for_shift
     pending = pending_for_shift(shift_id, employee["id"])
     if pdf_control and (not pending or pending["barcode"] != product_barcode):
