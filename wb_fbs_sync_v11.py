@@ -110,6 +110,10 @@ def init_schema():
             expected_skus TEXT NOT NULL, scanned_barcode TEXT NOT NULL,
             scanned_sticker TEXT NOT NULL, result TEXT NOT NULL,
             reason TEXT, created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS wb_fbs_sticker_repair_attempts (
+            account_id TEXT NOT NULL, order_id TEXT NOT NULL,
+            attempted_at TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY(account_id,order_id))""",
         """CREATE TABLE IF NOT EXISTS wb_fbs_sync_runs (
             run_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
             started_at TEXT NOT NULL, finished_at TEXT, sync_type TEXT,
@@ -533,6 +537,11 @@ def _account():
     return os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
 
 
+def _configured_scan_source():
+    """Server-selected source, not a request or an employee toggle."""
+    return os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower()
+
+
 def _manual_sync():
     _UI_STATE["running"] = True
     try:
@@ -560,15 +569,98 @@ def manager_wb_status_v11():
         AND NOT EXISTS (SELECT 1 FROM wb_fbs_order_skus s WHERE
         s.account_id=o.account_id AND s.order_id=o.order_id)""", (account,))[0]
     stickers = query_one("SELECT COUNT(*) FROM wb_fbs_stickers WHERE account_id=?", (account,))[0]
+    missing_stickers = query_one("""SELECT COUNT(*)
+        FROM wb_fbs_orders o
+        JOIN wb_fbs_picking_queue q
+          ON q.account_id=o.account_id AND q.order_id=o.order_id
+        LEFT JOIN wb_fbs_stickers s
+          ON s.account_id=o.account_id AND s.order_id=o.order_id
+        WHERE o.account_id=? AND o.local_status='pending'
+          AND o.wb_status IN ('confirm','complete')
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode=''
+               OR LENGTH(s.barcode)<>9 OR SUBSTR(s.barcode,1,1)<>'*')""",
+          (account,))[0]
     errors = query_one("""SELECT COUNT(*) FROM wb_fbs_scan_events
         WHERE account_id=? AND result<>'MATCH'""", (account,))[0]
     last = query_one("""SELECT finished_at,status FROM wb_fbs_sync_runs
         WHERE account_id=? ORDER BY started_at DESC LIMIT 1""", (account,))
+    last_repair = query_one("""SELECT MAX(attempted_at)
+        FROM wb_fbs_sticker_repair_attempts WHERE account_id=?""", (account,))
+    # The API cache and imported PDFs are independent order registries.
+    # Never silently switch source: pdf_picking_active() historically applies
+    # to all active shifts as soon as any PDF is imported.
+    pdf_count = query_one("SELECT COUNT(*) FROM pdf_fbs_orders")[0]
     return jsonify(enabled=True, configured=bool(os.getenv("WB_API_TOKEN", "").strip()),
                    orders=orders, missing_skus=missing, stickers=stickers,
+                   missing_stickers=missing_stickers,
+                   scan_source=_configured_scan_source(), pdf_orders_present=bool(pdf_count),
+                   pdf_verification_separate=True,
+                   last_sticker_repair=(last_repair[0] if last_repair else None),
                    rejected_scans=errors, last_sync=(last[0] if last else None),
                    last_status=(last[1] if last else None),
                    **dict(_UI_STATE))
+
+
+@wb_fbs_v11_bp.post("/api/wb-v11/diagnose-sticker")
+def manager_wb_diagnose_sticker_v11():
+    """Manager-only, read-only reason for an unknown WB QR.
+
+    Do not allow worker scans to trigger network access or mutate orders.
+    Output contains only classification flags, not WB order/customer details.
+    """
+    if not manager_access():
+        return jsonify(error="Только для руководителя"), 403
+    csrf = session.get("wb_fbs_v11_csrf") or ""
+    if not csrf or not secrets.compare_digest(
+            request.headers.get("X-CSRF-Token",""), csrf):
+        return jsonify(error="Неверный CSRF-токен"), 403
+    if not _allowed():
+        return jsonify(error="Режим WB FBS v1.1 выключен"), 503
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data,dict):
+        return jsonify(error="Неверный запрос"), 400
+    entered = data.get("sticker")
+    if not isinstance(entered,str) or not 1 <= len(entered) <= 128:
+        return jsonify(error="Нужен скан стикера WB"), 400
+    normalized = normalize_api_sticker(entered)
+    from wb_qr_codec import canonical_wb_sticker, QR_DATA_RE
+    from wms import query_one
+    # Schema is initialized at WMS startup. Never execute DDL from a
+    # read-only manager diagnosis request.
+    account = _account()
+    own = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
+        WHERE account_id=? AND barcode=?""",(account,normalized))[0]
+    # Never query other WB accounts from a tenant-scoped diagnosis.
+    # An unknown QR may belong to another account, but disclosing which
+    # account has it would be a cross-tenant information leak.
+    canonical=canonical_wb_sticker(entered)
+    numeric = canonical if canonical.isdigit() and len(canonical)==11 else ""
+    pdf_match = bool(numeric and query_one(
+        "SELECT 1 FROM pdf_fbs_orders WHERE wb_barcode=? LIMIT 1",(numeric,)))
+    qr_valid = QR_DATA_RE.fullmatch(normalized) is not None
+    if _configured_scan_source() == "pdf":
+        if pdf_match:
+            reason="IN_SELECTED_PDF"
+        elif not qr_valid and not numeric:
+            reason="NOT_A_RECOGNIZED_WB_CODE"
+        else:
+            reason="NOT_IN_PDF_REGISTRY"
+    elif own == 1:
+        reason="IN_SELECTED_ACCOUNT"
+    elif own > 1:
+        reason="DUPLICATE_CURRENT_ACCOUNT"
+    elif pdf_match:
+        reason="PDF_REGISTRY_ONLY"
+    elif not qr_valid:
+        reason="NOT_A_NINE_CHARACTER_WB_QR"
+    else:
+        reason="NOT_IN_WB_API_CACHE"
+    response=jsonify(source=_configured_scan_source(),account_has_match=bool(own),
+        imported_pdf_has_match=pdf_match,qr_format_valid=qr_valid,
+        reason=reason,needs_manager_review=reason not in
+        ("IN_SELECTED_ACCOUNT","IN_SELECTED_PDF"))
+    response.headers["Cache-Control"]="no-store"
+    return response
 
 
 @wb_fbs_v11_bp.post("/api/wb-v11/sync")
@@ -577,6 +669,8 @@ def manager_wb_sync_v11():
         return jsonify(error="Только для руководителя"), 403
     if not _allowed() or not os.getenv("WB_API_TOKEN", "").strip():
         return jsonify(error="WB FBS v1.1 отключён или нет API-ключа"), 503
+    if _configured_scan_source() != "api":
+        return jsonify(error="Выбран PDF-источник. Фоновая синхронизация WB не активирует этот режим."), 409
     csrf = session.get("wb_fbs_v11_csrf") or ""
     if not csrf or not secrets.compare_digest(
         request.headers.get("X-CSRF-Token", ""), csrf
@@ -603,6 +697,15 @@ button{background:#e58a34;border:0;border-radius:8px;padding:12px 18px;font-weig
 <div class="card"><p class="muted">Только чтение из WB API. Сканирование: товар → QR WB.</p>
 <div id="stats">Загрузка статуса…</div>
 <button onclick="syncNow()">Синхронизировать сейчас</button>
+<div style="margin-top:18px">
+  <strong>Почему стикер не найден?</strong>
+  <p class="muted">Проверка только по локальным данным, без изменения заказов WB.</p>
+  <input id="stickerLookup" autocomplete="off" maxlength="128"
+   placeholder="Сканируй QR WB" style="padding:12px;background:#09121e;
+   color:#edf6ff;border:1px solid #425875;border-radius:8px;max-width:100%;width:300px">
+  <button type="button" onclick="diagnoseSticker()">Проверить стикер</button>
+  <p class="muted" id="stickerDiagnostic" role="status"></p>
+</div>
 <p class="muted" id="message">Никакие WB-статусы и поставки не изменяются.</p></div>
 <script>
 const csrfToken=CSRF_VALUE;
@@ -611,16 +714,43 @@ async function refresh(){
  if(!r.ok){document.getElementById('stats').textContent=d.error||'Ошибка доступа';return}
  if(!d.enabled){document.getElementById('stats').textContent='Модуль отключён. Требуется явное разрешение администратора.';return}
  document.getElementById('stats').innerHTML=
- ['Заказов','Без SKU','Стикеров','Отклонено сканов'].map((title,i)=>
- '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
+ ['Заказов','Без SKU','Стикеров','Без стикера','Отклонено сканов'].map((title,i)=>
+ '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.missing_stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
  '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
- '; статус: '+(d.last_status||'нет')+'</p>';
+ '; статус: '+(d.last_status||'нет')+
+ '; последняя попытка восстановления QR: '+(d.last_sticker_repair||'ещё не выполнялась')+
+ (d.pdf_orders_present&&d.scan_source==='api'?'<br><strong>Внимание:</strong> загруженные PDF не используются при проверке WB API v1.1.':'')+
+ '<br>Источник FBS: '+(d.scan_source==='pdf'?'PDF':d.scan_source==='api'?'WB API':'НЕВЕРНЫЙ РЕЖИМ')+
+ '</p>';
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
 }
 async function syncNow(){
  const r=await fetch('/api/wb-v11/sync',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});
  const d=await r.json();document.getElementById('message').textContent=d.error||'Синхронизация запущена';
  refresh();
+}
+async function diagnoseSticker(){
+ const field=document.getElementById('stickerLookup');
+ const out=document.getElementById('stickerDiagnostic');
+ out.textContent='Проверка локального кэша…';
+ try{
+  const r=await fetch('/api/wb-v11/diagnose-sticker',{
+   method:'POST',credentials:'same-origin',cache:'no-store',
+   headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
+   body:JSON.stringify({sticker:field.value.trim()})});
+  const d=await r.json();
+  if(!r.ok){out.textContent=d.error||'Ошибка доступа';return}
+  const names={
+   IN_SELECTED_ACCOUNT:'QR есть в текущем WB API-кэше. Проверь статус заказа и ШК товара.',
+   IN_SELECTED_PDF:'Стикер найден в выбранном PDF-реестре. Проверь соответствие товара.',
+   NOT_IN_PDF_REGISTRY:'Стикер отсутствует в выбранном PDF-реестре. Заказ не засчитан.',
+   NOT_A_RECOGNIZED_WB_CODE:'Не распознан QR или цифровой код WB.',
+   DUPLICATE_CURRENT_ACCOUNT:'QR связан с несколькими заказами. Заблокировано, нужна проверка.',
+   PDF_REGISTRY_ONLY:'QR найден только в загруженном PDF. Режим WB API его не использует.',
+   NOT_A_NINE_CHARACTER_WB_QR:'Отсканирован не девятисимвольный QR WB. Проверь тип кода и сканер.',
+   NOT_IN_WB_API_CACHE:'QR отсутствует в выбранном WB API-кэше. Проверь синхронизацию и правильность аккаунта.'};
+  out.textContent=names[d.reason]||'Неизвестная причина';
+ }catch(e){out.textContent='Ошибка связи с GRIT'}
 }
 refresh();setInterval(refresh,10000);
 </script></main></body></html>"""
@@ -654,6 +784,81 @@ def _sync_new_once_unlocked(account_id, client):
     if eligible:
         ingest_stickers(account_id, client.stickers(eligible))
     return {"received": len(orders), "updated": updated}
+
+
+def _sync_missing_stickers_once_unlocked(account_id, client):
+    """Repair missing WB stickers for already-known active picking orders.
+
+    An order may be cached before its sticker becomes available. The old
+    status worker fetched stickers only for orders without a sticker at
+    that exact moment; failure or eventual WB availability left a durable
+    hole until a full/manual sync. This bounded repair runs in the existing
+    read-only WB worker under its per-account lock, never in /fbs/scan.
+
+    Do NOT fabricate a sticker, infer its QR from printed digits, or accept
+    an order when WB API does not return a verified barcode.
+    """
+    from wms import query_all, execute
+    init_schema()
+    retry_before = datetime.fromtimestamp(
+        time.time() - 300, timezone.utc).isoformat()
+    missing = query_all("""SELECT o.order_id
+        FROM wb_fbs_orders o
+        JOIN wb_fbs_picking_queue q
+          ON q.account_id=o.account_id AND q.order_id=o.order_id
+        LEFT JOIN wb_fbs_stickers s
+          ON s.account_id=o.account_id AND s.order_id=o.order_id
+        LEFT JOIN wb_fbs_sticker_repair_attempts r
+          ON r.account_id=o.account_id AND r.order_id=o.order_id
+        WHERE o.account_id=?
+          AND o.local_status='pending'
+          AND o.wb_status IN ('confirm','complete')
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode=''
+               OR LENGTH(s.barcode)<>9 OR SUBSTR(s.barcode,1,1)<>'*')
+          AND (r.attempted_at IS NULL OR r.attempted_at<=?)
+        ORDER BY CASE WHEN r.attempted_at IS NULL THEN 0 ELSE 1 END,
+                 r.attempted_at ASC,o.synced_at DESC,o.order_id DESC
+        LIMIT 100""", (account_id,retry_before))
+    if not missing:
+        return {"missing_checked": 0, "stickers_received": 0}
+    # A malformed order ID must NOT be passed to the WB API as a different
+    # integer or quietly reinterpreted as another valid order.
+    ids = [int(row[0]) for row in missing
+           if str(row[0]).isdigit() and str(int(row[0])) == str(row[0])]
+    if not ids:
+        return {"missing_checked": len(missing), "stickers_received": 0}
+    # Persist retry checkpoints BEFORE contacting WB. If WB has not yet
+    # published the sticker, the same order will not be hammered every
+    # 30 seconds; old missing orders also get a turn in subsequent batches.
+    now = utcnow()
+    for order_id in ids:
+        execute("""INSERT INTO wb_fbs_sticker_repair_attempts
+            (account_id,order_id,attempted_at,attempt_count)
+            VALUES(?,?,?,1)
+            ON CONFLICT(account_id,order_id) DO UPDATE SET
+            attempted_at=excluded.attempted_at,
+            attempt_count=wb_fbs_sticker_repair_attempts.attempt_count+1""",
+            (account_id,str(order_id),now))
+    response = client.stickers(ids)
+    allowed = {str(order_id) for order_id in ids}
+    from wb_qr_codec import QR_DATA_RE, canonical_wb_sticker
+    verified = []
+    for item in response or []:
+        if not isinstance(item,dict) or str(item.get('orderId') or '') not in allowed:
+            continue
+        raw = normalize_api_sticker(item.get('barcode'))
+        # Only authoritative 9-symbol WB API QRs enter this repair path.
+        # Never treat the printed numeric Code128 or malformed payload
+        # as a replacement for an API-sourced sticker.
+        if not QR_DATA_RE.fullmatch(raw):
+            continue
+        numeric = canonical_wb_sticker(raw)
+        if not (isinstance(numeric,str) and numeric.isdigit()
+                and len(numeric)==11):
+            continue
+        verified.append(dict(item,barcode=raw))
+    count = ingest_stickers(account_id, verified) if verified else 0
+    return {"missing_checked": len(ids), "stickers_received": count}
 
 
 def _sync_status_once_unlocked(account_id, client):
@@ -720,6 +925,11 @@ def sync_status_once(account_id, client):
         return _sync_status_once_unlocked(account_id, client)
 
 
+def sync_missing_stickers_once(account_id, client):
+    with _exclusive_sync(account_id):
+        return _sync_missing_stickers_once_unlocked(account_id, client)
+
+
 def sync_catalog_once(account_id, client):
     with _exclusive_sync(account_id):
         return _sync_catalog_once_unlocked(account_id, client)
@@ -729,7 +939,10 @@ def worker_loop(account_id, client, stop=None):
     """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
-    intervals = {"new": 30, "status": 30, "catalog": 21600, "full": 86400}
+    if _configured_scan_source() != "api":
+        raise RuntimeError("WB worker disabled: selected FBS scan source is not WB API")
+    intervals = {"new": 30, "status": 30, "stickers": 300,
+                 "catalog": 21600, "full": 86400}
     last = {key: -float("inf") for key in intervals}
     while stop is None or not stop.is_set():
         now = time.monotonic()
@@ -742,6 +955,8 @@ def worker_loop(account_id, client, stop=None):
                     sync_new_once(account_id, client)
                 elif name == "status":
                     sync_status_once(account_id, client)
+                elif name == "stickers":
+                    sync_missing_stickers_once(account_id, client)
                 elif name == "catalog" and client.content_token:
                     sync_catalog_once(account_id, client)
                 elif name == "full":
