@@ -31,10 +31,44 @@ TEST_ARTICLE='SYNTH-ART'
 TEST_STICKER='59298125228'
 PRINTER='p1'
 KEY=b'GRIT-PR211-PHYSICAL-SYNTH-32-KEY'
-# Genuine Code128 B/C stripe decomposition for the INVENTED numeric label
-# generated offline with code128 encoder. NOT a real WB label or WB API barcode.
-CODE128_PATTERN='BaAbCbCcBaAaCbBbAaAbAaDbCbAaBbBbCaAbAaDaCaCaAbBbBbBaBbBcCaAaB'
-
+# Immutable QR Version 1 (ECC Q, quiet zone 4 modules), generated and
+# independently optically decoded in the offline test environment.
+# A fixed matrix avoids adding a new QR library to the HOSTKEY release image.
+# The source PDF contains an INVENTED WB-shaped 9-symbol QR, NOT a live sticker.
+TEST_QR_CODE='*'+base64.b64encode(
+    int(TEST_STICKER).to_bytes(5,'big')+bytes([2])).decode('ascii')
+QR_MATRIX=tuple("""00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00001111111001011011111110000
+00001000001011101010000010000
+00001011101011111010111010000
+00001011101000100010111010000
+00001011101000110010111010000
+00001000001000001010000010000
+00001111111010101011111110000
+00000000000000100000000000000
+00000111011001110000001100000
+00000111100000000100111000000
+00001101011110011101010110000
+00000111100010000001110110000
+00001110101010101001000010000
+00000000000010111010110000000
+00001111111000010011111100000
+00001000001011100001001100000
+00001011101000111011101000000
+00001011101011110010010100000
+00001011101010101010011000000
+00001000001011000100000010000
+00001111111000000100011000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000
+00000000000000000000000000000""".splitlines())
+assert TEST_QR_CODE=='*Dc5xlawC', 'SYNTHETIC_WB_QR_EXPECTATION_CHANGED'
+assert len(QR_MATRIX)==29 and all(
+    len(row)==29 and set(row)<=set('01') for row in QR_MATRIX), 'BAD_FIXED_QR_MATRIX'
 
 def must_isolated():
     target=os.environ.get('PR211_SYNTHETIC_DATABASE_URL','')
@@ -54,23 +88,28 @@ def pdf_bytes():
         product.insert_text((20,35+i*26),line,fontsize=12,fontname='china-s')
     sticker=doc.new_page(width=58*72/25.4,height=40*72/25.4)
     sticker.insert_text((8,13),'WB '+TEST_STICKER,fontsize=9,fontname='helv')
-    # Actual machine-readable synthetic Code128 stripes matching printed 11-digit code.
-    x=10.0
-    for stripe in CODE128_PATTERN:
-        width=(ord(stripe.lower())-96)*1.22
-        if stripe.isupper():
-            sticker.draw_rect(fitz.Rect(x,26,x+width,64),
-                              color=(0,0,0),fill=(0,0,0),width=0)
-        x+=width
-    # Render a visible synthetic watermark as an IMAGE; strict sticker parser
-    # still sees only one authentic-formatted 'WB ###########' text line.
+    # Two-dimensional WB-style QR. Vector squares preserve exact source
+    # geometry through the ORIGINAL PDF → 203dpi TSPL BITMAP pipeline.
+    # Top/side quiet-zone modules are included in the fixed 29x29 matrix.
+    side=2.94
+    x0=(sticker.rect.width-29*side)/2
+    y0=14.0
+    for y,row in enumerate(QR_MATRIX):
+        for x,bit in enumerate(row):
+            if bit=='1':
+                sticker.draw_rect(
+                    fitz.Rect(x0+x*side,y0+y*side,
+                              x0+(x+1)*side,y0+(y+1)*side),
+                    color=None,fill=(0,0,0),overlay=True)
+    # The strict parser must see ONLY 'WB '+11 digits as searchable text.
+    # Test watermark is an IMAGE, not a second sticker string.
     notice=fitz.open()
-    p=notice.new_page(width=240,height=50)
-    p.insert_text((8,22),'GRIT SYNTHETIC',fontsize=18,fontname='hebo')
-    p.insert_text((8,42),'NOT WB  /  TEST ONLY',fontsize=12,fontname='hebo')
-    watermark=p.get_pixmap(matrix=fitz.Matrix(2,2),alpha=False).tobytes('png')
+    page=notice.new_page(width=480,height=52)
+    page.insert_text((8,21),'GRIT SYNTHETIC',fontsize=19,fontname='hebo')
+    page.insert_text((8,44),'NOT WB / QR TEST ONLY',fontsize=16,fontname='hebo')
+    watermark=page.get_pixmap(matrix=fitz.Matrix(2,2),alpha=False).tobytes('png')
     notice.close()
-    sticker.insert_image(fitz.Rect(10,73,150,109),stream=watermark)
+    sticker.insert_image(fitz.Rect(15,101,149,112.4),stream=watermark)
     out=doc.tobytes()
     doc.close()
     check=fitz.open(stream=out,filetype='pdf')
@@ -106,6 +145,9 @@ def require_http(resp, name, code=200):
 
 def main():
     dsn=must_isolated()
+    from wb_qr_codec import canonical_wb_sticker
+    if canonical_wb_sticker(TEST_QR_CODE)!=TEST_STICKER:
+        raise RuntimeError('QR_DATA_DOES_NOT_MATCH_PRINTED_WB_NUMBER')
     if len(KEY)!=32:
         raise RuntimeError('KEY_SIZE_ERROR')
     now=datetime.now(timezone.utc).isoformat()
@@ -193,7 +235,8 @@ def main():
         raise RuntimeError('NOT_EXACTLY_ONE_TSPL_LABEL')
     print(json.dumps({'kind':'PR211_SYNTHETIC_PHYSICAL_PDF',
                       'order':TEST_ORDER,'sticker':TEST_STICKER,
-                      'line':'А', 'claim':claim},separators=(',',':')),
+                      'line':'А', 'qr_payload':TEST_QR_CODE,
+                      'symbol':'QR', 'claim':claim},separators=(',',':')),
           flush=True)
     # Claim committed to PG17; Windows must journal BEFORE RAW submission.
     # One ACK only. Lost SSH connection = no automatic retry.
