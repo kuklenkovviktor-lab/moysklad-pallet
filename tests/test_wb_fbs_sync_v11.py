@@ -83,7 +83,7 @@ class WBFBSSyncV11Tests(unittest.TestCase):
 
     def test_hid_slash_with_aim_prefix_and_invalid_candidates(self):
         self.seed(barcode="*gDABCD/1")
-        self.assertEqual(self.mod.normalize_api_sticker("]Q3;пВФИСВ.1\\n"), "*gDABCD/1")
+        self.assertEqual(self.mod.normalize_api_sticker("]Q3;пВФИСВ.1\n"), "*gDABCD/1")
         self.assertEqual(self.mod.verify_pair("a", "4601234567890", "]Q3;пВФИСВ.1")["result"], "MATCH")
         for bad in ("*пВФИСВ.1EXTRA", "*пВФИСВ:1", "item.123456", "]Q3*bad.!"):
             with self.subTest(bad=bad):
