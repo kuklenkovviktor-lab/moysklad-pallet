@@ -274,6 +274,10 @@ def normalize_api_sticker(value):
         from wb_qr_codec import QR_DATA_RE, RU_HID_TO_EN
         candidate = "*" + candidate_code[1:]
         candidate = candidate.translate(RU_HID_TO_EN)
+        # Russian HID layout emits a period for the physical slash key.
+        # A dot is forbidden in WB Base64 QR, so only repair within an
+        # exact nine-character WB QR candidate, never arbitrary barcode text.
+        candidate = candidate.replace(".", "/")
         if QR_DATA_RE.fullmatch(candidate):
             return candidate
     return code
