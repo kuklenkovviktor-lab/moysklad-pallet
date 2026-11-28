@@ -87,6 +87,26 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
         self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
 
+    def test_russian_hid_slash_is_restored_and_existing_sticker_matches(self):
+        # Exact regression from 2026-11-28 HOSTKEY read-only diagnosis.
+        self.seed(barcode="*gDABCD/1")
+        raw = "*пВФИСВ.1"
+        self.assertEqual(self.mod.normalize_api_sticker(raw), "*gDABCD/1")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", raw)["result"], "MATCH")
+        # Fixing the QR must NEVER bypass the independent SKU guard.
+        self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
+        self.assertEqual(self.mod.verify_pair("b", "4601234567890", raw)["result"], "UNKNOWN_STICKER")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*gDABCD/2")["result"], "UNKNOWN_STICKER")
+
+    def test_hid_slash_with_aim_prefix_and_invalid_candidates(self):
+        self.seed(barcode="*gDABCD/1")
+        self.assertEqual(self.mod.normalize_api_sticker("]Q3;пВФИСВ.1\n"), "*gDABCD/1")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "]Q3;пВФИСВ.1")["result"], "MATCH")
+        for bad in ("*пВФИСВ.1EXTRA", "*пВФИСВ:1", "item.123456", "]Q3*bad.!"):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.mod.normalize_api_sticker(bad), bad)
+                self.assertEqual(self.mod.verify_pair("a", "4601234567890", bad)["result"], "UNKNOWN_STICKER")
+
     def test_scanner_aim_prefix_matches_exact_api_qr(self):
         self.seed(barcode="*DfgaMEc2")
         for suffix in ("0", "3", "9"):
@@ -345,6 +365,67 @@ class WBFBSSyncV11Tests(unittest.TestCase):
             self.assertEqual(retry.status_code,200,retry.json)
             self.assertTrue(retry.json["replayed"])
             self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0],1)
+
+    def test_existing_fbs_http_scan_russian_hid_slash_and_duplicate_guard(self):
+        """Actual /api/fbs/scan route, pending item, DB commit and replay."""
+        from flask import Flask
+        from fbs_skip_authorization import record_pending_item
+        self.wms.init_wms_db()
+        emp = self.wms.query_one(
+            "SELECT id FROM employees WHERE active=1 AND role!='manager' LIMIT 1"
+        )[0]
+        shift = str(uuid.uuid4())
+        stamp = self.wms.now_iso()
+        self.wms.execute(
+            "INSERT INTO shifts (id,employee_id,started_at) VALUES(?,?,?)",
+            (shift, emp, stamp),
+        )
+        self.wms.execute(
+            "INSERT INTO activities (id,shift_id,employee_id,activity_type,started_at) "
+            "VALUES(?,?,?,?,?)",
+            (str(uuid.uuid4()), shift, emp, "picking", stamp),
+        )
+        app = Flask(__name__)
+        app.secret_key = "synthetic-session"
+        app.testing = True
+        app.register_blueprint(self.wms.wms_bp)
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess["employee_id"] = emp
+            sess["employee_shift_id"] = shift
+        self.seed(barcode="*gDABCD/1")
+        with patch.dict(os.environ, {
+            "WB_FBS_V11_ENABLED": "1", "WB_FBS_V11_ACCOUNT_ID": "a",
+        }):
+            record_pending_item(shift, emp, "WRONG", "test", "test")
+            wrong = client.post("/api/fbs/scan", json={
+                "shift_id": shift, "barcode": "*пВФИСВ.1",
+                "product_barcode": "WRONG", "request_id": str(uuid.uuid4()),
+            })
+            self.assertEqual(wrong.status_code, 409, wrong.json)
+            self.assertEqual(wrong.json["reason"], "WB_PRODUCT_MISMATCH")
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0], 0)
+
+            record_pending_item(shift, emp, "4601234567890", "test", "test")
+            scan = {
+                "shift_id": shift, "barcode": "]Q3;пВФИСВ.1",
+                "product_barcode": "4601234567890",
+                "request_id": str(uuid.uuid4()),
+            }
+            first = client.post("/api/fbs/scan", json=scan)
+            self.assertEqual(first.status_code, 200, first.json)
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0], 1)
+            self.assertEqual(self.wms.query_one(
+                "SELECT local_status FROM wb_fbs_orders WHERE order_id='123'"
+            )[0], "complete")
+            repeat = client.post("/api/fbs/scan", json=scan)
+            self.assertEqual(repeat.status_code, 200, repeat.json)
+            self.assertTrue(repeat.json["replayed"])
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0], 1)
+            different_request = dict(scan, request_id=str(uuid.uuid4()))
+            rejected = client.post("/api/fbs/scan", json=different_request)
+            self.assertEqual(rejected.status_code, 409, rejected.json)
+            self.assertEqual(self.wms.query_one("SELECT COUNT(*) FROM scans")[0], 1)
 
     def test_fbs_scan_route_accepts_aim_prefixed_api_qr(self):
         from flask import Flask
