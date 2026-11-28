@@ -703,7 +703,7 @@ async function refresh(){
  '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.missing_stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
  '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
  '; статус: '+(d.last_status||'нет')+
- '; восстановление QR: '+(d.last_sticker_repair||'ещё не выполнялось')+
+ '; последняя попытка восстановления QR: '+(d.last_sticker_repair||'ещё не выполнялась')+
  (d.pdf_orders_present?'<br><strong>Внимание:</strong> загруженные PDF не используются при проверке WB API v1.1.':'')+
  '</p>';
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
