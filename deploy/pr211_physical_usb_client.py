@@ -25,8 +25,8 @@ from services.printing.wb_original_usb_agent_synthetic import decode_claim
 
 BRANCH='feature/pr211-wb-real-source-preflight'
 REPO='https://github.com/kuklenkovviktor-lab/moysklad-pallet.git'
-LABEL_MARKER='PR211_SYNTHETIC_PHYSICAL_PDF'
-ATTEMPT_FILE='pr211_original_like_pdf_physical_once.json'
+LABEL_MARKER='PR211_SYNTHETIC_PHYSICAL_QR_PDF'
+ATTEMPT_FILE='pr211_original_like_qr_physical_once.json'
 
 
 def marker():
@@ -57,7 +57,7 @@ def execute(spooler=None,popen=subprocess.Popen,state_path=None):
     win=spooler or _spooler()
     usb=check_printer(win,TEST_PRINTER)  # BEFORE network or claim.
     print('GRIT PR211: TEST PRINTER',TEST_PRINTER,'USB',usb,flush=True)
-    print('Synthetic WB-like PDF via REAL strict parser, PG17 and QR; ONE label',flush=True)
+    print('Synthetic PDF with ACTUAL 2D QR image via PG17; ONE TEST LABEL',flush=True)
     cmd=['ssh','-T','grit',remote_command()]
     try:
         process=popen(cmd,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
@@ -77,7 +77,9 @@ def execute(spooler=None,popen=subprocess.Popen,state_path=None):
         if (packet.get('kind')!=LABEL_MARKER or
                 packet.get('order')!='SYNTH-PR211-PDF-PHYSICAL-1' or
                 packet.get('sticker')!='59298125228' or
-                packet.get('line')!='А'):
+                packet.get('line')!='А' or
+                packet.get('symbol')!='QR' or
+                packet.get('qr_payload')!='*Dc5xlawC'):
             raise PilotError('Synthetic origin/line not verified; refuse print')
         claim=packet.get('claim')
         validated=decode_claim(claim)
@@ -87,7 +89,8 @@ def execute(spooler=None,popen=subprocess.Popen,state_path=None):
         record={
             'kind':LABEL_MARKER,'ticket':ticket,
             'printer':TEST_PRINTER,'usb_port':usb,
-            'source':'ORIGINAL-LIKE-INVENTED-PDF-ONLY',
+            'source':'ORIGINAL-LIKE-INVENTED-WB-QR-PDF-ONLY',
+            'qr_payload':'*Dc5xlawC',
             'wb_account':None,'sha256':digest,
             'physical_print_confirmed':False,
             'state':'CLAIMED','created_utc':_utc_now(),
@@ -116,7 +119,8 @@ def execute(spooler=None,popen=subprocess.Popen,state_path=None):
         if report!='PR211_SERVER_REPORT_SUBMITTED':
             raise PilotError('Windows got the label, but server ACK is UNKNOWN. NO RETRY')
         print('PR211 WINDOWS RAW SUBMITTED + PG17 SERVER ACK PASS',flush=True)
-        print('VERIFY PAPER: WB 59298125228 / GRIT SYNTHETIC / NOT WB',flush=True)
+        print('VERIFY PAPER: real 2D QR / WB 59298125228 / GRIT SYNTHETIC',flush=True)
+        print('SCAN QR MUST RETURN: *Dc5xlawC',flush=True)
         print('PHYSICAL OUTPUT REQUIRES YOUR CONFIRMATION. DO NOT REPRINT.',flush=True)
         print('Journal:',path,flush=True)
         return 0
