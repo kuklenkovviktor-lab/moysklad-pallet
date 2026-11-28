@@ -2661,10 +2661,13 @@ def fbs_product_info():
 
         # In WB API picking, stage the scanned SKU from the cached CONFIRM
         # orders. Never require an imported PDF or a MoySklad lookup.
-        from wms import pdf_picking_active
+        from wms import fbs_selected_source
         from fbs_skip_authorization import record_pending_item
         shift_id = str(data.get("shift_id") or "").strip()
-        if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+        source = fbs_selected_source(shift_id, employee["id"])
+        if source == "unavailable":
+            return jsonify(error="Источник FBS недоступен: проверь выбранный режим и импорт PDF.", reason="fbs_source_unavailable"), 409
+        if source == "wb_api":
             account = os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
             from wb_fbs_sync_v11 import accepted_product
             row = accepted_product(account, barcode)
@@ -2681,7 +2684,7 @@ def fbs_product_info():
                 ok=True, barcode=barcode, article=pending["article"],
                 name=pending["name"], source="wb_api",
             )
-        if pdf_picking_active(shift_id, employee["id"]):
+        if source == "pdf":
             mapped = query_all(
                 "SELECT DISTINCT article, product_barcode "
                 "FROM pdf_fbs_orders WHERE product_barcode=? LIMIT 2",
