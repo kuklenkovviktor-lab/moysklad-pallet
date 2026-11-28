@@ -572,7 +572,8 @@ def manager_wb_status_v11():
           ON s.account_id=o.account_id AND s.order_id=o.order_id
         WHERE o.account_id=? AND o.local_status='pending'
           AND o.wb_status IN ('confirm','complete')
-          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')""",
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode=''
+               OR LENGTH(s.barcode)<>9 OR SUBSTR(s.barcode,1,1)<>'*')""",
           (account,))[0]
     errors = query_one("""SELECT COUNT(*) FROM wb_fbs_scan_events
         WHERE account_id=? AND result<>'MATCH'""", (account,))[0]
@@ -619,7 +620,8 @@ def manager_wb_diagnose_sticker_v11():
     normalized = normalize_api_sticker(entered)
     from wb_qr_codec import canonical_wb_sticker, QR_DATA_RE
     from wms import query_one
-    init_schema()
+    # Schema is initialized at WMS startup. Never execute DDL from a
+    # read-only manager diagnosis request.
     account = _account()
     own = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
         WHERE account_id=? AND barcode=?""",(account,normalized))[0]
@@ -792,7 +794,8 @@ def _sync_missing_stickers_once_unlocked(account_id, client):
         WHERE o.account_id=?
           AND o.local_status='pending'
           AND o.wb_status IN ('confirm','complete')
-          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode=''
+               OR LENGTH(s.barcode)<>9 OR SUBSTR(s.barcode,1,1)<>'*')
           AND (r.attempted_at IS NULL OR r.attempted_at<=?)
         ORDER BY CASE WHEN r.attempted_at IS NULL THEN 0 ELSE 1 END,
                  r.attempted_at ASC,o.synced_at DESC,o.order_id DESC
