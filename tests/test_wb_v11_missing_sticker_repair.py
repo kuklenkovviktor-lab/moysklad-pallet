@@ -123,12 +123,10 @@ class ManagerStickerDiagnosisTests(unittest.TestCase):
         self.app=Flask("synthetic-wb-sticker-diagnostics")
         self.app.secret_key="synthetic-session-secret"
 
-    def diagnose(self, *, own=0, other=0, pdf=0,
+    def diagnose(self, *, own=0, pdf=0,
                  sticker="*Dc5xlawC", allowed=True, authorized=True):
         from flask import session
         def q(sql,params=()):
-            if "FROM wb_fbs_stickers" in sql and "account_id<>?" in sql:
-                return (other,)
             if "FROM wb_fbs_stickers" in sql:
                 return (own,)
             if "FROM pdf_fbs_orders" in sql:
@@ -153,11 +151,11 @@ class ManagerStickerDiagnosisTests(unittest.TestCase):
         self.assertEqual(response.json["reason"],"IN_SELECTED_ACCOUNT")
         self.assertEqual(response.headers["Cache-Control"],"no-store")
 
-    def test_qr_in_different_account_is_detected_not_accepted(self):
-        response,status=self.diagnose(other=1)
+    def test_unknown_qr_is_never_looked_up_across_other_accounts(self):
+        response,status=self.diagnose()
         self.assertEqual(status,200)
-        self.assertEqual(response.json["reason"],"STICKER_IN_OTHER_ACCOUNT")
-        self.assertFalse(response.json["account_has_match"])
+        self.assertEqual(response.json["reason"],"NOT_IN_WB_API_CACHE")
+        self.assertNotIn("other_account_has_match",response.json)
 
     def test_qr_in_pdf_only_is_not_accepted_as_wb_api(self):
         response,status=self.diagnose(pdf=1)
