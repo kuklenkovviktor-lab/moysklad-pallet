@@ -139,10 +139,10 @@ class ManagerStickerDiagnosisTests(unittest.TestCase):
             headers={"X-CSRF-Token":"test-csrf"},
             json={"sticker":sticker}):
             session["wb_fbs_v11_csrf"]="test-csrf"
-            with patch.object(wb,"manager_access",return_value=authorized), \\
-                 patch.object(wb,"_allowed",return_value=allowed), \\
-                 patch.object(wb,"init_schema"), \\
-                 patch.object(wb,"_account",return_value="acct-demo"), \\
+            with patch.object(wb,"manager_access",return_value=authorized), \
+                 patch.object(wb,"_allowed",return_value=allowed), \
+                 patch.object(wb,"init_schema"), \
+                 patch.object(wb,"_account",return_value="acct-demo"), \
                  patch("wms.query_one",side_effect=q):
                 result=wb.manager_wb_diagnose_sticker_v11()
             return result if isinstance(result,tuple) else (result,200)
