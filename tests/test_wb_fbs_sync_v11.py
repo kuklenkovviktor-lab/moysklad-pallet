@@ -70,6 +70,26 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
         self.assertEqual(self.mod.normalize_api_sticker("4601234567890"), "4601234567890")
 
+    def test_russian_hid_slash_is_restored_and_existing_sticker_matches(self):
+        # Exact regression from 2026-11-28 HOSTKEY read-only diagnosis.
+        self.seed(barcode="*gDABCD/1")
+        raw = "*пВФИСВ.1"
+        self.assertEqual(self.mod.normalize_api_sticker(raw), "*gDABCD/1")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", raw)["result"], "MATCH")
+        # Fixing the QR must NEVER bypass the independent SKU guard.
+        self.assertEqual(self.mod.verify_pair("a", "WRONG", raw)["result"], "MISMATCH")
+        self.assertEqual(self.mod.verify_pair("b", "4601234567890", raw)["result"], "UNKNOWN_STICKER")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "*gDABCD/2")["result"], "UNKNOWN_STICKER")
+
+    def test_hid_slash_with_aim_prefix_and_invalid_candidates(self):
+        self.seed(barcode="*gDABCD/1")
+        self.assertEqual(self.mod.normalize_api_sticker("]Q3;пВФИСВ.1\\n"), "*gDABCD/1")
+        self.assertEqual(self.mod.verify_pair("a", "4601234567890", "]Q3;пВФИСВ.1")["result"], "MATCH")
+        for bad in ("*пВФИСВ.1EXTRA", "*пВФИСВ:1", "item.123456", "]Q3*bad.!"):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.mod.normalize_api_sticker(bad), bad)
+                self.assertEqual(self.mod.verify_pair("a", "4601234567890", bad)["result"], "UNKNOWN_STICKER")
+
     def test_scanner_aim_prefix_matches_exact_api_qr(self):
         self.seed(barcode="*DfgaMEc2")
         for suffix in ("0", "3", "9"):
