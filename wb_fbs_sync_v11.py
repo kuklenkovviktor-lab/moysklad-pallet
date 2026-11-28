@@ -537,6 +537,11 @@ def _account():
     return os.getenv("WB_FBS_V11_ACCOUNT_ID", "default").strip() or "default"
 
 
+def _configured_scan_source():
+    """Server-selected source, not a request or an employee toggle."""
+    return os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower()
+
+
 def _manual_sync():
     _UI_STATE["running"] = True
     try:
@@ -588,7 +593,7 @@ def manager_wb_status_v11():
     return jsonify(enabled=True, configured=bool(os.getenv("WB_API_TOKEN", "").strip()),
                    orders=orders, missing_skus=missing, stickers=stickers,
                    missing_stickers=missing_stickers,
-                   scan_source="wb_api", pdf_orders_present=bool(pdf_count),
+                   scan_source=_configured_scan_source(), pdf_orders_present=bool(pdf_count),
                    pdf_verification_separate=True,
                    last_sticker_repair=(last_repair[0] if last_repair else None),
                    rejected_scans=errors, last_sync=(last[0] if last else None),
@@ -633,7 +638,14 @@ def manager_wb_diagnose_sticker_v11():
     pdf_match = bool(numeric and query_one(
         "SELECT 1 FROM pdf_fbs_orders WHERE wb_barcode=? LIMIT 1",(numeric,)))
     qr_valid = QR_DATA_RE.fullmatch(normalized) is not None
-    if own == 1:
+    if _configured_scan_source() == "pdf":
+        if pdf_match:
+            reason="IN_SELECTED_PDF"
+        elif not qr_valid and not numeric:
+            reason="NOT_A_RECOGNIZED_WB_CODE"
+        else:
+            reason="NOT_IN_PDF_REGISTRY"
+    elif own == 1:
         reason="IN_SELECTED_ACCOUNT"
     elif own > 1:
         reason="DUPLICATE_CURRENT_ACCOUNT"
@@ -643,9 +655,10 @@ def manager_wb_diagnose_sticker_v11():
         reason="NOT_A_NINE_CHARACTER_WB_QR"
     else:
         reason="NOT_IN_WB_API_CACHE"
-    response=jsonify(source="wb_api_v11",account_has_match=bool(own),
+    response=jsonify(source=_configured_scan_source(),account_has_match=bool(own),
         imported_pdf_has_match=pdf_match,qr_format_valid=qr_valid,
-        reason=reason,needs_manager_review=reason!="IN_SELECTED_ACCOUNT")
+        reason=reason,needs_manager_review=reason not in
+        ("IN_SELECTED_ACCOUNT","IN_SELECTED_PDF"))
     response.headers["Cache-Control"]="no-store"
     return response
 
@@ -656,6 +669,8 @@ def manager_wb_sync_v11():
         return jsonify(error="Только для руководителя"), 403
     if not _allowed() or not os.getenv("WB_API_TOKEN", "").strip():
         return jsonify(error="WB FBS v1.1 отключён или нет API-ключа"), 503
+    if _configured_scan_source() != "api":
+        return jsonify(error="Выбран PDF-источник. Фоновая синхронизация WB не активирует этот режим."), 409
     csrf = session.get("wb_fbs_v11_csrf") or ""
     if not csrf or not secrets.compare_digest(
         request.headers.get("X-CSRF-Token", ""), csrf
@@ -704,7 +719,8 @@ async function refresh(){
  '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
  '; статус: '+(d.last_status||'нет')+
  '; последняя попытка восстановления QR: '+(d.last_sticker_repair||'ещё не выполнялась')+
- (d.pdf_orders_present?'<br><strong>Внимание:</strong> загруженные PDF не используются при проверке WB API v1.1.':'')+
+ (d.pdf_orders_present&&d.scan_source==='api'?'<br><strong>Внимание:</strong> загруженные PDF не используются при проверке WB API v1.1.':'')+
+ '<br>Источник FBS: '+(d.scan_source==='pdf'?'PDF':d.scan_source==='api'?'WB API':'НЕВЕРНЫЙ РЕЖИМ')+
  '</p>';
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
 }
@@ -726,6 +742,9 @@ async function diagnoseSticker(){
   if(!r.ok){out.textContent=d.error||'Ошибка доступа';return}
   const names={
    IN_SELECTED_ACCOUNT:'QR есть в текущем WB API-кэше. Проверь статус заказа и ШК товара.',
+   IN_SELECTED_PDF:'Стикер найден в выбранном PDF-реестре. Проверь соответствие товара.',
+   NOT_IN_PDF_REGISTRY:'Стикер отсутствует в выбранном PDF-реестре. Заказ не засчитан.',
+   NOT_A_RECOGNIZED_WB_CODE:'Не распознан QR или цифровой код WB.',
    DUPLICATE_CURRENT_ACCOUNT:'QR связан с несколькими заказами. Заблокировано, нужна проверка.',
    PDF_REGISTRY_ONLY:'QR найден только в загруженном PDF. Режим WB API его не использует.',
    NOT_A_NINE_CHARACTER_WB_QR:'Отсканирован не девятисимвольный QR WB. Проверь тип кода и сканер.',
@@ -920,6 +939,8 @@ def worker_loop(account_id, client, stop=None):
     """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
+    if _configured_scan_source() != "api":
+        raise RuntimeError("WB worker disabled: selected FBS scan source is not WB API")
     intervals = {"new": 30, "status": 30, "stickers": 300,
                  "catalog": 21600, "full": 86400}
     last = {key: -float("inf") for key in intervals}
