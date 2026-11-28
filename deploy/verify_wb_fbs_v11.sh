@@ -5,12 +5,14 @@ cd "$(dirname "$0")/.."
 IMAGE="grit-wb-fbs-v11-synthetic:$(git rev-parse --short HEAD)"
 docker build -t "$IMAGE" .
 test_files=(
-  test_wb_fbs_sync_v11.py
-  test_wb_fbs_api_mock.py
   test_fbs_double_product_scan.py
   test_attendance.py
   test_shift_history.py
 )
+for file in tests/test_wb*.py; do
+  [[ "$file" == tests/test_wb_fbs_pg_stress.py ]] && continue
+  test_files+=("${file##*/}")
+done
 for pattern in "${test_files[@]}"; do
   echo "=== RUN $pattern ==="
   docker run --rm --network none --read-only \

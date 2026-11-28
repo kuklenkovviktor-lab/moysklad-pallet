@@ -2379,7 +2379,8 @@ async function loadWbAssemblyPlan(){
     ' · ещё не собрано в GRIT: '+result.remaining_orders+
     (result.unadmitted_orders?' · не поставлено в очередь GRIT: '+result.unadmitted_orders:'')+
     ' · в доставке WB, но не закрыто в GRIT: '+result.delivery_orders+
-    ' · проверено по кэшу WB: '+(result.synced_at||'время неизвестно');
+    ' · проверено по кэшу WB (самый старый статус): '+(result.synced_at||'время неизвестно')+
+    (result.cache_stale?' · ВНИМАНИЕ: кэш устарел, показатели требуют обновления':'');
  }catch(e){
   wbAssemblyCount=null;
   renderProgress();
@@ -2411,7 +2412,8 @@ async function load(){
  document.getElementById('todayOrders').textContent=fact;
  document.getElementById('wbDailyFlow').textContent=picked!==null
   ?'За сегодня · поступило на сборку '+hist.new_on_assembly_observed+
-    ' · собрано '+picked+' · замечено переходов в доставку '+hist.moved_to_delivery_observed
+    ' · собрано '+picked+' · замечено переходов в доставку '+hist.moved_to_delivery_observed+
+    ' · дата поступления неизвестна: '+Number(hist.unknown_admission_orders||0)
   :'История WB недоступна · факт показан по журналу FBS';
  document.getElementById('receivingUnits').textContent=Math.round(Number(r.units||0));
  document.getElementById('deviationCount').textContent=dev.count||0;
@@ -3876,13 +3878,13 @@ def manager_wb_fbs_picking_queue():
             assembled = sum(1 for row in rows if row[0] == "complete")
             remaining = total - assembled
             unadmitted = sum(1 for row in rows if row[0] != "complete" and not row[1])
-            synced_at = max((row[2] for row in rows if row[2]), default=None)
+            synced_at = min((row[2] for row in rows if row[2]), default=None)
         else:
             counts = query_one("""SELECT COUNT(*),
                 COALESCE(SUM(CASE WHEN o.local_status='complete' THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN o.local_status<>'complete' AND q.order_id IS NULL
                      THEN 1 ELSE 0 END),0),
-                MAX(o.synced_at)
+                MIN(o.synced_at)
                 FROM wb_fbs_orders o
                 LEFT JOIN wb_fbs_picking_queue q
                   ON q.account_id=o.account_id AND q.order_id=o.order_id
@@ -3901,8 +3903,14 @@ def manager_wb_fbs_picking_queue():
     except Exception:
         # A broken or missing WB cache is NOT an empty assembly queue.
         return jsonify(state="error", error="Очередь WB недоступна"), 503
+    try:
+        oldest = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+        cache_stale = (datetime.now(timezone.utc) - oldest).total_seconds() > 180
+    except (ValueError, TypeError, AttributeError):
+        cache_stale = True
     response = jsonify(
         state="connected", source="wb_api_synced_statuses",
+        cache_stale=cache_stale, freshness_basis="oldest_confirm_order",
         day=day or None, synced_at=synced_at,
         assembly_orders=total, assembled_assembly_orders=assembled,
         remaining_orders=remaining, confirm_orders=remaining,
