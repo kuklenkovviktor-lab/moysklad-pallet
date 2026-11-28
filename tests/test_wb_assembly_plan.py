@@ -110,9 +110,9 @@ class WBAssemblyPlanTests(unittest.TestCase):
     def test_dashboard_not_mixing_all_daily_scans_with_current_wb_orders(self):
         from pathlib import Path
         wms=Path("wms.py").read_text(encoding="utf-8")
-        self.assertIn("result.grit_picked_on_assembly",wms)
-        self.assertIn("result.remaining_units",wms)
-        self.assertIn("if(wbAssemblyCount===null)renderProgress",wms)
+        self.assertIn("wbAssemblyCount.assembled_assembly_orders",wms)
+        self.assertIn("wbAssemblyCount.remaining_orders",wms)
+        self.assertIn("Отдельно от собранного за сегодня",wms)
 
 
 if __name__ == "__main__":
