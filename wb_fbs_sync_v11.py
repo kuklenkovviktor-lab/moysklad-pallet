@@ -700,7 +700,8 @@ def _sync_missing_stickers_once_unlocked(account_id, client):
           AND o.wb_status IN ('confirm','complete')
           AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')
           AND (r.attempted_at IS NULL OR r.attempted_at<=?)
-        ORDER BY r.attempted_at ASC,o.synced_at DESC,o.order_id DESC
+        ORDER BY CASE WHEN r.attempted_at IS NULL THEN 0 ELSE 1 END,
+                 r.attempted_at ASC,o.synced_at DESC,o.order_id DESC
         LIMIT 100""", (account_id,retry_before))
     if not missing:
         return {"missing_checked": 0, "stickers_received": 0}
