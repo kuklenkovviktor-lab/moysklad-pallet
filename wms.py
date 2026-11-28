@@ -4429,14 +4429,14 @@ def fbs_selected_source(shift_id, employee_id):
     use a previously imported PDF instead; never infer mode from a globally
     populated PDF table when API mode is enabled.
     """
-    pdf_enabled = pdf_picking_active(shift_id, employee_id)
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
-        return "pdf" if pdf_enabled else "legacy"
+        return "pdf" if pdf_picking_active(shift_id, employee_id) else "legacy"
     source = os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower()
     if source == "api":
+        # Hot path: no extra PDF/shift DB lookups on ordinary WB API scans.
         return "wb_api"
     if source == "pdf":
-        return "pdf" if pdf_enabled else "unavailable"
+        return "pdf" if pdf_picking_active(shift_id, employee_id) else "unavailable"
     return "unavailable"
 
 
