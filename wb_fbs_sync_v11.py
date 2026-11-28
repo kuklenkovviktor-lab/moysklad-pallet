@@ -289,6 +289,9 @@ def normalize_api_sticker(value):
         from wb_qr_codec import QR_DATA_RE, RU_HID_TO_EN
         candidate = "*" + candidate_code[1:]
         candidate = candidate.translate(RU_HID_TO_EN)
+        # Russian HID keyboard emits '.' for the QR Base64 slash key.
+        # Restrict this repair to a nine-character WB API QR candidate.
+        candidate = candidate.replace(".", "/")
         if QR_DATA_RE.fullmatch(candidate):
             return candidate
     return code
