@@ -7,6 +7,8 @@ python3 - <<'WB_FBS_AST'
 import ast
 from pathlib import Path
 for name in (
+    'app.py',
+    'wms.py',
     'wb_fbs_sync_v11.py',
     'tests/test_wb_fbs_sync_v11.py',
     'tests/test_wb_v11_missing_sticker_repair.py',
