@@ -54,6 +54,23 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(value["result"], "MATCH")
         self.assertEqual(value["order_id"], "123")
 
+    def test_worker_loop_publishes_success_without_web_server(self):
+        import wb_worker_health
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as tmp:
+            state = wb_worker_health.WorkerHealth(str(Path(tmp) / 'health.json'))
+            stop = Mock()
+            stop.is_set.return_value = False
+            stop.wait.return_value = True
+            client = Mock(content_token=None)
+            with patch.dict(os.environ, {'WB_FBS_V11_ENABLED': '1'}), \
+                 patch.object(wb_worker_health, 'WorkerHealth', return_value=state), \
+                 patch.object(self.mod, 'sync_new_once'), \
+                 patch.object(self.mod, 'sync_status_once'), \
+                 patch.object(self.mod, 'sync_once'):
+                self.mod.worker_loop('synthetic', client, stop)
+            self.assertEqual(wb_worker_health.check(str(state.path), alive=lambda pid: True), (True, 'ok'))
+
     def test_raw_wb_qr_matches_exact_api_sticker(self):
         self.seed(barcode="*DfgaMEc2")
         verdict = self.mod.verify_pair("a", "4601234567890", "*DfgaMEc2")
