@@ -182,5 +182,53 @@ class ManagerStickerDiagnosisTests(unittest.TestCase):
         self.assertEqual(status,503)
 
 
+class ExplicitFbsSourceTests(unittest.TestCase):
+    def test_v11_defaults_to_api_even_with_imported_pdf(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{"WB_FBS_V11_ENABLED":"1"},clear=False):
+            with patch.dict(os.environ,{},clear=False):
+                os.environ.pop("WB_FBS_SOURCE_MODE",None)
+                with patch.object(wms,"pdf_picking_active",
+                                  side_effect=AssertionError("Do not query PDF on API hot path")):
+                    self.assertEqual(wms.fbs_selected_source("shift","badge"),"wb_api")
+
+    def test_intentional_pdf_selection_with_v11_enabled(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"pdf"},clear=False):
+            with patch.object(wms,"pdf_picking_active",return_value=True):
+                self.assertEqual(wms.fbs_selected_source("shift","badge"),"pdf")
+
+    def test_pdf_selection_without_imported_file_fails_closed(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"pdf"},clear=False):
+            with patch.object(wms,"pdf_picking_active",return_value=False):
+                self.assertEqual(wms.fbs_selected_source("shift","badge"),
+                                 "unavailable")
+
+    def test_invalid_source_configuration_fails_closed(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"anything"},clear=False):
+            with patch.object(wms,"pdf_picking_active",
+                              side_effect=AssertionError("Invalid mode cannot query data")):
+                self.assertEqual(wms.fbs_selected_source("shift","badge"),
+                                 "unavailable")
+
+    def test_legacy_source_selection_remains_unchanged_when_v11_off(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{"WB_FBS_V11_ENABLED":"0"},clear=False):
+            with patch.object(wms,"pdf_picking_active",return_value=True):
+                self.assertEqual(wms.fbs_selected_source("shift","badge"),"pdf")
+            with patch.object(wms,"pdf_picking_active",return_value=False):
+                self.assertEqual(wms.fbs_selected_source("shift","badge"),"legacy")
+
+
 if __name__=="__main__":
     unittest.main()
