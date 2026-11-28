@@ -98,6 +98,24 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.assertEqual(self.mod.verify_pair(
             "a","4601234567890","*Dc5xlawC")["result"],"UNKNOWN_STICKER")
 
+    def test_invalid_old_sticker_repairs_from_authoritative_wb_qr(self):
+        """Previously cached numeric/linear barcode is NOT accepted as QR."""
+        from unittest.mock import Mock
+        self.mod.ingest_orders("a",[self.order()],{"123":"confirm"})
+        self.mod.ingest_stickers("a",[
+            {"orderId":123,"barcode":"59298125228"}
+        ])
+        self.assertEqual(self.mod.verify_pair(
+            "a","4601234567890","*Dc5xlawC")["result"],"UNKNOWN_STICKER")
+        remote=Mock()
+        remote.stickers.return_value=[
+            {"orderId":123,"barcode":"*Dc5xlawC"}
+        ]
+        result=self.mod.sync_missing_stickers_once("a",remote)
+        self.assertEqual(result["stickers_received"],1)
+        self.assertEqual(self.mod.verify_pair(
+            "a","4601234567890","*Dc5xlawC")["result"],"MATCH")
+
     def test_product_then_sticker_match(self):
         self.seed()
         value = self.mod.verify_pair("a", "4601234567890", "WB-QR-123")
