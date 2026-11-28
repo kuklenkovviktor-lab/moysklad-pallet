@@ -220,6 +220,40 @@ class ExplicitFbsSourceTests(unittest.TestCase):
                 self.assertEqual(wms.fbs_selected_source("shift","badge"),
                                  "unavailable")
 
+    def test_pdf_source_disables_wb_api_worker(self):
+        import os
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"pdf"},clear=False):
+            with self.assertRaisesRegex(RuntimeError,"WB worker disabled"):
+                wb.worker_loop("synthetic-account",Mock())
+
+    def test_manager_diag_uses_selected_pdf_as_authority(self):
+        # The real manager verifier is also read-only in PDF mode:
+        # a WB API cache record must not override a chosen PDF session.
+        from flask import Flask, session
+        import os
+        app=Flask("pdf-source-synthetic")
+        app.secret_key="test-secret"
+        with patch.dict(os.environ,{"WB_FBS_SOURCE_MODE":"pdf"},clear=False):
+            with app.test_request_context(
+                "/api/wb-v11/diagnose-sticker",method="POST",
+                headers={"X-CSRF-Token":"x"},
+                json={"sticker":QR}):
+                session["wb_fbs_v11_csrf"]="x"
+                def q(sql,params=()):
+                    if "FROM wb_fbs_stickers" in sql:
+                        return (1,)
+                    if "FROM pdf_fbs_orders" in sql:
+                        return (1,)
+                    raise AssertionError("Unexpected query")
+                with patch.object(wb,"manager_access",return_value=True), \
+                     patch.object(wb,"_allowed",return_value=True), \
+                     patch.object(wb,"_account",return_value="synthetic-account"), \
+                     patch("wms.query_one",side_effect=q):
+                    response=wb.manager_wb_diagnose_sticker_v11()
+                self.assertEqual(response.json["reason"],"IN_SELECTED_PDF")
+                self.assertFalse(response.json["needs_manager_review"])
+
     def test_legacy_source_selection_remains_unchanged_when_v11_off(self):
         import os
         import wms
