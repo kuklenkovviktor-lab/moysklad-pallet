@@ -560,12 +560,23 @@ def manager_wb_status_v11():
         AND NOT EXISTS (SELECT 1 FROM wb_fbs_order_skus s WHERE
         s.account_id=o.account_id AND s.order_id=o.order_id)""", (account,))[0]
     stickers = query_one("SELECT COUNT(*) FROM wb_fbs_stickers WHERE account_id=?", (account,))[0]
+    missing_stickers = query_one("""SELECT COUNT(*)
+        FROM wb_fbs_orders o
+        JOIN wb_fbs_picking_queue q
+          ON q.account_id=o.account_id AND q.order_id=o.order_id
+        LEFT JOIN wb_fbs_stickers s
+          ON s.account_id=o.account_id AND s.order_id=o.order_id
+        WHERE o.account_id=? AND o.local_status='pending'
+          AND o.wb_status IN ('confirm','complete')
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')""",
+          (account,))[0]
     errors = query_one("""SELECT COUNT(*) FROM wb_fbs_scan_events
         WHERE account_id=? AND result<>'MATCH'""", (account,))[0]
     last = query_one("""SELECT finished_at,status FROM wb_fbs_sync_runs
         WHERE account_id=? ORDER BY started_at DESC LIMIT 1""", (account,))
     return jsonify(enabled=True, configured=bool(os.getenv("WB_API_TOKEN", "").strip()),
                    orders=orders, missing_skus=missing, stickers=stickers,
+                   missing_stickers=missing_stickers,
                    rejected_scans=errors, last_sync=(last[0] if last else None),
                    last_status=(last[1] if last else None),
                    **dict(_UI_STATE))
@@ -611,8 +622,8 @@ async function refresh(){
  if(!r.ok){document.getElementById('stats').textContent=d.error||'Ошибка доступа';return}
  if(!d.enabled){document.getElementById('stats').textContent='Модуль отключён. Требуется явное разрешение администратора.';return}
  document.getElementById('stats').innerHTML=
- ['Заказов','Без SKU','Стикеров','Отклонено сканов'].map((title,i)=>
- '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
+ ['Заказов','Без SKU','Стикеров','Без стикера','Отклонено сканов'].map((title,i)=>
+ '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.missing_stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
  '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
  '; статус: '+(d.last_status||'нет')+'</p>';
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
@@ -654,6 +665,52 @@ def _sync_new_once_unlocked(account_id, client):
     if eligible:
         ingest_stickers(account_id, client.stickers(eligible))
     return {"received": len(orders), "updated": updated}
+
+
+def _sync_missing_stickers_once_unlocked(account_id, client):
+    """Repair missing WB stickers for already-known active picking orders.
+
+    An order may be cached before its sticker becomes available. The old
+    status worker fetched stickers only for orders without a sticker at
+    that exact moment; failure or eventual WB availability left a durable
+    hole until a full/manual sync. This bounded repair runs in the existing
+    read-only WB worker under its per-account lock, never in /fbs/scan.
+
+    Do NOT fabricate a sticker, infer its QR from printed digits, or accept
+    an order when WB API does not return a verified barcode.
+    """
+    from wms import query_all
+    init_schema()
+    missing = query_all("""SELECT o.order_id
+        FROM wb_fbs_orders o
+        JOIN wb_fbs_picking_queue q
+          ON q.account_id=o.account_id AND q.order_id=o.order_id
+        LEFT JOIN wb_fbs_stickers s
+          ON s.account_id=o.account_id AND s.order_id=o.order_id
+        WHERE o.account_id=?
+          AND o.local_status='pending'
+          AND o.wb_status IN ('confirm','complete')
+          AND (s.order_id IS NULL OR s.barcode IS NULL OR s.barcode='')
+        ORDER BY o.synced_at DESC,o.order_id DESC
+        LIMIT 100""", (account_id,))
+    if not missing:
+        return {"missing_checked": 0, "stickers_received": 0}
+    # A malformed order ID must NOT be passed to the WB API as a different
+    # integer or quietly reinterpreted as another valid order.
+    ids = [int(row[0]) for row in missing
+           if str(row[0]).isdigit() and str(int(row[0])) == str(row[0])]
+    if not ids:
+        return {"missing_checked": len(missing), "stickers_received": 0}
+    response = client.stickers(ids)
+    allowed = {str(order_id) for order_id in ids}
+    verified = [item for item in (response or [])
+                if isinstance(item,dict)
+                and str(item.get('orderId') or '') in allowed
+                and _clean(item.get('barcode'))]
+    # ingest_stickers additionally locks the parent order row and applies
+    # the existing account-scoped uniqueness/transaction rules.
+    count = ingest_stickers(account_id, verified) if verified else 0
+    return {"missing_checked": len(ids), "stickers_received": count}
 
 
 def _sync_status_once_unlocked(account_id, client):
@@ -720,6 +777,11 @@ def sync_status_once(account_id, client):
         return _sync_status_once_unlocked(account_id, client)
 
 
+def sync_missing_stickers_once(account_id, client):
+    with _exclusive_sync(account_id):
+        return _sync_missing_stickers_once_unlocked(account_id, client)
+
+
 def sync_catalog_once(account_id, client):
     with _exclusive_sync(account_id):
         return _sync_catalog_once_unlocked(account_id, client)
@@ -729,7 +791,8 @@ def worker_loop(account_id, client, stop=None):
     """Run in exactly ONE dedicated process per WB account, never in Gunicorn."""
     if os.getenv("WB_FBS_V11_ENABLED", "0") != "1":
         raise RuntimeError("Set WB_FBS_V11_ENABLED=1 only in an isolated worker")
-    intervals = {"new": 30, "status": 30, "catalog": 21600, "full": 86400}
+    intervals = {"new": 30, "status": 30, "stickers": 300,
+                 "catalog": 21600, "full": 86400}
     last = {key: -float("inf") for key in intervals}
     while stop is None or not stop.is_set():
         now = time.monotonic()
@@ -742,6 +805,8 @@ def worker_loop(account_id, client, stop=None):
                     sync_new_once(account_id, client)
                 elif name == "status":
                     sync_status_once(account_id, client)
+                elif name == "stickers":
+                    _sync_missing_stickers_once_unlocked(account_id, client)
                 elif name == "catalog" and client.content_token:
                     sync_catalog_once(account_id, client)
                 elif name == "full":
