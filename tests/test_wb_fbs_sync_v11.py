@@ -48,6 +48,56 @@ class WBFBSSyncV11Tests(unittest.TestCase):
         self.mod.ingest_orders(account, [order or self.order()])
         self.mod.ingest_stickers(account, [{"orderId": 123, "barcode": barcode}])
 
+    def test_late_wb_qr_is_repaired_into_old_fbs_scanner(self):
+        """Real synthetic SQLite DB, no WB network, no order replay."""
+        from unittest.mock import Mock
+        order=self.order(oid="123",status="confirm")
+        self.mod.ingest_orders("a",[order],{"123":"confirm"})
+        self.assertEqual(
+            self.mod.verify_pair("a","4601234567890","*Dc5xlawC")["result"],
+            "UNKNOWN_STICKER")
+        remote=Mock()
+        remote.stickers.return_value=[
+            {"orderId":123,"barcode":"*Dc5xlawC","partA":"602278","partB":"5344"}
+        ]
+        result=self.mod.sync_missing_stickers_once("a",remote)
+        self.assertEqual(result,{"missing_checked":1,"stickers_received":1})
+        self.assertEqual(self.mod.verify_pair(
+            "a","4601234567890","*Dc5xlawC")["result"],"MATCH")
+        self.assertEqual(self.mod.verify_pair(
+            "b","4601234567890","*Dc5xlawC")["result"],"UNKNOWN_STICKER")
+        remote.stickers.assert_called_once_with([123])
+
+    def test_empty_qr_response_stays_unknown_and_retry_is_throttled(self):
+        from unittest.mock import Mock
+        self.mod.ingest_orders("a",[self.order()],{"123":"confirm"})
+        remote=Mock()
+        remote.stickers.return_value=[]
+        self.assertEqual(self.mod.sync_missing_stickers_once(
+            "a",remote)["stickers_received"],0)
+        self.assertEqual(self.mod.verify_pair(
+            "a","4601234567890","*Dc5xlawC")["result"],"UNKNOWN_STICKER")
+        self.assertEqual(self.mod.sync_missing_stickers_once(
+            "a",remote)["missing_checked"],0)
+        remote.stickers.assert_called_once_with([123])
+        self.assertEqual(self.wms.query_one(
+            "SELECT attempt_count FROM wb_fbs_sticker_repair_attempts "
+            "WHERE account_id='a' AND order_id='123'")[0],1)
+
+    def test_wrong_account_wb_sticker_cannot_enter_other_account(self):
+        from unittest.mock import Mock
+        self.mod.ingest_orders("a",[self.order()],{"123":"confirm"})
+        remote=Mock()
+        remote.stickers.return_value=[
+            {"orderId":999,"barcode":"*Dc5xlawC"}
+        ]
+        self.assertEqual(self.mod.sync_missing_stickers_once(
+            "a",remote)["stickers_received"],0)
+        self.assertIsNone(self.wms.query_one(
+            "SELECT barcode FROM wb_fbs_stickers WHERE account_id='a'"))
+        self.assertEqual(self.mod.verify_pair(
+            "a","4601234567890","*Dc5xlawC")["result"],"UNKNOWN_STICKER")
+
     def test_product_then_sticker_match(self):
         self.seed()
         value = self.mod.verify_pair("a", "4601234567890", "WB-QR-123")
