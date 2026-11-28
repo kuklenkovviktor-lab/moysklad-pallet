@@ -595,6 +595,61 @@ def manager_wb_status_v11():
                    **dict(_UI_STATE))
 
 
+@wb_fbs_v11_bp.post("/api/wb-v11/diagnose-sticker")
+def manager_wb_diagnose_sticker_v11():
+    """Manager-only, read-only reason for an unknown WB QR.
+
+    Do not allow worker scans to trigger network access or mutate orders.
+    Output contains only classification flags, not WB order/customer details.
+    """
+    if not manager_access():
+        return jsonify(error="Только для руководителя"), 403
+    csrf = session.get("wb_fbs_v11_csrf") or ""
+    if not csrf or not secrets.compare_digest(
+            request.headers.get("X-CSRF-Token",""), csrf):
+        return jsonify(error="Неверный CSRF-токен"), 403
+    if not _allowed():
+        return jsonify(error="Режим WB FBS v1.1 выключен"), 503
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data,dict):
+        return jsonify(error="Неверный запрос"), 400
+    entered = data.get("sticker")
+    if not isinstance(entered,str) or not 1 <= len(entered) <= 128:
+        return jsonify(error="Нужен скан стикера WB"), 400
+    normalized = normalize_api_sticker(entered)
+    from wb_qr_codec import canonical_wb_sticker, QR_DATA_RE
+    from wms import query_one
+    init_schema()
+    account = _account()
+    own = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
+        WHERE account_id=? AND barcode=?""",(account,normalized))[0]
+    elsewhere = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
+        WHERE account_id<>? AND barcode=?""",(account,normalized))[0]
+    canonical=canonical_wb_sticker(entered)
+    numeric = canonical if canonical.isdigit() and len(canonical)==11 else ""
+    pdf_match = bool(numeric and query_one(
+        "SELECT 1 FROM pdf_fbs_orders WHERE wb_barcode=? LIMIT 1",(numeric,)))
+    qr_valid = QR_DATA_RE.fullmatch(normalized) is not None
+    if own == 1:
+        reason="IN_SELECTED_ACCOUNT"
+    elif own > 1:
+        reason="DUPLICATE_CURRENT_ACCOUNT"
+    elif elsewhere:
+        reason="STICKER_IN_OTHER_ACCOUNT"
+    elif pdf_match:
+        reason="PDF_REGISTRY_ONLY"
+    elif not qr_valid:
+        reason="NOT_A_NINE_CHARACTER_WB_QR"
+    else:
+        reason="NOT_IN_WB_API_CACHE"
+    response=jsonify(source="wb_api_v11",account_has_match=bool(own),
+        other_account_has_match=bool(elsewhere),
+        imported_pdf_has_match=pdf_match,qr_format_valid=qr_valid,
+        reason=reason,needs_manager_review=reason!="IN_SELECTED_ACCOUNT")
+    response.headers["Cache-Control"]="no-store"
+    return response
+
+
 @wb_fbs_v11_bp.post("/api/wb-v11/sync")
 def manager_wb_sync_v11():
     if not manager_access():
@@ -627,6 +682,15 @@ button{background:#e58a34;border:0;border-radius:8px;padding:12px 18px;font-weig
 <div class="card"><p class="muted">Только чтение из WB API. Сканирование: товар → QR WB.</p>
 <div id="stats">Загрузка статуса…</div>
 <button onclick="syncNow()">Синхронизировать сейчас</button>
+<div style="margin-top:18px">
+  <strong>Почему стикер не найден?</strong>
+  <p class="muted">Проверка только по локальным данным, без изменения заказов WB.</p>
+  <input id="stickerLookup" autocomplete="off" maxlength="128"
+   placeholder="Сканируй QR WB" style="padding:12px;background:#09121e;
+   color:#edf6ff;border:1px solid #425875;border-radius:8px;max-width:100%;width:300px">
+  <button type="button" onclick="diagnoseSticker()">Проверить стикер</button>
+  <p class="muted" id="stickerDiagnostic" role="status"></p>
+</div>
 <p class="muted" id="message">Никакие WB-статусы и поставки не изменяются.</p></div>
 <script>
 const csrfToken=CSRF_VALUE;
@@ -648,6 +712,27 @@ async function syncNow(){
  const r=await fetch('/api/wb-v11/sync',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:'{}'});
  const d=await r.json();document.getElementById('message').textContent=d.error||'Синхронизация запущена';
  refresh();
+}
+async function diagnoseSticker(){
+ const field=document.getElementById('stickerLookup');
+ const out=document.getElementById('stickerDiagnostic');
+ out.textContent='Проверка локального кэша…';
+ try{
+  const r=await fetch('/api/wb-v11/diagnose-sticker',{
+   method:'POST',credentials:'same-origin',cache:'no-store',
+   headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
+   body:JSON.stringify({sticker:field.value.trim()})});
+  const d=await r.json();
+  if(!r.ok){out.textContent=d.error||'Ошибка доступа';return}
+  const names={
+   IN_SELECTED_ACCOUNT:'QR есть в текущем WB API-кэше. Проверь статус заказа и ШК товара.',
+   DUPLICATE_CURRENT_ACCOUNT:'QR связан с несколькими заказами. Заблокировано, нужна проверка.',
+   STICKER_IN_OTHER_ACCOUNT:'QR найден в другом подключённом аккаунте WB.',
+   PDF_REGISTRY_ONLY:'QR найден только в загруженном PDF. Режим WB API его не использует.',
+   NOT_A_NINE_CHARACTER_WB_QR:'Отсканирован не девятисимвольный QR WB. Проверь тип кода и сканер.',
+   NOT_IN_WB_API_CACHE:'QR отсутствует в кэше WB API. Проверь синхронизацию и аккаунт.'};
+  out.textContent=names[d.reason]||'Неизвестная причина';
+ }catch(e){out.textContent='Ошибка связи с GRIT'}
 }
 refresh();setInterval(refresh,10000);
 </script></main></body></html>"""
