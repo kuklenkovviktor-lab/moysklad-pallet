@@ -254,6 +254,21 @@ class ExplicitFbsSourceTests(unittest.TestCase):
                 self.assertEqual(response.json["reason"],"IN_SELECTED_PDF")
                 self.assertFalse(response.json["needs_manager_review"])
 
+    def test_replay_uses_exact_api_qr_without_decimal_conversion(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"api"},clear=False):
+            self.assertEqual(wms.fbs_replay_sticker_code("]Q3"+QR),QR)
+            self.assertEqual(wms.fbs_replay_sticker_code(";"+QR[1:]),QR)
+
+    def test_replay_uses_numeric_code_when_pdf_is_explicit(self):
+        import os
+        import wms
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"pdf"},clear=False):
+            self.assertEqual(wms.fbs_replay_sticker_code(QR),"59298125228")
+
     def test_legacy_source_selection_remains_unchanged_when_v11_off(self):
         import os
         import wms
