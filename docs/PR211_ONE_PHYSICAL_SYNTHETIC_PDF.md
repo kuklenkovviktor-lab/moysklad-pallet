@@ -66,3 +66,44 @@ operator must directly observe the paper and scan-readback, if needed.
 - Re-running a failed/uncertain physical attempt is unsafe. Read the Windows
   journal/print queue; do not delete it to force another print.
 - No release, migration execution, main merge or employer warehouse test.
+
+## 2026-11-28: separate physical WB-shaped TWO-DIMENSIONAL QR acceptance
+
+The first physical print successfully produced a 58×40 label with a LINEAR
+Code128. The operator provided a photograph of that paper. That result is
+**physical original-like PDF pipeline PASS but QR-format NOT VERIFIED**.
+
+The next synthetic-only test replaces the source PDF's Code128 with a
+29×29-module Version 1 / error correction Q QR (including quiet zone).
+The QR encodes exact synthetic nine-character WB-shaped value
+`*Dc5xlawC` and canonicalizes to the same invented visible decimal
+`59298125228`. QR is drawn as real source-PDF vector squares and
+rasterized through the same original-page TSPL BITMAP path.
+
+Offline optical verification of both the rendered PDF and the simulated
+203-dpi thresholded black/white print raster returned exactly `*Dc5xlawC`.
+This was checked in the development environment using OpenCV QRCodeDetector;
+it **does not** establish scan success from physically printed paper.
+The source PDF page otherwise contains only the parsed text
+`WB 59298125228` and a separate visible *raster image watermark*
+`GRIT SYNTHETIC / NOT WB / QR TEST ONLY`.
+
+Changed files: `deploy/pr211_physical_pdf_session.py`,
+`deploy/pr211_physical_usb_client.py`,
+`tests/printing/test_pr211_physical_pdf_preflight.py`.
+Windows uses a NEW permanent marker
+`%LOCALAPPDATA%\\GRIT-WMS\\PR211-Original-PDF\\pr211_original_like_qr_physical_once.json`.
+The earlier printed Code128 journal
+`pr211_original_like_pdf_physical_once.json` remains untouched and is
+NOT reset, deleted, or replayed. This is exactly one NEW QR-format test,
+not a retry of the prior physical label.
+
+The one-click launcher for this particular job is
+`GRIT_PR211_PRINT_QR_ONCE.cmd`. It downloads the current branch, connects
+via the existing `ssh grit` alias and prints only to a dedicated nondefault
+USB `ONIX-TEST-XP460B`, once. Stop on any failure or uncertain response;
+never delete the QR journal or automatically resend. The operator must
+visually confirm the new QR label and scan the physical QR; expected scanner
+text is `*Dc5xlawC` (possible keyboard/HID variant normalized by GRIT).
+
+**No physical QR paper is claimed in this PR until observed by operator.**
