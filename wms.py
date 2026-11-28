@@ -4565,13 +4565,16 @@ def fbs_scan():
         except ValueError:
             return jsonify(error="Неверный номер операции"), 400
     from fbs_transactions import replay, commit_scan
-    if os.getenv("WB_FBS_V11_ENABLED", "0") != "1" and (request_id or pdf_picking_active(shift_id, employee["id"])):
+    # An active PDF picking session always owns sticker verification, even if
+    # the optional WB API v1.1 integration is enabled for other sessions.
+    pdf_control = pdf_picking_active(shift_id, employee["id"])
+    if pdf_control or (os.getenv("WB_FBS_V11_ENABLED", "0") != "1" and request_id):
         from wb_qr_codec import canonical_wb_sticker
         barcode = canonical_wb_sticker(barcode)
 
     # WB FBS v1.1 is opt-in. The product is already pending on this terminal;
     # the *second* scan identifies the WB order. No legacy article fallback.
-    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1":
+    if os.getenv("WB_FBS_V11_ENABLED", "0") == "1" and not pdf_control:
         from wb_fbs_sync_v11 import verify_pair, log_verification, normalize_api_sticker
         barcode = normalize_api_sticker(barcode)
         from fbs_skip_authorization import pending_for_shift
@@ -4615,7 +4618,9 @@ def fbs_scan():
     except ValueError as exc:
         return jsonify(error=str(exc)), 409
 
-    if request_id:
+    # A request ID is not permission to bypass loaded-PDF sticker/product
+    # verification. PDF scans must reach the pdf_fbs_orders checks below.
+    if request_id and not pdf_control:
         try:
             replayed = commit_scan(shift_id, employee["id"], barcode, product_barcode,
                                    article, product_name, None, scan_type, request_id, True)
@@ -4645,7 +4650,6 @@ def fbs_scan():
 
     # Only normalize at the WB-sticker stage; the earlier item scan stays raw.
     # The printed Code128 is decimal, while the QR contains WB's Base64 form.
-    pdf_control = pdf_picking_active(shift_id, employee["id"])
     from fbs_skip_authorization import pending_for_shift
     pending = pending_for_shift(shift_id, employee["id"])
     if pdf_control and (not pending or pending["barcode"] != product_barcode):
