@@ -578,9 +578,18 @@ def manager_wb_status_v11():
         WHERE account_id=? AND result<>'MATCH'""", (account,))[0]
     last = query_one("""SELECT finished_at,status FROM wb_fbs_sync_runs
         WHERE account_id=? ORDER BY started_at DESC LIMIT 1""", (account,))
+    last_repair = query_one("""SELECT MAX(attempted_at)
+        FROM wb_fbs_sticker_repair_attempts WHERE account_id=?""", (account,))
+    # The API cache and imported PDFs are independent order registries.
+    # Never silently switch source: pdf_picking_active() historically applies
+    # to all active shifts as soon as any PDF is imported.
+    pdf_count = query_one("SELECT COUNT(*) FROM pdf_fbs_orders")[0]
     return jsonify(enabled=True, configured=bool(os.getenv("WB_API_TOKEN", "").strip()),
                    orders=orders, missing_skus=missing, stickers=stickers,
                    missing_stickers=missing_stickers,
+                   scan_source="wb_api", pdf_orders_present=bool(pdf_count),
+                   pdf_verification_separate=True,
+                   last_sticker_repair=(last_repair[0] if last_repair else None),
                    rejected_scans=errors, last_sync=(last[0] if last else None),
                    last_status=(last[1] if last else None),
                    **dict(_UI_STATE))
@@ -629,7 +638,10 @@ async function refresh(){
  ['Заказов','Без SKU','Стикеров','Без стикера','Отклонено сканов'].map((title,i)=>
  '<span class="metric"><b>'+[d.orders,d.missing_skus,d.stickers,d.missing_stickers,d.rejected_scans][i]+'</b>'+title+'</span>').join('')+
  '<p class="muted">Последняя синхронизация: '+(d.last_sync||'не запускалась')+
- '; статус: '+(d.last_status||'нет')+'</p>';
+ '; статус: '+(d.last_status||'нет')+
+ '; восстановление QR: '+(d.last_sticker_repair||'ещё не выполнялось')+
+ (d.pdf_orders_present?'<br><strong>Внимание:</strong> загруженные PDF не используются при проверке WB API v1.1.':'')+
+ '</p>';
  document.getElementById('message').textContent=d.running?'Синхронизация выполняется':(d.last_error?'Ошибка: '+d.last_error:'Готово');
 }
 async function syncNow(){
