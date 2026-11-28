@@ -233,7 +233,7 @@ def main():
     ticket,raw,digest=verified
     if raw.count(b'PRINT 1,1')!=1:
         raise RuntimeError('NOT_EXACTLY_ONE_TSPL_LABEL')
-    print(json.dumps({'kind':'PR211_SYNTHETIC_PHYSICAL_PDF',
+    print(json.dumps({'kind':'PR211_SYNTHETIC_PHYSICAL_QR_PDF',
                       'order':TEST_ORDER,'sticker':TEST_STICKER,
                       'line':'А', 'qr_payload':TEST_QR_CODE,
                       'symbol':'QR', 'claim':claim},separators=(',',':')),
