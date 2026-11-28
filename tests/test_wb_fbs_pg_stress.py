@@ -229,5 +229,18 @@ class PGStress(unittest.TestCase):
                 wb.verify_pair(ACCOUNT,"SYNTH-SKU-1502","SYNTH-WB-1502")["result"],
                 "MATCH")
 
+    def test_07_status_refresh_includes_local_complete_and_records_transition(self):
+        from unittest.mock import Mock
+        client = Mock()
+        client.statuses.side_effect = lambda ids: {str(oid): 'complete' for oid in ids}
+        client.stickers.return_value = []
+        before = db_one("SELECT COUNT(*) FROM wb_fbs_orders WHERE local_status='complete'")
+        count = wb.sync_status_once(ACCOUNT, client)
+        self.assertGreater(count, 9000)
+        self.assertEqual(db_one("SELECT COUNT(*) FROM wb_fbs_orders WHERE local_status='complete'"), before)
+        self.assertEqual(db_one("SELECT COUNT(*) FROM wb_fbs_delivery_observations"), count)
+        wb.sync_status_once(ACCOUNT, client)
+        self.assertEqual(db_one("SELECT COUNT(*) FROM wb_fbs_delivery_observations"), count)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
