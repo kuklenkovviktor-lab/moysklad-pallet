@@ -101,7 +101,10 @@ class StickerRepairTests(unittest.TestCase):
         stop.is_set.return_value=False
         stop.wait.return_value=True
         client=Mock()
-        with patch.object(wb,"sync_new_once"), \
+        import os
+        with patch.dict(os.environ,{
+            "WB_FBS_V11_ENABLED":"1","WB_FBS_SOURCE_MODE":"api"},clear=False), \
+             patch.object(wb,"sync_new_once"), \
              patch.object(wb,"sync_status_once"), \
              patch.object(wb,"sync_missing_stickers_once") as repair, \
              patch.object(wb,"sync_catalog_once"), \
