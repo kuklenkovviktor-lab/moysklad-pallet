@@ -6,6 +6,7 @@ IMAGE="grit-wb-fbs-v11-synthetic:$(git rev-parse --short HEAD)"
 docker build -t "$IMAGE" .
 test_files=(
   test_wb_fbs_sync_v11.py
+  test_wb_v11_missing_sticker_repair.py
   test_wb_fbs_api_mock.py
   test_fbs_double_product_scan.py
   test_attendance.py
