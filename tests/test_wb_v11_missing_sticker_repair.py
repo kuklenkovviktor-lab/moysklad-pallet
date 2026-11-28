@@ -101,12 +101,11 @@ class StickerRepairTests(unittest.TestCase):
         stop.is_set.return_value=False
         stop.wait.return_value=True
         client=Mock()
-        with patch.object(wb,"_sync_new_once_unlocked"), \
-             patch.object(wb,"_sync_status_once_unlocked"), \
-             patch.object(wb,"_sync_missing_stickers_once_unlocked") as repair, \
-             patch.object(wb,"_sync_catalog_once_unlocked"), \
-             patch.object(wb,"sync_once"), \
-             patch.object(wb,"_exclusive_sync"):
+        with patch.object(wb,"sync_new_once"), \
+             patch.object(wb,"sync_status_once"), \
+             patch.object(wb,"sync_missing_stickers_once") as repair, \
+             patch.object(wb,"sync_catalog_once"), \
+             patch.object(wb,"sync_once"):
             wb.worker_loop("acct-demo",client,stop)
         repair.assert_called_once_with("acct-demo",client)
 
