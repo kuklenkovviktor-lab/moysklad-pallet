@@ -4423,6 +4423,20 @@ def pdf_picking_active(shift_id, employee_id):
     return bool(valid_shift and query_one("SELECT 1 FROM pdf_fbs_orders LIMIT 1"))
 
 
+def fbs_replay_sticker_code(value):
+    """Use the same immutable barcode identity for a lost-ACK replay.
+
+    A WB API scan commits the exact 9-char API QR. PDF/legacy commits its
+    canonical printed decimal sticker. Replays must never switch formats.
+    """
+    if (os.getenv("WB_FBS_V11_ENABLED", "0") == "1"
+            and os.getenv("WB_FBS_SOURCE_MODE", "api").strip().lower() == "api"):
+        from wb_fbs_sync_v11 import normalize_api_sticker
+        return normalize_api_sticker(value)
+    from wb_qr_codec import canonical_wb_sticker
+    return canonical_wb_sticker(value)
+
+
 def fbs_selected_source(shift_id, employee_id):
     """Single fail-closed source decision shared by product + sticker scans.
 
@@ -4562,8 +4576,7 @@ def fbs_scan():
             try:
                 request_id = str(uuid.UUID(request_id))
                 from fbs_transactions import replay
-                from wb_qr_codec import canonical_wb_sticker
-                replay_barcode = canonical_wb_sticker(barcode)
+                replay_barcode = fbs_replay_sticker_code(barcode)
                 if replay(request_id, shift_id, prior_employee_id, replay_barcode, product_barcode):
                     return jsonify(ok=True, replayed=True, **shift_stats(shift_id))
             except ValueError:
