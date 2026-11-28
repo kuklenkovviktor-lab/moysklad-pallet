@@ -2,6 +2,18 @@
 # Offline synthetic regression: NEVER mount production data or expose WB API keys.
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
+# Fail before building an image if the new source/tests have syntax errors.
+python3 - <<'WB_FBS_AST'
+import ast
+from pathlib import Path
+for name in (
+    'wb_fbs_sync_v11.py',
+    'tests/test_wb_fbs_sync_v11.py',
+    'tests/test_wb_v11_missing_sticker_repair.py',
+):
+    ast.parse(Path(name).read_text(encoding='utf-8'),filename=name)
+print('WB v1.1 delayed sticker repair PYTHON SYNTAX PASS')
+WB_FBS_AST
 IMAGE="grit-wb-fbs-v11-synthetic:$(git rev-parse --short HEAD)"
 docker build -t "$IMAGE" .
 test_files=(
