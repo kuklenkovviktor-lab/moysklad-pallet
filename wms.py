@@ -4652,7 +4652,9 @@ def fbs_scan():
     except ValueError as exc:
         return jsonify(error=str(exc)), 409
 
-    if request_id:
+    # request_id is an idempotency key, NOT permission to bypass PDF checks.
+    # A strict PDF source must validate the exact sticker→product mapping below.
+    if request_id and source == "legacy":
         try:
             replayed = commit_scan(shift_id, employee["id"], barcode, product_barcode,
                                    article, product_name, None, scan_type, request_id, True)
