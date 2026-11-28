@@ -1,0 +1,30 @@
+name: WB FBS HID release gate
+
+on:
+  pull_request:
+    paths:
+      - 'wb_fbs_sync_v11.py'
+      - 'tests/test_wb_fbs_sync_v11.py'
+      - 'deploy/verify_wb_hid_fix.sh'
+      - '.github/workflows/wb-hid-release-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wb-hid-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated WB scanner API and transaction regressions
+        run: bash deploy/verify_wb_hid_fix.sh
+
+  wb-hid-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated PostgreSQL 17 WB FBS stress and transaction checks
+        run: env -u DATABASE_URL -u WB_API_TOKEN -u WB_CONTENT_TOKEN bash deploy/verify_wb_fbs_pg_isolated.sh
