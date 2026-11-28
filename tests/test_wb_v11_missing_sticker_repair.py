@@ -254,6 +254,17 @@ class ExplicitFbsSourceTests(unittest.TestCase):
                 self.assertEqual(response.json["reason"],"IN_SELECTED_PDF")
                 self.assertFalse(response.json["needs_manager_review"])
 
+    def test_pdf_scan_idempotency_cannot_skip_pdf_matching(self):
+        """Static guard against reintroducing early PDF commit by request ID."""
+        import inspect
+        import wms
+        handler=inspect.getsource(wms.fbs_scan)
+        self.assertIn('if request_id and source == "legacy":',handler)
+        self.assertIn('if pdf_control:',handler)
+        self.assertIn('SELECT article, product_barcode FROM pdf_fbs_orders',handler)
+        self.assertLess(handler.index('if pdf_control:'),
+                        handler.rindex('replayed = commit_scan('))
+
     def test_replay_uses_exact_api_qr_without_decimal_conversion(self):
         import os
         import wms
