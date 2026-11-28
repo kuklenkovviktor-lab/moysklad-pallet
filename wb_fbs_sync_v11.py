@@ -623,8 +623,9 @@ def manager_wb_diagnose_sticker_v11():
     account = _account()
     own = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
         WHERE account_id=? AND barcode=?""",(account,normalized))[0]
-    elsewhere = query_one("""SELECT COUNT(*) FROM wb_fbs_stickers
-        WHERE account_id<>? AND barcode=?""",(account,normalized))[0]
+    # Never query other WB accounts from a tenant-scoped diagnosis.
+    # An unknown QR may belong to another account, but disclosing which
+    # account has it would be a cross-tenant information leak.
     canonical=canonical_wb_sticker(entered)
     numeric = canonical if canonical.isdigit() and len(canonical)==11 else ""
     pdf_match = bool(numeric and query_one(
@@ -634,16 +635,13 @@ def manager_wb_diagnose_sticker_v11():
         reason="IN_SELECTED_ACCOUNT"
     elif own > 1:
         reason="DUPLICATE_CURRENT_ACCOUNT"
-    elif elsewhere:
-        reason="STICKER_IN_OTHER_ACCOUNT"
-    elif pdf_match:
+     elif pdf_match:
         reason="PDF_REGISTRY_ONLY"
     elif not qr_valid:
         reason="NOT_A_NINE_CHARACTER_WB_QR"
     else:
         reason="NOT_IN_WB_API_CACHE"
     response=jsonify(source="wb_api_v11",account_has_match=bool(own),
-        other_account_has_match=bool(elsewhere),
         imported_pdf_has_match=pdf_match,qr_format_valid=qr_valid,
         reason=reason,needs_manager_review=reason!="IN_SELECTED_ACCOUNT")
     response.headers["Cache-Control"]="no-store"
@@ -727,10 +725,9 @@ async function diagnoseSticker(){
   const names={
    IN_SELECTED_ACCOUNT:'QR есть в текущем WB API-кэше. Проверь статус заказа и ШК товара.',
    DUPLICATE_CURRENT_ACCOUNT:'QR связан с несколькими заказами. Заблокировано, нужна проверка.',
-   STICKER_IN_OTHER_ACCOUNT:'QR найден в другом подключённом аккаунте WB.',
    PDF_REGISTRY_ONLY:'QR найден только в загруженном PDF. Режим WB API его не использует.',
    NOT_A_NINE_CHARACTER_WB_QR:'Отсканирован не девятисимвольный QR WB. Проверь тип кода и сканер.',
-   NOT_IN_WB_API_CACHE:'QR отсутствует в кэше WB API. Проверь синхронизацию и аккаунт.'};
+   NOT_IN_WB_API_CACHE:'QR отсутствует в выбранном WB API-кэше. Проверь синхронизацию и правильность аккаунта.'};
   out.textContent=names[d.reason]||'Неизвестная причина';
  }catch(e){out.textContent='Ошибка связи с GRIT'}
 }
